@@ -19,6 +19,8 @@ class BootstrapConfigurationTests(unittest.TestCase):
             value = dotenv_values(root / '.env')['SECRET_KEY']
             self.assertGreaterEqual(len(value), 32)
             self.assertEqual(os.environ['SECRET_KEY'], value)
+            self.assertEqual(dotenv_values(root / '.env')['LIMITER_STORAGE_URI'], 'memory://')
+            self.assertEqual(os.environ['LIMITER_STORAGE_URI'], 'memory://')
             if os.name != 'nt':
                 self.assertEqual((root / '.env').stat().st_mode & 0o777, 0o600)
 
@@ -30,11 +32,12 @@ class BootstrapConfigurationTests(unittest.TestCase):
             values = dotenv_values(root / '.env')
             self.assertGreaterEqual(len(values['SECRET_KEY']), 32)
             self.assertEqual(values['SHOP_NAME'], 'My shop')
+            self.assertEqual(values['LIMITER_STORAGE_URI'], 'memory://')
 
     def test_existing_secret_is_not_rotated(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
             root = Path(directory)
-            (root / '.env').write_text('SECRET_KEY=' + 'existing-test-key-' * 3 + '\n')
+            (root / '.env').write_text('SECRET_KEY=' + 'existing-test-key-' * 3 + '\nLIMITER_STORAGE_URI=memory://\n')
             before = (root / '.env').read_bytes()
             ensure_local_configuration(root)
             ensure_local_configuration(root)
@@ -43,11 +46,27 @@ class BootstrapConfigurationTests(unittest.TestCase):
     def test_shell_secret_takes_precedence_without_rewriting_file(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'SECRET_KEY': 'shell-test-key-' * 4}, clear=True):
             root = Path(directory)
-            (root / '.env').write_text('SECRET_KEY=' + 'file-test-key-' * 4 + '\n')
+            (root / '.env').write_text('SECRET_KEY=' + 'file-test-key-' * 4 + '\nLIMITER_STORAGE_URI=memory://\n')
             before = (root / '.env').read_bytes()
             ensure_local_configuration(root)
             self.assertEqual(os.environ['SECRET_KEY'], 'shell-test-key-' * 4)
             self.assertEqual((root / '.env').read_bytes(), before)
+
+    def test_existing_redis_configuration_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            root = Path(directory)
+            (root / '.env').write_text('SECRET_KEY=' + 'file-test-key-' * 4 + '\nREDIS_URL=redis://localhost:6379/0\n')
+            before = (root / '.env').read_bytes()
+            ensure_local_configuration(root)
+            self.assertEqual((root / '.env').read_bytes(), before)
+            self.assertNotIn('LIMITER_STORAGE_URI', os.environ)
+
+    def test_shell_redis_configuration_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'REDIS_URL': 'redis://localhost:6379/1'}, clear=True):
+            root = Path(directory)
+            ensure_local_configuration(root)
+            self.assertNotIn('LIMITER_STORAGE_URI', dotenv_values(root / '.env'))
+            self.assertNotIn('LIMITER_STORAGE_URI', os.environ)
 
 
 if __name__ == '__main__':

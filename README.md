@@ -76,6 +76,8 @@ Lần đầu, chương trình yêu cầu **tự đặt mật khẩu cho tài kho
 
 Bootstrap tạo khóa session riêng trong `UTE MALL/.env`, nạp catalog công khai được đóng gói và sinh dữ liệu vận hành mô phỏng: 24 shop, 16 ngành, 5.843 sản phẩm nguồn, 1.500 đơn và 450 người mua giả lập. Catalog không chứa tài khoản, đơn hàng, lịch sử chat hoặc ảnh tải lên của máy phát triển. [Nguồn và giấy phép dữ liệu](THIRD_PARTY_NOTICES.md).
 
+Demo một process dùng `LIMITER_STORAGE_URI=memory://` để chạy không cần Redis và không bật debugger. Bootstrap giữ nguyên cấu hình Redis nếu máy đã có. Khi triển khai nhiều process/server, cần chuyển bộ đếm giới hạn request sang Redis.
+
 **Không chạy lại bootstrap trên shop đang dùng.** Chương trình từ chối ghi đè database đã có sản phẩm. Kiểm tra mà không khởi tạo lại:
 
 ```sh

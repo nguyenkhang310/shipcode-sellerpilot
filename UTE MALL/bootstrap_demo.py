@@ -28,6 +28,14 @@ def ensure_local_configuration(root: Path):
         set_key(str(env_path), 'SECRET_KEY', secret)
         env_path.chmod(0o600)
     os.environ['SECRET_KEY'] = secret
+    storage = (os.environ.get('REDIS_URL') or values.get('REDIS_URL')
+               or os.environ.get('LIMITER_STORAGE_URI') or values.get('LIMITER_STORAGE_URI') or '').strip()
+    if not storage:
+        # This bootstrap is for a single-process local demo, with debugging off.
+        # Keep deployed Redis settings intact; app.py still requires configured storage.
+        set_key(str(env_path), 'LIMITER_STORAGE_URI', 'memory://')
+        env_path.chmod(0o600)
+        os.environ['LIMITER_STORAGE_URI'] = 'memory://'
 
 
 def main():
