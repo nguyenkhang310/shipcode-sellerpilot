@@ -10,8 +10,8 @@
     "web": "expo start --web --port 5173",
     "typecheck": "tsc --noEmit",
     "dev": "expo start --port 5173",
-    "build": "expo export --platform web --output-dir dist/web",
-    "build:ios": "expo export --platform ios --output-dir dist/ios"
+    "build": "expo export --platform web --output-dir dist/web --clear",
+    "build:ios": "expo export --platform ios --output-dir dist/ios --clear"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
