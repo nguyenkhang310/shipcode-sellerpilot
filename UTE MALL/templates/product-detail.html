@@ -1,0 +1,946 @@
+{% extends 'base.html' %}
+{% block title %}{{ product.name }} - UTE MALL{% endblock %}
+
+{% block extra_styles %}
+<style>
+.detail-page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+.breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin-bottom: 2rem;
+}
+
+.breadcrumb a { color: var(--text-muted); text-decoration: none; }
+.breadcrumb a:hover { color: var(--primary); }
+.breadcrumb .sep { color: var(--border); }
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4rem;
+    align-items: start;
+}
+
+/* GALLERY */
+.gallery-main {
+    border-radius: 20px;
+    overflow: hidden;
+    aspect-ratio: 3/4;
+    background: var(--surface2);
+}
+
+.gallery-main img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* PRODUCT INFO */
+.product-info {
+    position: sticky;
+    top: 90px;
+}
+
+.product-category-tag {
+    display: inline-block;
+    padding: 0.3rem 0.875rem;
+    background: rgba(10,92,54,0.08);
+    color: var(--primary);
+    border-radius: 50px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 1rem;
+    text-decoration: none;
+}
+
+.product-title {
+    font-family: inherit;
+    font-size: 2.25rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--text);
+    margin-bottom: 1rem;
+}
+
+.product-rating {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+
+.product-meta{
+    display:flex;
+    gap:0.6rem;
+    flex-wrap:wrap;
+    margin-bottom:1rem;
+}
+.meta-pill{
+    padding:0.35rem 0.65rem;
+    border-radius:999px;
+    font-size:0.75rem;
+    font-weight:700;
+    background:#f3f4f6;
+    color:#374151;
+}
+
+.stars {
+    color: #eab308;
+    font-size: 1rem;
+    letter-spacing: 0.05em;
+}
+
+.rating-text {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+.price-section {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    padding: 1.5rem;
+    background: var(--surface2);
+    border-radius: 14px;
+}
+
+.price-current {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--primary);
+}
+
+.price-original {
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    text-decoration: line-through;
+}
+
+.price-discount {
+    background: var(--red);
+    color: white;
+    padding: 0.2rem 0.75rem;
+    border-radius: 50px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.product-description {
+    color: var(--text-muted);
+    line-height: 1.8;
+    margin-bottom: 1.5rem;
+    font-size: 0.95rem;
+}
+
+.divider {
+    height: 1px;
+    background: var(--border);
+    margin: 1.5rem 0;
+}
+
+/* SIZE SELECT */
+.size-section {
+    margin-bottom: 1.5rem;
+}
+
+.size-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.875rem;
+}
+
+.size-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.size-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text);
+}
+
+.size-selected-badge {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--primary);
+    background: rgba(10,92,54,0.08);
+    padding: 2px 10px;
+    border-radius: 999px;
+    transition: all 0.2s;
+    display: none;
+}
+.size-selected-badge.show { display: inline-block; }
+
+.size-guide-link {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    font-weight: 400;
+    cursor: pointer;
+    transition: color 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+.size-guide-link:hover { color: var(--primary); }
+
+.size-grid {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0;
+}
+
+.size-btn {
+    min-width: 52px;
+    height: 44px;
+    padding: 0 0.875rem;
+    border-radius: 6px;
+    border: 1.5px solid #d1d5db;
+    background: #fafafa;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #374151;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    font-family: inherit;
+    letter-spacing: 0.02em;
+    position: relative;
+    overflow: hidden;
+}
+
+.size-btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--primary);
+    transform: scale(0);
+    border-radius: inherit;
+    transition: transform 0.2s ease;
+    z-index: 0;
+}
+
+.size-btn span { position: relative; z-index: 1; }
+
+.size-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: white;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(10,92,54,0.15);
+}
+
+.size-btn.active {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: white;
+    box-shadow: 0 4px 14px rgba(10,92,54,0.25);
+    transform: translateY(-1px);
+}
+
+.size-onesize {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+    color: white;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border: none;
+    box-shadow: 0 4px 14px rgba(10,92,54,0.2);
+}
+
+/* QTY */
+.qty-section {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.qty-label {
+    font-size: 0.875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.qty-control {
+    display: flex;
+    align-items: center;
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.qty-btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: var(--surface2);
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.qty-btn:hover { background: var(--border); }
+
+.qty-input {
+    width: 56px;
+    height: 40px;
+    border: none;
+    text-align: center;
+    font-size: 1rem;
+    font-weight: 700;
+    font-family: inherit;
+    outline: none;
+}
+
+/* ACTIONS */
+.action-btns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+
+/* POLICIES */
+.policies {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.policy-item {
+    text-align: center;
+    padding: 1rem;
+    background: var(--surface2);
+    border-radius: 12px;
+}
+
+.policy-icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
+.policy-name { font-size: 0.75rem; font-weight: 700; color: var(--text); }
+
+/* REVIEWS SECTION */
+.reviews-section {
+    max-width: 1200px;
+    margin: 3rem auto;
+    padding: 0 2rem;
+}
+
+/* DETAILS SECTION */
+.details-section{
+    max-width:1200px;
+    margin:2.5rem auto 0;
+    padding:0 2rem;
+}
+.details-card{
+    background:#fff;
+    border-radius:16px;
+    padding:1.75rem;
+    box-shadow:0 2px 8px rgba(0,0,0,0.06);
+}
+.details-title{
+    font-family:inherit;
+    font-size:1.35rem;
+    font-weight:800;
+    margin-bottom:1rem;
+}
+.details-body{
+    color:var(--text);
+    line-height:1.85;
+    font-size:0.95rem;
+    white-space:pre-wrap;
+}
+
+.reviews-title {
+    font-family: inherit;
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 2rem;
+}
+
+.review-card {
+    background: white;
+    border-radius: 14px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.review-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.review-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.reviewer-name { font-weight: 700; font-size: 0.95rem; }
+.reviewer-date { font-size: 0.8rem; color: var(--text-muted); }
+
+.review-stars { color: #eab308; font-size: 0.875rem; margin-bottom: 0.5rem; }
+
+.review-text { color: var(--text-muted); font-size: 0.9rem; line-height: 1.6; }
+
+/* ADD REVIEW FORM */
+.review-form {
+    background: white;
+    border-radius: 16px;
+    padding: 2rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    margin-top: 2rem;
+}
+
+.form-group {
+    margin-bottom: 1.25rem;
+}
+
+.form-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    color: var(--text);
+}
+
+.form-input,
+.form-textarea {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    font-size: 0.925rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.form-input:focus,
+.form-textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(10,92,54,0.1);
+}
+
+.form-textarea { resize: vertical; min-height: 120px; }
+
+.star-picker {
+    display: flex;
+    gap: 0.5rem;
+    font-size: 1.5rem;
+    cursor: pointer;
+}
+
+.star-picker .star {
+    cursor: pointer;
+    transition: transform 0.1s;
+    color: #d1d5db;
+}
+
+.star-picker .star:hover,
+.star-picker .star.active {
+    color: #eab308;
+    transform: scale(1.15);
+}
+
+@media (max-width: 768px) {
+    .detail-grid { grid-template-columns: 1fr; gap: 2rem; }
+    .product-info { position: static; }
+    .action-btns { grid-template-columns: 1fr; }
+    .policies { grid-template-columns: 1fr; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="detail-page">
+    <!-- BREADCRUMB -->
+    <nav class="breadcrumb">
+        <a href="{{ url_for('index') }}">Trang chủ</a>
+        <span class="sep">›</span>
+        <a href="{{ url_for('products') }}">Sản phẩm</a>
+        <span class="sep">›</span>
+        <a href="{{ url_for('products', category=product.category.slug or product.category.name) }}">{{ product.category.name }}</a>
+        <span class="sep">›</span>
+        <span>{{ product.name }}</span>
+    </nav>
+
+    <!-- DETAIL -->
+    <div class="detail-grid">
+        <!-- GALLERY -->
+        <div>
+            <style>
+                .gallery-nav:hover { background: #fff !important; box-shadow: 0 4px 10px rgba(0,0,0,0.3) !important; }
+            </style>
+            <div class="gallery-main" id="galleryMain" style="position:relative">
+                {% if product.video_url %}
+                <video id="mainVideo" src="{{ product.video_url }}" controls style="display:none;width:100%;height:100%;object-fit:cover;"></video>
+                {% endif %}
+                <img id="mainImage" src="{{ product.image_url }}" alt="{{ product.name }}" style="display:block;">
+
+                <button class="gallery-nav prev" id="btnPrevMedia" onclick="navigateMedia(-1)" style="position:absolute;top:50%;left:10px;transform:translateY(-50%);background:rgba(255,255,255,0.8);border:none;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 5px rgba(0,0,0,0.2);z-index:10;transition:0.2s;">
+                    <span class="material-symbols-outlined">chevron_left</span>
+                </button>
+                <button class="gallery-nav next" id="btnNextMedia" onclick="navigateMedia(1)" style="position:absolute;top:50%;right:10px;transform:translateY(-50%);background:rgba(255,255,255,0.8);border:none;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 5px rgba(0,0,0,0.2);z-index:10;transition:0.2s;">
+                    <span class="material-symbols-outlined">chevron_right</span>
+                </button>
+            </div>
+
+            <div class="gallery-thumbs" style="display:flex;gap:10px;margin-top:1rem;overflow-x:auto;padding-bottom:0.5rem">
+                <!-- Thumbnail 1 (Main Image) -->
+                {% if product.image_url %}
+                <div class="thumb-item active" style="width:70px;height:70px;border-radius:10px;overflow:hidden;cursor:pointer;border:2px solid var(--primary);flex-shrink:0" onclick="changeMainMedia('image', '{{ product.image_url }}', this)">
+                    <img src="{{ product.image_url }}" style="width:100%;height:100%;object-fit:cover;">
+                </div>
+                {% endif %}
+
+                <!-- Extra Images -->
+                {% for img in extra_images_list %}
+                <div class="thumb-item" style="width:70px;height:70px;border-radius:10px;overflow:hidden;cursor:pointer;border:2px solid transparent;flex-shrink:0" onclick="changeMainMedia('image', '{{ img }}', this)">
+                    <img src="{{ img }}" style="width:100%;height:100%;object-fit:cover;">
+                </div>
+                {% endfor %}
+
+                <!-- Video Thumb -->
+                {% if product.video_url %}
+                <div class="thumb-item" style="width:70px;height:70px;border-radius:10px;overflow:hidden;cursor:pointer;border:2px solid transparent;flex-shrink:0;position:relative;background:#000" onclick="changeMainMedia('video', '{{ product.video_url }}', this)">
+                    <video src="{{ product.video_url }}" style="width:100%;height:100%;object-fit:cover;opacity:0.6"></video>
+                    <span class="material-symbols-outlined" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:white;font-size:1.5rem">play_circle</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- INFO -->
+        <div class="product-info">
+            <a href="{{ url_for('products', category=product.category.slug or product.category.name) }}" class="product-category-tag">{{ product.category.name }}</a>
+
+            <h1 class="product-title">{{ product.name }}</h1>
+
+            <div class="product-rating">
+                <div class="stars" style="display:flex; gap:2px; align-items:center">
+                    {% for star in range(1, 6) %}
+                    <span class="material-symbols-outlined" style="font-size:1.1rem;color:{{ '#eab308' if display_rating >= star - 0.5 else '#d1d5db' }};font-variation-settings:'FILL' {{ 1 if display_rating >= star - 0.5 else 0 }},'wght' 700,'GRAD' 0,'opsz' 24">star</span>
+                    {% endfor %}
+                </div>
+                <a href="#reviews" class="rating-text">{% if display_rating %}{{ '%.1f'|format(display_rating) }} · {% endif %}{{ display_review_count }} đánh giá</a><span class="rating-text">| {{ product.sold_count or 0 }} Đã bán</span>
+            </div>
+
+            {% set initial_variant = variants[0] if variants else none %}
+            <div class="product-meta">
+                <span class="meta-pill" id="productSku">SKU: {{ initial_variant.sku if initial_variant else (product.sku or ('UTE-' ~ "%05d"|format(product.id))) }}</span>
+                {% set initial_stock = initial_variant.stock if initial_variant else product.stock %}
+                <span class="meta-pill" id="productStock" style="{% if initial_stock and initial_stock > 0 %}background:#dcfce7;color:#166534{% else %}background:#fee2e2;color:#991b1b{% endif %}">
+                    {% if initial_stock and initial_stock > 0 %}Còn {{ initial_stock }} sản phẩm{% else %}Hết hàng{% endif %}
+                </span>
+            </div>
+
+            <div class="price-section">
+                {% set initial_price = initial_variant.price if initial_variant else product.price %}
+                {% set initial_old_price = initial_variant.old_price if initial_variant else product.old_price %}
+                <span class="price-current" id="productPrice">{{ "{:,.0f}".format(initial_price)|replace(',', '.') }}đ</span>
+                <span class="price-original" id="productOldPrice" {% if not initial_old_price %}style="display:none"{% endif %}>{{ "{:,.0f}".format(initial_old_price or 0)|replace(',', '.') }}đ</span>
+                <span class="price-discount" id="productDiscount" {% if not initial_old_price %}style="display:none"{% endif %}>{% if initial_old_price %}-{{ ((1 - initial_price/initial_old_price)*100)|int }}%{% endif %}</span>
+            </div>
+
+            {% if product.seller_shop %}
+            <a class="mall-seller-card" href="{{ url_for('shop_page', slug=product.seller_shop.slug) }}">
+                <span class="mall-seller-avatar"><span class="material-symbols-outlined">storefront</span></span>
+                <span><strong>{{ product.seller_shop.name }}</strong><small>{{ 'Mall chính hãng' if product.seller_shop.is_verified else 'Nhà bán trên UTE MALL' }} · {{ product.seller_shop.location }}</small></span>
+                <span class="mall-seller-view">Xem Shop</span>
+            </a>
+            {% endif %}
+
+            <div class="divider"></div>
+
+            <!-- SELLABLE VARIANT -->
+            {% if variants %}
+            <div class="size-section">
+                <div class="size-header">
+                    <div class="size-header-left">
+                        <span class="size-title">Phân loại sản phẩm</span>
+                    </div>
+                    <a href="#details" class="size-guide-link">
+                        <span class="material-symbols-outlined" style="font-size:0.9rem">straighten</span>
+                        Thông số sản phẩm
+                    </a>
+                </div>
+                <select id="variantSelect" aria-label="Chọn phân loại sản phẩm" style="width:100%;padding:0.85rem 1rem;border:1.5px solid var(--border);border-radius:10px;background:#fff;font:inherit;font-weight:600;color:var(--text);cursor:pointer">
+                    {% for variant in variants %}
+                    <option value="{{ variant.id }}"
+                            data-sku="{{ variant.sku }}"
+                            data-price="{{ variant.price }}"
+                            data-old-price="{{ variant.old_price or '' }}"
+                            data-stock="{{ variant.stock }}"
+                            {% if variant.stock <= 0 %}disabled{% endif %}>
+                        {{ variant.title }} — {{ "{:,.0f}".format(variant.price)|replace(',', '.') }}đ{% if variant.stock <= 0 %} (Hết hàng){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+                <p style="font-size:0.75rem;color:var(--text-muted);margin-top:0.5rem">Chọn đúng phân loại bạn muốn mua.</p>
+            </div>
+            {% endif %}
+
+            <!-- QUANTITY -->
+            <div class="qty-section">
+                <span class="qty-label">Số lượng:</span>
+                <div class="qty-control">
+                    <button class="qty-btn" onclick="adjustQty(-1)">−</button>
+                    <input type="number" class="qty-input" id="qty" value="1" min="1" max="99">
+                    <button class="qty-btn" onclick="adjustQty(1)">+</button>
+                </div>
+            </div>
+
+            <!-- ACTION BUTTONS -->
+            <div class="action-btns">
+                {% if current_user.is_authenticated %}
+                <form action="{{ url_for('add_to_cart', product_id=product.id) }}" method="POST" id="add-cart-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="quantity" id="cart-qty" value="1">
+                    <input type="hidden" name="variant_id" class="variant-id-input" value="{{ initial_variant.id if initial_variant else '' }}">
+                    <button type="submit" class="btn btn-outline" style="width:100%">
+                        <span class="material-symbols-outlined" style="font-size:1.1rem">shopping_bag</span>
+                        Thêm vào giỏ
+                    </button>
+                </form>
+                <form action="{{ url_for('add_to_cart', product_id=product.id) }}" method="POST" id="buy-now-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="quantity" id="buy-qty" value="1">
+                    <input type="hidden" name="variant_id" class="variant-id-input" value="{{ initial_variant.id if initial_variant else '' }}">
+                    <input type="hidden" name="next" value="{{ url_for('checkout') }}">
+                    <button type="submit" class="btn btn-primary" style="width:100%">
+                        Mua ngay
+                    </button>
+                </form>
+                {% else %}
+                <form action="{{ url_for('add_to_cart', product_id=product.id) }}" method="POST" id="add-cart-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="quantity" id="cart-qty" value="1">
+                    <input type="hidden" name="variant_id" class="variant-id-input" value="{{ initial_variant.id if initial_variant else '' }}">
+                    <button type="submit" class="btn btn-outline" style="width:100%">
+                        <span class="material-symbols-outlined" style="font-size:1.1rem">shopping_bag</span>
+                        Thêm vào giỏ
+                    </button>
+                </form>
+                <form action="{{ url_for('add_to_cart', product_id=product.id) }}" method="POST" id="buy-now-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="quantity" id="buy-qty" value="1">
+                    <input type="hidden" name="variant_id" class="variant-id-input" value="{{ initial_variant.id if initial_variant else '' }}">
+                    <input type="hidden" name="next" value="{{ url_for('checkout') }}">
+                    <button type="submit" class="btn btn-primary" style="width:100%">
+                        Mua ngay
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+
+            {% if current_user.is_authenticated %}
+            <form action="{{ url_for('wishlist_toggle', product_id=product.id) }}" method="POST" style="margin-bottom:1rem">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn" style="width:100%;justify-content:center;background:#fff;border:2px solid #fecaca;color:#b91c1c">
+                    <span class="material-symbols-outlined" style="font-size:1rem; font-variation-settings:'FILL' {{ 1 if is_in_wishlist else 0 }},'wght' 600,'GRAD' 0,'opsz' 24">favorite</span>
+                    {% if is_in_wishlist %}Đã thêm yêu thích{% else %}Thêm vào yêu thích{% endif %}
+                </button>
+            </form>
+            {% endif %}
+
+            <!-- POLICIES -->
+            <div class="policies">
+                <div class="policy-item">
+                    <div class="policy-icon"><span class="material-symbols-outlined" style="font-size:1.1rem">autorenew</span></div>
+                    <div class="policy-name">Đổi trả trong 7 ngày</div>
+                </div>
+                <div class="policy-item">
+                    <div class="policy-icon"><span class="material-symbols-outlined" style="font-size:1.1rem">shield</span></div>
+                    <div class="policy-name">Bảo vệ người mua</div>
+                </div>
+                <div class="policy-item">
+                    <div class="policy-icon"><span class="material-symbols-outlined" style="font-size:1.1rem">local_shipping</span></div>
+                    <div class="policy-name">Ship toàn quốc</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- DETAILS -->
+<div class="details-section" id="details">
+    <div class="details-card">
+        <div class="details-title">Mô tả chi tiết</div>
+        <div class="details-body">{{ product.description or 'Sản phẩm chất lượng cao từ UTE MALL.' }}</div>
+    </div>
+</div>
+
+<!-- REVIEWS -->
+<div class="reviews-section" id="reviews">
+    <h2 class="reviews-title">ĐÁNH GIÁ SẢN PHẨM</h2>
+    <div class="public-summary"><div><strong>{{ '%.1f'|format(display_rating) }}</strong><span style="color:#ee4d2d"> / 5</span><div style="color:#999;font-size:12px">{{ display_review_count }} đánh giá</div></div><nav class="review-filters"><a href="{{ url_for('product_detail',product_id=product.id) }}#reviews">Tất cả ({{ display_review_count }})</a>{% for star in range(5,0,-1) %}<a href="{{ url_for('product_detail',product_id=product.id,stars=star) }}#reviews">{{ star }} Sao ({{ review_counts[star] }})</a>{% endfor %}</nav></div>
+
+    {% for review in reviews %}
+    <div class="review-card" style="position:relative">
+        <div class="review-header">
+            <div class="review-avatar">{{ review.user.username[0].upper() }}</div>
+            <div>
+                <div class="reviewer-name">{{ review.user.username|mask_username }}</div>
+                <div class="reviewer-date">{{ review.created_at.strftime('%d/%m/%Y') }}</div>
+            </div>
+            {% if current_user.is_authenticated and (current_user.role == 'admin' or current_user.id == review.user_id) %}
+            <form action="{{ url_for('delete_review', review_id=review.id) }}" method="POST" style="margin-left:auto"
+                  onsubmit="return confirm('Xóa đánh giá này?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" title="Xóa đánh giá" style="background:none;border:none;cursor:pointer;color:#dc2626;padding:4px;border-radius:6px;display:flex;align-items:center;transition:background 0.2s" onmouseenter="this.style.background='#fee2e2'" onmouseleave="this.style.background='none'">
+                    <span class="material-symbols-outlined" style="font-size:1.1rem">delete</span>
+                </button>
+            </form>
+            {% endif %}
+        </div>
+        <div class="review-stars" style="display:flex; gap:2px; margin-bottom:0.5rem">
+            {% for i in range(review.rating) %}
+            <span class="material-symbols-outlined" style="font-size:1rem; color:#eab308; font-variation-settings:'FILL' 1,'wght' 700,'GRAD' 0,'opsz' 24">star</span>
+            {% endfor %}
+            {% for i in range(5 - review.rating) %}
+            <span class="material-symbols-outlined" style="font-size:1rem; color:#d1d5db">star</span>
+            {% endfor %}
+        </div>
+        <p class="review-text">{{ review.comment }}</p>{% if review.seller_reply %}<div class="review-reply"><strong>Phản hồi của {{ product.seller_shop.name if product.seller_shop else 'Shop' }}</strong>{{ review.seller_reply }}</div>{% endif %}
+    </div>
+    {% endfor %}
+
+    {% if not reviews %}
+    <div style="text-align:center; padding:2rem; color:var(--text-muted); background:white; border-radius:14px">
+        <span class="material-symbols-outlined" style="font-size:3rem; color:var(--border)">chat_bubble_outline</span>
+        <p style="margin-top:0.75rem">Chưa có đánh giá nào. Hãy là người đánh giá đầu tiên!</p>
+    </div>
+    {% endif %}
+
+    {% if review_pagination.pages>1 %}<nav class="pagination">{% for n in review_pagination.iter_pages(left_edge=1,right_edge=1,left_current=1,right_current=1) %}{% if n %}<a class="page-btn {% if n==review_pagination.page %}active{% endif %}" href="{{ url_for('product_detail',product_id=product.id,stars=request.args.get('stars'),review_page=n) }}#reviews">{{ n }}</a>{% endif %}{% endfor %}</nav>{% endif %}
+    <!-- REVIEW FORM -->
+    {% if current_user.is_authenticated and current_user.role != 'admin' and can_review %}
+    <div class="review-form">
+        <h3 style="font-weight:700; font-size:1.1rem; margin-bottom:1.5rem">Viết đánh giá của bạn</h3>
+        <form action="{{ url_for('add_review', product_id=product.id) }}" method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+                <label class="form-label">Xếp hạng</label>
+                <div class="star-picker" id="star-picker">
+                    {% for i in range(1, 6) %}
+                    <span class="material-symbols-outlined star" data-val="{{ i }}" onclick="setRating({{ i }})" style="font-size:2rem; cursor:pointer; color:#d1d5db; transition:color 0.15s">star</span>
+                    {% endfor %}
+                </div>
+                <input type="hidden" name="rating" id="rating-input" value="5">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Nhận xét</label>
+                <textarea name="comment" class="form-textarea" placeholder="Chia sẻ trải nghiệm của bạn về sản phẩm này..." required></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">
+                Gửi đánh giá
+                <span class="material-symbols-outlined" style="font-size:1rem">send</span>
+            </button>
+        </form>
+    </div>
+    {% elif current_user.is_authenticated and current_user.role != 'admin' and not can_review %}
+    <div style="text-align:center; padding:1.25rem; background:#f0fdfa; border:1.5px solid #99f6e4; border-radius:12px; margin-top:1rem">
+        <p style="color:#0f766e; font-size:0.875rem; font-weight:600">
+            <span class="material-symbols-outlined" style="font-size:1rem;vertical-align:middle">local_mall</span>
+            Bạn cần mua và nhận hàng thành công thì mới có thể viết đánh giá cho sản phẩm này.
+        </p>
+    </div>
+    {% elif current_user.is_authenticated and current_user.role == 'admin' %}
+    <div style="text-align:center; padding:1.25rem; background:#fefce8; border:1.5px solid #fde047; border-radius:12px; margin-top:1rem">
+        <p style="color:#854d0e; font-size:0.875rem; font-weight:600">
+            <span class="material-symbols-outlined" style="font-size:1rem;vertical-align:middle">admin_panel_settings</span>
+            Tài khoản quản trị không thể viết đánh giá sản phẩm.
+        </p>
+    </div>
+    {% else %}
+    <div style="text-align:center; padding:1.5rem; border:2px dashed var(--border); border-radius:14px; margin-top:1rem">
+        <p style="color:var(--text-muted)">
+            <a href="{{ url_for('login') }}" style="color:var(--primary); font-weight:600">Đăng nhập</a> để viết đánh giá.
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Product",
+  "name": {{ product.name|tojson }},
+  "description": {{ (product.description or 'Sản phẩm tại UTE MALL')|tojson }},
+  "image": [{{ product.image_url|tojson }}],
+  "sku": {{ (product.sku or ("UTE-%05d"|format(product.id)))|tojson }},
+  "offers": {
+    "@type": "Offer",
+    "priceCurrency": "VND",
+    "price": {{ product.price|tojson }},
+    "availability": {{ ("https://schema.org/InStock" if product.stock and product.stock > 0 else "https://schema.org/OutOfStock")|tojson }}
+  }{% if display_review_count > 0 %},
+  "aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": {{ display_rating|tojson }},
+    "reviewCount": {{ display_review_count|tojson }}
+  }{% endif %}
+}
+</script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let currentMediaIndex = 0;
+
+function changeMainMedia(type, url, element) {
+    const thumbs = Array.from(document.querySelectorAll('.thumb-item'));
+    currentMediaIndex = thumbs.indexOf(element);
+
+    document.querySelectorAll('.thumb-item').forEach(el => el.style.borderColor = 'transparent');
+    element.style.borderColor = 'var(--primary)';
+
+    const mainImage = document.getElementById('mainImage');
+    const mainVideo = document.getElementById('mainVideo');
+
+    if (type === 'image') {
+        if (mainVideo) {
+            mainVideo.style.display = 'none';
+            mainVideo.pause();
+        }
+        mainImage.src = url;
+        mainImage.style.display = 'block';
+    } else if (type === 'video') {
+        if (mainImage) mainImage.style.display = 'none';
+        if (mainVideo) {
+            mainVideo.style.display = 'block';
+            mainVideo.play();
+        }
+    }
+}
+
+function navigateMedia(dir) {
+    const thumbs = Array.from(document.querySelectorAll('.thumb-item'));
+    if (!thumbs.length) return;
+
+    currentMediaIndex += dir;
+    if (currentMediaIndex < 0) currentMediaIndex = thumbs.length - 1;
+    if (currentMediaIndex >= thumbs.length) currentMediaIndex = 0;
+
+    thumbs[currentMediaIndex].click();
+}
+
+function formatVnd(value) {
+    return new Intl.NumberFormat('vi-VN').format(Number(value || 0)) + 'đ';
+}
+
+function syncVariant() {
+    const select = document.getElementById('variantSelect');
+    if (!select || !select.selectedOptions.length) return;
+    const option = select.selectedOptions[0];
+    const price = Number(option.dataset.price || 0);
+    const oldPrice = Number(option.dataset.oldPrice || 0);
+    const stock = Number(option.dataset.stock || 0);
+
+    document.querySelectorAll('.variant-id-input').forEach(input => {
+        input.value = option.value;
+    });
+    document.getElementById('productSku').textContent = 'SKU: ' + option.dataset.sku;
+    document.getElementById('productPrice').textContent = formatVnd(price);
+
+    const stockBadge = document.getElementById('productStock');
+    stockBadge.textContent = stock > 0 ? `Còn ${stock} sản phẩm` : 'Hết hàng';
+    stockBadge.style.background = stock > 0 ? '#dcfce7' : '#fee2e2';
+    stockBadge.style.color = stock > 0 ? '#166534' : '#991b1b';
+
+    const oldPriceElement = document.getElementById('productOldPrice');
+    const discountElement = document.getElementById('productDiscount');
+    if (oldPrice > price) {
+        oldPriceElement.textContent = formatVnd(oldPrice);
+        discountElement.textContent = '-' + Math.round((1 - price / oldPrice) * 100) + '%';
+        oldPriceElement.style.display = '';
+        discountElement.style.display = '';
+    } else {
+        oldPriceElement.style.display = 'none';
+        discountElement.style.display = 'none';
+    }
+
+    const qtyInput = document.getElementById('qty');
+    qtyInput.max = Math.max(1, stock);
+    if (Number(qtyInput.value) > stock && stock > 0) {
+        qtyInput.value = stock;
+        document.getElementById('cart-qty').value = stock;
+        document.getElementById('buy-qty').value = stock;
+    }
+}
+
+const variantSelect = document.getElementById('variantSelect');
+if (variantSelect) {
+    variantSelect.addEventListener('change', syncVariant);
+    syncVariant();
+}
+
+function adjustQty(delta) {
+    const input = document.getElementById('qty');
+    const qtyCart = document.getElementById('cart-qty');
+    const qtyBuy = document.getElementById('buy-qty');
+    let val = (parseInt(input.value, 10) || 1) + delta;
+    if (val < 1) val = 1;
+    const max = parseInt(input.max || '99', 10);
+    if (val > max) val = max;
+    input.value = val;
+    if (qtyCart) qtyCart.value = val;
+    if (qtyBuy) qtyBuy.value = val;
+}
+
+function setRating(val) {
+    const ratingInput = document.getElementById('rating-input');
+    if (!ratingInput) return;
+    ratingInput.value = val;
+    document.querySelectorAll('#star-picker .star').forEach((s, i) => {
+        s.style.color = i < val ? '#eab308' : '#d1d5db';
+        s.style.fontVariationSettings = i < val
+            ? "'FILL' 1,'wght' 700,'GRAD' 0,'opsz' 24"
+            : "'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24";
+    });
+}
+
+// Initialize stars at 5
+setRating(5);
+</script>
+{% endblock %}

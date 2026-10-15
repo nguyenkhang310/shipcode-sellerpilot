@@ -1,0 +1,110 @@
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const OUTPUT=path.resolve(__dirname,'../../docs/evaluations/app-audit');
+fs.mkdirSync(OUTPUT,{recursive:true});
+let browser,page;
+(async()=>{
+ browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE || undefined,headless:true});
+ page=await browser.newPage({viewport:{width:390,height:844}});
+ const errors=[],checks=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(process.env.QA_APP_URL || 'http://127.0.0.1:5174',{waitUntil:'networkidle'});
+ for(const width of [320,375,430]){
+  await page.setViewportSize({width,height:width===320?640:844});
+  for(const [tab,title] of [['Quản lý','Quản lý'],['Sản phẩm','Sản phẩm'],['Đơn hàng','Đơn hàng'],['Shop','Shop'],['SellerPilot',null]]){
+   await page.getByRole('tab',{name:tab,exact:true}).click();
+   if(title)await page.getByRole('heading',{name:title,exact:true}).waitFor();
+   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+   const hiddenFields=await page.locator('[aria-hidden="true"] input, [aria-hidden="true"] textarea').evaluateAll(els=>els.filter(el=>el.getClientRects().length>0).length);
+   assert.equal(hiddenFields,0,'Inactive tab fields must have no layout or focus target');
+   if(tab==='Quản lý'){
+    const scroll=page.getByTestId('management-scroll');
+    await scroll.evaluate(el=>{el.scrollTop=el.scrollHeight;});
+    const last=await scroll.getByRole('button').last().boundingBox();
+    const dock=await page.getByTestId('bottom-dock').boundingBox();
+    assert(last&&dock&&last.y+last.height<=dock.y,'Last dashboard action must scroll clear of the floating dock');
+    await scroll.evaluate(el=>{el.scrollTop=0;});
+   }
+   if(tab==='SellerPilot'){
+    const field=await page.getByRole('textbox',{name:'Nhắn cho SellerPilot'}).boundingBox();
+    const dock=await page.getByTestId('bottom-dock').boundingBox();
+    assert(field&&dock&&field.y+field.height<dock.y,'Composer must remain clear of navigation');
+   }
+   await page.screenshot({path:path.join(OUTPUT,`${tab}-${width}.png`)});
+  }
+ }
+ checks.push('All five tabs at 320, 375 and 430px; no horizontal page overflow or focusable inactive scenes');
+ checks.push('Dashboard final action and chat composer clear the floating navigation at every tested width');
+ await page.setViewportSize({width:390,height:844});
+ await page.getByRole('button',{name:'Cài đặt shop và giao diện',exact:true}).click();
+ const close=page.getByRole('button',{name:'Đóng',exact:true});await close.waitFor();
+ await page.waitForFunction(()=>document.getAnimations().every(animation=>animation.playState!=='running'||animation.effect?.getTiming().iterations===Infinity));
+ const closeBox=await close.boundingBox();
+ assert(closeBox&&closeBox.y>=0&&closeBox.y+closeBox.height<=844,'Sheet close action must be visible');
+ await close.click();
+ await page.getByRole('button',{name:'Lịch sử trò chuyện',exact:true}).click();
+ await page.getByRole('button',{name:'Đóng lịch sử trò chuyện',exact:true}).click();
+ checks.push('Shop sheet and chat history open and close without trapping navigation');
+ await page.getByRole('tab',{name:'Sản phẩm',exact:true}).click();
+ await page.getByText('Điện thoại mẫu',{exact:true}).filter({visible:true}).waitFor();
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('img')).some(el=>el.currentSrc.includes('/store-static/catalog/sample.png')&&el.complete&&el.naturalWidth>0));
+ checks.push('Actual product thumbnail loads through API static origin');
+ const search=page.getByRole('textbox',{name:'Tìm sản phẩm'});
+ await search.fill('khong-co-san-pham');await page.getByText('Không tìm thấy kết quả',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Xóa tìm kiếm sản phẩm'}).click();
+ await page.getByText('Điện thoại mẫu',{exact:true}).filter({visible:true}).waitFor();
+ checks.push('Product search empty state and clear restore results');
+ await page.getByRole('tab',{name:'Đơn hàng',exact:true}).click();
+ await page.getByRole('button',{name:'Chi tiết đơn #1',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Chi tiết đơn #1',exact:true}).click();
+ await page.getByRole('button',{name:'Xử lý đơn #1 trên UTE MALL',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Chờ xác nhận',exact:true}).click();
+ await page.getByRole('button',{name:'Chi tiết đơn #5',exact:true}).waitFor();
+ const orderSearch=page.getByRole('textbox',{name:'Tìm đơn hàng'});
+ await orderSearch.fill('#5');await page.getByText('1 đơn hàng',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Xóa tìm kiếm đơn hàng'}).click();
+ checks.push('Order list, expansion, status filters, search and clearing function');
+ await page.getByRole('tab',{name:'SellerPilot',exact:true}).click();
+ const input=page.getByRole('textbox',{name:'Nhắn cho SellerPilot'});
+ await input.fill(Array.from({length:16},(_,i)=>'Dòng '+i+' kiểm tra nhập nhiều dòng').join('\n'));
+ await page.waitForFunction(()=>document.querySelector('textarea')?.getBoundingClientRect().height>=100);
+ const expanded=await input.boundingBox();assert(expanded.height>=100&&expanded.height<=129,JSON.stringify(expanded));
+ await input.fill('Ngắn');
+ await page.waitForFunction(()=>document.querySelector('textarea')?.getBoundingClientRect().height<=50);
+ const compact=await input.boundingBox();assert(compact.height<=50,JSON.stringify(compact));
+ await page.evaluate(()=>{Object.defineProperty(window.visualViewport,'height',{configurable:true,get:()=>window.innerHeight-320});window.visualViewport.dispatchEvent(new Event('resize'));});
+ await page.getByTestId('bottom-dock').waitFor({state:'detached'});
+ const composer=await input.boundingBox();assert(composer.y+composer.height<=524,JSON.stringify(composer));
+ await page.screenshot({path:path.join(OUTPUT,'keyboard.png')});
+ await page.evaluate(()=>{delete window.visualViewport.height;window.visualViewport.dispatchEvent(new Event('resize'));});
+ checks.push('Multiline composer grows, shrinks and remains above emulated keyboard');
+ await page.getByRole('tab',{name:'Quản lý',exact:true}).click();
+ let dashboardRequests=0;
+ await page.route('**/management/dashboard?days=7',async route=>{
+  dashboardRequests++;await new Promise(resolve=>setTimeout(resolve,700));
+  const response=await route.fetch();const data=await response.json();data.data.series=[];
+  await route.fulfill({response,json:data});
+ });
+ await page.getByRole('button',{name:'7 ngày',exact:true}).click();
+ await page.getByText('Đang lấy số liệu từ shop…',{exact:true}).waitFor();
+ await page.getByText('Theo ngày · 7 ngày',{exact:true}).waitFor();
+ assert.equal(dashboardRequests,1);await page.unroute('**/management/dashboard?days=7');
+ checks.push('Period switch replaces old metrics while loading; empty chart series does not crash');
+ await page.getByRole('tab',{name:'Shop',exact:true}).click();
+ await page.route('**/management/dashboard?days=7',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({detail:'Kết nối kiểm thử tạm gián đoạn.'})}));
+ await page.getByRole('button',{name:'Đồng bộ dữ liệu',exact:true}).click();
+ await page.getByText('Chưa đồng bộ được dữ liệu mới',{exact:true}).waitFor();
+ assert.equal(await page.getByText('Đã kết nối UTE MALL',{exact:true}).count(),0);
+ await page.unroute('**/management/dashboard?days=7');
+ await page.getByRole('button',{name:'Đồng bộ dữ liệu',exact:true}).click();
+ await page.getByText('Đã kết nối UTE MALL',{exact:true}).waitFor();
+ await page.getByRole('switch',{name:'Giao diện tối',exact:true}).click();
+ await page.screenshot({path:path.join(OUTPUT,'shop-dark.png')});
+ await page.getByRole('tab',{name:'Quản lý',exact:true}).click();
+ await page.screenshot({path:path.join(OUTPUT,'dashboard-dark.png')});
+ checks.push('Shop sync failure is visible and recoverable; dark mode persists across tabs');
+ assert.deepEqual(errors,[]);
+ fs.writeFileSync(path.join(OUTPUT,'results.json'),JSON.stringify({checks,errors},null,2));
+ console.log(JSON.stringify({checks,errors},null,2));await browser.close();
+})().catch(async e=>{console.error(e);if(page){console.error((await page.locator('body').innerText()).slice(-5000));await page.screenshot({path:path.join(OUTPUT,'failure.png')});}if(browser)await browser.close();process.exit(1)});

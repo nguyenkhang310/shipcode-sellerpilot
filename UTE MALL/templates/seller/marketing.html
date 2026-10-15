@@ -1,0 +1,28 @@
+{% extends 'seller/base.html' %}
+{% block content %}
+<div class="seller-page-heading"><div><h1>Mã giảm giá của Shop</h1><p>Tạo ưu đãi cho người mua, theo dõi lượt dùng và quản lý thời hạn.</p></div><div class="actions"><a class="btn" href="{{ url_for('seller.vouchers') }}" target="_blank" rel="noopener">Kho voucher</a><a class="btn primary" href="{{ url_for('seller.marketing',create=1) }}#voucher-create"><span class="material-symbols-outlined">add</span>Tạo mã giảm giá</a></div></div>
+<div class="stats-grid voucher-stats"><div class="stat accent"><label>Voucher đang chạy</label><b>{{ counts.active }}</b><small>Còn hạn và còn lượt sử dụng</small></div><div class="stat"><label>Tổng lượt sử dụng</label><b>{{ used_total }}</b><small>Áp dụng tại bước thanh toán</small></div><div class="stat"><label>Tất cả voucher</label><b>{{ counts.all }}</b><small>Thuộc {{ seller_shop.name }}</small></div></div>
+<details class="panel voucher-create" id="voucher-create" {% if request.args.get('create')=='1' %}open{% endif %}>
+  <summary><span class="material-symbols-outlined">confirmation_number</span><strong>Tạo mã giảm giá</strong><span class="material-symbols-outlined">expand_more</span></summary>
+  <p class="muted">Ưu đãi chỉ áp dụng cho sản phẩm thuộc {{ seller_shop.name }}.</p>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-grid">
+      <div class="field"><label for="voucher-code">Mã voucher *</label><input class="input" id="voucher-code" name="code" placeholder="Ví dụ: UTECH100" required pattern="[A-Za-z0-9_\-]{3,30}" maxlength="30"><small>Từ 3 đến 30 ký tự chữ, số hoặc dấu gạch ngang.</small></div>
+      <div class="field"><label for="coupon-type">Loại ưu đãi</label><select id="coupon-type" name="coupon_type"><option value="fixed">Giảm số tiền (₫)</option><option value="percent">Giảm phần trăm (%)</option><option value="shipping">Hỗ trợ vận chuyển (₫)</option></select></div>
+      <div class="field"><label for="voucher-value">Giá trị giảm *</label><input class="input" id="voucher-value" type="number" name="value" min="1" max="10000000" required><small data-discount-unit>Nhập số tiền giảm, đơn vị đồng.</small></div>
+      <div class="field"><label for="voucher-minimum">Giá trị đơn tối thiểu (₫)</label><input class="input" id="voucher-minimum" type="number" name="min_subtotal" value="0" min="0" max="1000000000"></div>
+      <div class="field"><label for="voucher-quota">Lượt dùng tối đa *</label><input class="input" id="voucher-quota" type="number" name="max_uses" value="100" min="1" max="1000000" required></div>
+      <div class="field"><label for="voucher-expiry">Ngày hết hạn *</label><input class="input" id="voucher-expiry" type="date" name="expires_at" min="{{ today }}" required><small>Có hiệu lực đến hết ngày đã chọn, giờ Việt Nam.</small></div>
+    </div><div class="form-actions"><a class="btn" href="{{ url_for('seller.marketing') }}">Hủy</a><button class="btn primary">Tạo mã giảm giá</button></div>
+  </form>
+</details>
+<section class="panel">
+  <nav class="tabs" aria-label="Trạng thái voucher">{% for value,label in [('all','Tất cả'),('active','Đang chạy'),('paused','Tạm dừng'),('expired','Hết hạn'),('used','Hết lượt dùng')] %}<a class="{% if selected==value %}active{% endif %}" href="{{ url_for('seller.marketing',status=value) }}">{{ label }}<span class="tab-count">{{ counts[value] }}</span></a>{% endfor %}</nav>
+  <h2 class="result-heading">{{ coupons|length }} voucher</h2>
+  <div class="table-wrap"><table class="data-table"><thead><tr><th>Mã giảm giá</th><th>Ưu đãi</th><th>Đơn tối thiểu</th><th>Lượt sử dụng</th><th>Hết hạn</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>
+  {% for coupon in coupons %}<tr><td><strong>{{ coupon.code }}</strong><small class="cell-secondary">{{ 'Hỗ trợ vận chuyển' if coupon.coupon_type=='shipping' else 'Giảm giá sản phẩm' }}</small></td><td class="money">{{ (coupon.value|int)~'%' if coupon.coupon_type=='percent' else coupon.value|vnd }}</td><td>{{ coupon.min_subtotal|vnd }}</td><td>{{ coupon.used_count }} / {{ coupon.max_uses or '∞' }}</td><td>{{ coupon.expires_at|vn_time }}</td><td><span class="badge {{ 'active' if coupon_states[coupon.id]=='active' else '' }}">{{ {'active':'Đang chạy','paused':'Tạm dừng','expired':'Hết hạn','used':'Hết lượt dùng'}[coupon_states[coupon.id]] }}</span></td><td><div class="actions"><button class="link-button" type="button" data-copy="{{ coupon.code }}">Sao chép</button>{% if coupon_states[coupon.id] in ['active','paused'] %}<form method="post" action="{{ url_for('seller.coupon_toggle',coupon_id=coupon.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn small">{{ 'Tạm dừng' if coupon.is_active else 'Bật lại' }}</button></form>{% endif %}</div></td></tr>
+  {% else %}<tr><td colspan="7" class="empty"><span class="material-symbols-outlined">confirmation_number</span>Chưa có voucher trong bộ lọc này.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

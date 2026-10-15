@@ -1,0 +1,52 @@
+{% extends 'seller/base.html' %}
+{% block content %}
+{% set multi=product and product.variants|length>1 %}
+<div class="seller-page-heading"><div><h1>{{ title }}</h1><p>Hoàn thiện thông tin để người mua dễ tìm kiếm và lựa chọn sản phẩm.</p></div><a class="btn" href="{{ url_for('seller.products') }}"><span class="material-symbols-outlined">arrow_back</span>Quay lại danh sách</a></div>
+<form method="post" enctype="multipart/form-data" class="product-editor" id="product-editor">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="editor-content">
+    <section class="panel" id="product-basic">
+      <div class="panel-head"><h2>Thông tin cơ bản</h2><small>* Thông tin bắt buộc</small></div>
+      <div class="form-grid">
+        <div class="field full"><label for="product-name">Tên sản phẩm *</label><input class="input" id="product-name" name="name" value="{{ request.form.get('name',product.name if product else '') }}" minlength="5" maxlength="200" placeholder="Thương hiệu + tên sản phẩm + thông số nổi bật" required><small>Tên từ 5–200 ký tự. Ví dụ: Bàn phím cơ UTech K68 Bluetooth, màu đen.</small></div>
+        <div class="field"><label for="sku">SKU sản phẩm *</label><input class="input" id="sku" name="sku" value="{{ request.form.get('sku',product.sku if product else '') }}" required pattern="[A-Za-z0-9_\-]{3,100}" placeholder="UTECH-K68"><small>Mã riêng để quản lý và tra cứu hàng hóa.</small></div>
+        <div class="field"><label for="category">Ngành hàng *</label><select id="category" name="category_id" required><option value="">Chọn ngành hàng phù hợp</option>{% for category in categories %}<option value="{{ category.id }}" {% if (request.form.get('category_id',product.category_id if product else 0)|int)==category.id %}selected{% endif %}>{{ category.name }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="vendor">Thương hiệu</label><input class="input" id="vendor" name="vendor" maxlength="150" value="{{ request.form.get('vendor',product.vendor if product else '') or '' }}" placeholder="Nhập thương hiệu"></div>
+        <div class="field"><label for="subcategory">Nhóm sản phẩm trong Shop</label><input class="input" id="subcategory" name="subcategory" maxlength="100" value="{{ request.form.get('subcategory',product.subcategory if product else '') or '' }}" placeholder="Ví dụ: Bàn phím & Chuột"></div>
+        <div class="field full"><label for="description">Mô tả sản phẩm</label><textarea id="description" name="description" rows="7" maxlength="10000" placeholder="Thông số kỹ thuật, tính năng, phụ kiện đi kèm và chính sách bảo hành…">{{ request.form.get('description',product.description if product else '') or '' }}</textarea></div>
+      </div>
+    </section>
+    <section class="panel" id="product-images">
+      <div class="panel-head"><div><h2>Hình ảnh sản phẩm</h2><p>Ảnh rõ nét giúp người mua dễ nhận biết sản phẩm.</p></div></div>
+      <div class="image-editor">
+        <div class="image-preview-box"><img id="product-image-preview" src="{{ request.form.get('image_url',product.image_url if product else '') or '' }}" alt="Xem trước ảnh sản phẩm" {% if not product and not request.form.get('image_url') %}hidden{% endif %}><span class="material-symbols-outlined image-placeholder" {% if product or request.form.get('image_url') %}hidden{% endif %}>add_photo_alternate</span><small data-image-status>Ảnh bìa sản phẩm</small></div>
+        <div class="form-grid"><div class="field full"><label for="image-url">Đường dẫn ảnh</label><input class="input" id="image-url" name="image_url" value="{{ request.form.get('image_url',product.image_url if product else '') or '' }}" placeholder="https://..."><small>Nhập đường dẫn ảnh hoặc tải ảnh từ máy tính bên dưới.</small></div><div class="field full"><label for="image-file">Tải ảnh từ máy tính</label><input type="file" id="image-file" name="image_file" accept="image/jpeg,image/png,image/webp"><small>JPG, PNG hoặc WEBP, tối đa 8 MB. Ảnh tải lên sẽ thay thế đường dẫn ảnh.</small></div></div>
+      </div>
+    </section>
+    <section class="panel" id="product-sales">
+      <div class="panel-head"><h2>Thông tin bán hàng</h2></div>
+      {% if multi %}<div class="notice info"><span class="material-symbols-outlined">info</span><span>Sản phẩm có nhiều phân loại. Hãy sửa giá và tồn kho tại bảng phân loại bên dưới; tổng tồn và giá thấp nhất được tính tự động.</span></div>{% endif %}
+      <div class="form-grid">
+        <div class="field"><label for="price">{{ 'Giá thấp nhất (₫)' if multi else 'Giá bán (₫) *' }}</label><input class="input" id="price" name="price" type="number" min="1000" max="1000000000" step="1" required value="{{ request.form.get('price',product.price|int if product else '') }}" {% if multi %}readonly{% endif %}></div>
+        <div class="field"><label for="old-price">Giá niêm yết (₫)</label><input class="input" id="old-price" name="old_price" type="number" min="0" max="1000000000" step="1" value="{{ request.form.get('old_price',product.old_price|int if product and product.old_price else '') }}"><small>Để trống nếu không giảm giá. Giá niêm yết phải lớn hơn giá bán.</small></div>
+        <div class="field"><label for="stock">{{ 'Tổng tồn kho' if multi else 'Tồn kho *' }}</label><input class="input" id="stock" name="stock" type="number" min="0" max="1000000" required value="{{ request.form.get('stock',product.stock if product else 0) }}" {% if multi %}readonly{% endif %}></div>
+        <div class="field"><label for="product-status">Trạng thái hiển thị</label><select id="product-status" name="status">{% for value,label in [('active','Đăng bán'),('draft','Lưu bản nháp'),('archived','Ẩn sản phẩm')] %}<option value="{{ value }}" {% if request.form.get('status',product.status if product else 'active')==value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+      </div>
+      {% if multi %}
+      <h3>Phân loại hàng</h3>
+      <div class="table-wrap"><table class="data-table variant-table"><thead><tr><th>SKU</th><th>Phân loại</th><th>Giá bán (₫)</th><th>Tồn kho</th></tr></thead><tbody>{% for variant in product.variants %}<tr data-active-variant="{{ '1' if variant.is_active else '0' }}"><td>{{ variant.sku }}</td><td><input class="input" name="variant_title_{{ variant.id }}" aria-label="Tên phân loại {{ variant.sku }}" value="{{ request.form.get('variant_title_'~variant.id,variant.title) }}" maxlength="200" required></td><td><input class="input" type="number" min="1000" max="1000000000" name="variant_price_{{ variant.id }}" aria-label="Giá phân loại {{ variant.sku }}" value="{{ request.form.get('variant_price_'~variant.id,variant.price|int) }}" required></td><td><input class="input" type="number" min="0" max="1000000" name="variant_stock_{{ variant.id }}" aria-label="Tồn kho {{ variant.sku }}" value="{{ request.form.get('variant_stock_'~variant.id,variant.stock) }}" required></td></tr>{% endfor %}</tbody></table></div>
+      {% else %}
+      <div class="field standard-variant"><label for="standard-variant">Tên phân loại tiêu chuẩn</label><input class="input" id="standard-variant" name="standard_variant_title" value="{{ request.form.get('standard_variant_title',product.variants[0].title if product and product.variants else 'Phiên bản tiêu chuẩn') }}" maxlength="200"></div>
+      {% endif %}
+      <details class="variant-create" {% if request.form.get('new_variant_title') %}open{% endif %}><summary><span class="material-symbols-outlined">add</span>Thêm phân loại hàng</summary><p class="muted">Tạo SKU riêng cho màu sắc, dung lượng hoặc phiên bản khác.</p><div class="form-grid">
+        <div class="field"><label for="new-variant-title">Tên phân loại mới</label><input class="input" id="new-variant-title" name="new_variant_title" value="{{ request.form.get('new_variant_title','') }}" placeholder="Ví dụ: Đen / 512 GB" maxlength="200"></div>
+        <div class="field"><label for="new-variant-sku">SKU phân loại mới</label><input class="input" id="new-variant-sku" name="new_variant_sku" value="{{ request.form.get('new_variant_sku','') }}" placeholder="UTECH-512-BLK" pattern="[A-Za-z0-9_\-]{3,100}"></div>
+        <div class="field"><label for="new-variant-price">Giá bán phân loại mới (₫)</label><input class="input" id="new-variant-price" type="number" name="new_variant_price" value="{{ request.form.get('new_variant_price','') }}" min="1000" max="1000000000"></div>
+        <div class="field"><label for="new-variant-stock">Tồn kho phân loại mới</label><input class="input" id="new-variant-stock" type="number" name="new_variant_stock" value="{{ request.form.get('new_variant_stock','') }}" min="0" max="1000000"></div>
+      </div><p class="muted standard-variant">Điền đủ bốn thông tin để thêm một SKU. Giá và tồn kho của sản phẩm được tính lại khi lưu.</p></details>
+    </section>
+    <div class="panel editor-save"><span>Sản phẩm được cập nhật trên gian hàng sau khi lưu.</span><div class="actions"><a class="btn" href="{{ url_for('seller.products') }}">Hủy</a><button class="btn primary" type="submit">Lưu sản phẩm</button></div></div>
+  </div>
+  <aside class="editor-guide"><nav class="panel"><h2>Nội dung sản phẩm</h2><a href="#product-basic"><span>1</span>Thông tin cơ bản</a><a href="#product-images"><span>2</span>Hình ảnh sản phẩm</a><a href="#product-sales"><span>3</span>Thông tin bán hàng</a></nav><div class="editor-tip"><span class="material-symbols-outlined">lightbulb</span><strong>Trước khi đăng bán</strong><p>Kiểm tra đúng ngành hàng, ảnh sản phẩm, giá bán và số lượng từng phân loại.</p><p>Chọn <b>Lưu bản nháp</b> nếu bạn muốn hoàn thiện thông tin sau.</p></div></aside>
+</form>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Đăng ký' if register_mode else 'Đăng nhập' }} · UTE MALL{% endblock %}
+{% block extra_styles %}
+<style>
+.auth-area{background:linear-gradient(135deg,#ee4d2d,#ff6b45);padding:58px 20px;min-height:600px}
+.auth-inner{max-width:1060px;margin:auto;display:grid;grid-template-columns:1fr 430px;gap:72px;align-items:center}
+.auth-brand{color:white;text-align:center}.auth-brand img{width:112px;height:112px;margin-bottom:16px}.auth-brand h1{font-size:44px;letter-spacing:-1.5px}.auth-brand p{font-size:20px;margin-top:12px;line-height:1.7}
+.auth-card{background:white;border-radius:9px;padding:34px;box-shadow:0 12px 35px #87251138}.auth-card h2{font-size:24px;font-weight:600;margin-bottom:26px}.auth-card .public-input{margin-bottom:16px}.auth-submit{width:100%;min-height:48px;background:#ee4d2d;border:0;border-radius:5px;color:#fff;padding:13px;font:inherit;font-size:15px;font-weight:600;cursor:pointer}.auth-submit:hover{background:#d94327;box-shadow:0 4px 12px #ee4d2d3d}
+.auth-help{display:flex;justify-content:space-between;align-items:center;font-size:13px;margin:14px 0 23px}.auth-help label{display:flex;align-items:center;gap:7px}.auth-help input{width:17px;height:17px}.auth-help a{color:#2870ba;text-decoration:none}.auth-switch{text-align:center;color:#777;font-size:14px;margin-top:26px}.auth-switch a{color:#ee4d2d;text-decoration:none;font-weight:500}.auth-terms{font-size:12px;color:#888;text-align:center;margin-top:20px;line-height:1.6}.auth-terms a{color:#ee4d2d}
+@media(max-width:750px){.auth-area{padding:28px 12px;min-height:calc(100vh - 102px)}.auth-inner{display:block;max-width:440px}.auth-brand{display:none}.auth-card{padding:26px 22px}.auth-card h2{font-size:22px}}
+</style>
+{% endblock %}
+{% block content %}
+<section class="auth-area">
+  <div class="auth-inner">
+    <div class="auth-brand">
+      <img src="{{ url_for('static',filename='ute-mall.svg') }}" alt="UTE MALL">
+      <h1>UTE MALL</h1>
+      <p>Mua sắm mỗi ngày.<br>Kết nối những điều bạn yêu thích.</p>
+    </div>
+    <div class="auth-card">
+      <h2>{{ 'Đăng ký' if register_mode else ('Đăng nhập Kênh Người Bán' if request.args.get('next','').startswith('/seller') else 'Đăng nhập') }}</h2>
+      <form method="post" action="{{ url_for('register') if register_mode else url_for('login',next=request.args.get('next')) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {% if register_mode %}
+        <input class="public-input" aria-label="Tên đăng nhập" name="name" placeholder="Tên đăng nhập" minlength="3" maxlength="100" value="{{ request.form.get('name','') }}" autocomplete="username" required>
+        <input class="public-input" aria-label="Email" name="email" placeholder="Email" type="email" value="{{ request.form.get('email','') }}" autocomplete="email" required>
+        {% else %}
+        <input class="public-input" aria-label="Email hoặc tên đăng nhập" name="login_id" placeholder="Email / Tên đăng nhập" value="{{ request.form.get('login_id','') }}" autocomplete="username" required>
+        {% endif %}
+        <input class="public-input" aria-label="Mật khẩu" name="password" placeholder="Mật khẩu{{ ' (ít nhất 8 ký tự)' if register_mode else '' }}" type="password" autocomplete="{{ 'new-password' if register_mode else 'current-password' }}" {{ 'minlength=8 maxlength=128' if register_mode else '' }} required>
+        {% if register_mode %}
+        <input class="public-input" aria-label="Xác nhận mật khẩu" name="confirm_password" placeholder="Xác nhận mật khẩu" type="password" autocomplete="new-password" minlength="8" required>
+        {% endif %}
+        <button class="auth-submit">{{ 'ĐĂNG KÝ' if register_mode else 'ĐĂNG NHẬP' }}</button>
+        {% if not register_mode %}
+        <div class="auth-help"><label><input type="checkbox" name="remember"> Ghi nhớ đăng nhập</label><a href="{{ url_for('forgot_password') }}">Quên mật khẩu?</a></div>
+        {% endif %}
+      </form>
+      <p class="auth-switch">{% if register_mode %}Đã có tài khoản? <a href="{{ url_for('login',next=request.args.get('next')) }}">Đăng nhập</a>{% else %}Bạn mới biết đến UTE MALL? <a href="{{ url_for('register') }}">Đăng ký</a>{% endif %}</p>
+      <p class="auth-terms">Bằng việc tiếp tục, bạn đồng ý với <a href="{{ url_for('policy') }}">Điều khoản sử dụng</a> và <a href="{{ url_for('policy') }}#privacy">Chính sách bảo mật</a>.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}

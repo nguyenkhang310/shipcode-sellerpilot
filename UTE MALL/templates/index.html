@@ -1,0 +1,86 @@
+{% extends 'base.html' %}
+{% block title %}UTE MALL — Mua sắm online đa ngành{% endblock %}
+{% block meta_description %}UTE MALL là sàn thương mại điện tử demo đa ngành với gian hàng công nghệ được vận hành bởi SellerPilot AI.{% endblock %}
+{% block content %}
+<main class="mall-home">
+    <div class="market-shell">
+        <section class="mall-hero-grid mall-panel" aria-label="Khuyến mãi nổi bật">
+            <div class="mall-hero-main">
+                <div class="mall-hero-copy">
+                    <span class="mall-hero-kicker">ƯU ĐÃI MỖI NGÀY</span>
+                    <h1>Săn công nghệ<br>giá cực hời</h1>
+                    <p>Nâng cấp góc làm việc và giải trí. Khám phá thiết bị, phụ kiện từ UTech Official.</p>
+                    <a href="{{ url_for('shop_page', slug='utech-official') }}">Khám phá UTech <span class="material-symbols-outlined" style="font-size:17px">arrow_forward</span></a>
+                </div>
+                {% if tech_hero_product %}
+                <img class="mall-hero-product" src="{{ tech_hero_product.image_url }}" alt="{{ tech_hero_product.name }}">
+                {% endif %}
+            </div>
+            <div class="mall-hero-side">
+                <a class="mall-promo" href="{{ url_for('products', sale='true') }}">
+                    <h3>Flash Sale mỗi ngày</h3><p>Ưu đãi mỗi ngày · Số lượng có hạn</p>
+                    {% if sale_products %}<img src="{{ sale_products[0].image_url }}" alt="Flash sale">{% endif %}
+                </a>
+                <a class="mall-promo" href="{{ url_for('seller.vouchers') }}">
+                    <h3>Freeship toàn sàn</h3><p>Mã vận chuyển cho đơn hàng của bạn</p>
+                    {% if sale_products|length > 1 %}<img src="{{ sale_products[1].image_url }}" alt="Freeship">{% endif %}
+                </a>
+            </div>
+        </section>
+
+        <nav class="mall-shortcuts mall-panel" aria-label="Tiện ích UTE MALL">
+            {% set shortcuts = [('verified','UTE MALL Chính Hãng','products'),('bolt','Khung Giờ Săn Sale','products'),('local_shipping','Mã Freeship','seller.vouchers'),('redeem','Kho Voucher','seller.vouchers'),('devices','UTech Official','shop_page'),('favorite','Shop Yêu Thích','seller.following'),('storefront','Kênh Người Bán','seller.dashboard'),('receipt_long','Tra Cứu Đơn','order_lookup')] %}
+            {% for icon,label,endpoint in shortcuts %}
+            <a class="mall-shortcut" href="{% if endpoint == 'shop_page' %}{{ url_for(endpoint, slug='utech-official') }}{% elif endpoint == 'products' %}{{ url_for(endpoint,sale='true') }}{% else %}{{ url_for(endpoint) }}{% endif %}"><span class="mall-shortcut-icon"><span class="material-symbols-outlined">{{ icon }}</span></span>{{ label }}</a>
+            {% endfor %}
+        </nav>
+
+        <section class="mall-section mall-panel">
+            <div class="mall-section-head"><h2>Danh mục</h2><a href="{{ url_for('products') }}">Xem tất cả ›</a></div>
+            <div class="mall-categories">
+                {% for category in categories %}
+                <a class="mall-category" href="{{ url_for('products', category=category.slug or category.name) }}">
+                    <span class="mall-category-image">{% if category.image_url %}<img src="{{ category.image_url }}" alt="{{ category.name }}" loading="lazy">{% else %}<span class="material-symbols-outlined">{{ category.icon or 'category' }}</span>{% endif %}</span>
+                    <span>{{ category.name }}</span>
+                </a>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="mall-section mall-panel">
+            <div class="mall-section-head">
+                <div class="flash-heading"><span class="flash-logo">FLASH SALE</span><span class="flash-timer"><b id="flash-h">02</b><b id="flash-m">00</b><b id="flash-s">00</b></span></div>
+                <a href="{{ url_for('products', sale='true') }}">Xem tất cả ›</a>
+            </div>
+            <div class="mall-product-grid">
+                {% for product in sale_products %}{% include '_market_product_card.html' %}{% else %}<div class="mall-empty">Dữ liệu Flash Sale đang được cập nhật.</div>{% endfor %}
+            </div>
+        </section>
+
+        {% if sellerpilot_shop %}
+        <section class="mall-section mall-panel">
+            <div class="mall-section-head"><h2>Gian hàng công nghệ nổi bật</h2><a href="{{ url_for('shop_page', slug=sellerpilot_shop.slug) }}">Xem shop ›</a></div>
+            <div class="mall-shop-showcase">
+                <a class="mall-shop-banner" href="{{ url_for('shop_page', slug=sellerpilot_shop.slug) }}"><span class="material-symbols-outlined">smart_toy</span><h3>{{ sellerpilot_shop.name }}</h3><p>Thiết bị & phụ kiện · Mua sắm thuận tiện mỗi ngày</p></a>
+                <div class="mall-shop-products">
+                    {% for item in sellerpilot_products[:4] %}<a class="mall-shop-mini" href="{{ url_for('product_detail', product_id=item.id) }}"><img src="{{ item.image_url }}" alt="{{ item.name }}" loading="lazy"><strong>Từ ₫{{ "{:,.0f}".format(item.price)|replace(',', '.') }}</strong></a>{% endfor %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+        <section class="mall-section mall-panel">
+            <div class="mall-section-head daily-head"><h2>Gợi ý hôm nay</h2></div>
+            <div class="mall-product-grid">
+                {% for product in new_products %}{% include '_market_product_card.html' %}{% else %}<div class="mall-empty">Catalog đang được chuẩn bị.</div>{% endfor %}
+            </div>
+        </section>
+    </div>
+</main>
+<script>
+(function(){
+  const boundary=new Date();boundary.setHours(24,0,0,0);const end=boundary.getTime();
+  setInterval(()=>{const t=Math.max(0,end-Date.now()),h=Math.floor(t/3600000),m=Math.floor(t%3600000/60000),s=Math.floor(t%60000/1000);['flash-h','flash-m','flash-s'].forEach((id,i)=>{const e=document.getElementById(id);if(e)e.textContent=String([h,m,s][i]).padStart(2,'0')})},1000);
+})();
+</script>
+{% endblock %}

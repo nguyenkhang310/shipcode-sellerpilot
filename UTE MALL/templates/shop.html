@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}{{ seller.name }} | UTE MALL{% endblock %}
+{% block meta_description %}Gian hàng {{ seller.name }} trên UTE MALL. {{ seller.description }}{% endblock %}
+{% block content %}
+<main class="mall-page">
+    <div class="market-shell">
+        <section class="shop-hero mall-panel" {% if seller.cover_url %}style="background-image:linear-gradient(90deg,#172138dd,#17213888),url('{{ seller.cover_url }}')"{% endif %}>
+            <div class="shop-hero-inner">
+                <div class="shop-identity">
+                    <div class="shop-avatar">{% if seller.logo_url %}<img src="{{ seller.logo_url }}" alt="{{ seller.name }}">{% else %}<span class="material-symbols-outlined">devices</span>{% endif %}</div>
+                    <div class="shop-title"><h1>{{ seller.name }}</h1><p>{{ seller.description or 'Gian hàng chính hãng trên UTE MALL' }}</p>{% if seller.is_verified %}<span class="shop-verified"><span class="material-symbols-outlined" style="font-size:14px">verified</span> UTE MALL CHÍNH HÃNG</span>{% endif %}</div>
+                </div>
+                <div class="shop-actions"><form method="post" action="{{ url_for('seller.follow',slug=seller.slug) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="{{ 'unfollow' if following else 'follow' }}"><button>{{ '✓ Đang theo dõi' if following else '+ Theo dõi' }}</button></form><a href="{{ url_for('seller.messages',shop=seller.slug) }}">Chat ngay</a>{% if owned_shop and owned_shop.id==seller.id %}<a href="{{ url_for('seller.dashboard') }}">Quản lý Shop</a>{% endif %}</div>
+                <div class="shop-stats">
+                    <span>Sản phẩm: <strong>{{ product_total }}</strong></span>
+                    <span>Đánh giá: <strong>{{ '%.1f'|format(seller.rating) }} / 5</strong></span>
+                    <span>Người theo dõi: <strong>{{ "{:,.0f}".format(seller.follower_count)|replace(',', '.') }}</strong></span>
+                    <span>Phản hồi chat: <strong>{{ seller.response_rate }}%</strong></span>
+                </div>
+            </div>
+        </section>
+        <nav class="shop-tabs mall-panel">
+            <a class="{{ 'active' if not request.args.get('category') else '' }}" href="{{ url_for('shop_page', slug=seller.slug) }}">Shop</a>
+            <a href="#products">Tất cả sản phẩm</a>
+            {% for category in shop_categories[:5] %}<a class="{{ 'active' if request.args.get('category')==category.slug else '' }}" href="{{ url_for('shop_page', slug=seller.slug, category=category.slug or category.name) }}">{{ category.name }}</a>{% endfor %}
+        </nav>
+        {% if seller.vacation_mode %}<p style="padding:15px;background:#fff4db">Shop đang tạm nghỉ và chưa nhận đơn mới.</p>{% endif %}
+        <div class="shop-intro-bar"><form method="get"><input name="q" value="{{ request.args.get('q','') }}" placeholder="Tìm kiếm trong Shop này" aria-label="Tìm trong shop"><button>Tìm kiếm</button></form><form method="get"><input type="hidden" name="category" value="{{ request.args.get('category','') }}"><input type="hidden" name="q" value="{{ request.args.get('q','') }}"><select name="sort" aria-label="Sắp xếp"><option value="bestseller" {{ 'selected' if sort_value=='bestseller' else '' }}>Bán chạy</option><option value="newest" {{ 'selected' if sort_value=='newest' else '' }}>Mới nhất</option><option value="price_asc" {{ 'selected' if sort_value=='price_asc' else '' }}>Giá tăng dần</option><option value="price_desc" {{ 'selected' if sort_value=='price_desc' else '' }}>Giá giảm dần</option></select><button>Sắp xếp</button></form></div>
+        <h2 class="shop-products-title" id="products">Sản phẩm của shop</h2>
+        <section class="mall-panel">
+            <div class="mall-product-grid">
+                {% for product in products %}{% include '_market_product_card.html' %}{% else %}<div class="mall-empty">Shop chưa có sản phẩm trong danh mục này.</div>{% endfor %}
+            </div>
+        </section>
+        {% if pagination.pages > 1 %}
+        <div class="pagination" style="margin-top:24px">
+            {% if pagination.has_prev %}<a class="page-btn" href="{{ url_for('shop_page', slug=seller.slug, page=pagination.prev_num, category=request.args.get('category'),q=request.args.get('q'),sort=request.args.get('sort')) }}">‹</a>{% endif %}
+            {% for p in pagination.iter_pages(left_edge=1,right_edge=1,left_current=2,right_current=2) %}{% if p %}<a class="page-btn{% if p == pagination.page %} active{% endif %}" href="{{ url_for('shop_page', slug=seller.slug, page=p, category=request.args.get('category'),q=request.args.get('q'),sort=request.args.get('sort')) }}">{{ p }}</a>{% endif %}{% endfor %}
+            {% if pagination.has_next %}<a class="page-btn" href="{{ url_for('shop_page', slug=seller.slug, page=pagination.next_num, category=request.args.get('category'),q=request.args.get('q'),sort=request.args.get('sort')) }}">›</a>{% endif %}
+        </div>
+        {% endif %}
+    </div>
+</main>
+{% endblock %}

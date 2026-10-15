@@ -1,0 +1,139 @@
+{% extends 'base.html' %}
+{% block title %}Thanh toán - UTE MALL{% endblock %}
+
+{% block extra_styles %}
+<style>
+.checkout-page{
+  max-width:1100px;margin:0 auto;padding:2.5rem 2rem;
+  display:grid;grid-template-columns:1fr 360px;gap:2rem;align-items:start;
+}
+.card{background:#fff;border-radius:16px;padding:1.5rem;box-shadow:0 2px 8px rgba(0,0,0,0.06);}
+.title{font-family:inherit;font-size:1.9rem;font-weight:800;margin-bottom:0.25rem;}
+.sub{color:var(--text-muted);font-size:0.9rem;margin-bottom:1.25rem;}
+.field{margin-bottom:1rem;}
+.label{display:block;font-size:0.8rem;font-weight:700;margin-bottom:0.4rem;}
+.input,.textarea,.select{
+  width:100%;padding:0.75rem 0.9rem;border:1.5px solid var(--border);border-radius:12px;
+  font-family:inherit;font-size:0.9rem;background:var(--surface2);outline:none;
+}
+.input:focus,.textarea:focus,.select:focus{border-color:var(--primary);background:#fff;box-shadow:0 0 0 3px rgba(10,92,54,0.1);}
+.textarea{min-height:90px;resize:vertical;}
+.radio-row{display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:0.25rem;}
+.radio{
+  border:1.5px solid var(--border);border-radius:12px;padding:0.75rem 0.9rem;cursor:pointer;
+  display:flex;gap:0.6rem;align-items:flex-start;flex:1;min-width:220px;background:#fff;
+}
+.radio input{margin-top:0.2rem;accent-color:var(--primary);}
+.radio strong{display:block;font-size:0.9rem;}
+.radio span{display:block;color:var(--text-muted);font-size:0.8rem;margin-top:0.1rem;}
+.summary{position:sticky;top:90px;}
+.sum-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem;font-size:0.9rem;}
+.sum-row .lbl{color:var(--text-muted); flex:1; padding-right:1rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; word-break: break-word;}
+.sum-total{display:flex;justify-content:space-between;align-items:center;border-top:2px solid var(--border);padding-top:1rem;margin-top:0.75rem;}
+.sum-total .val{font-size:1.35rem;font-weight:900;color:var(--primary);}
+.btn-pay{width:100%;padding:1rem;border:none;border-radius:12px;background:var(--primary);color:#fff;font-weight:800;cursor:pointer;font-family:inherit;font-size:1rem;}
+.btn-pay:hover{background:var(--primary-light);transform:translateY(-1px);box-shadow:0 6px 20px rgba(10,92,54,0.25);}
+@media (max-width: 900px){.checkout-page{grid-template-columns:1fr;}.summary{position:static;}}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="checkout-page">
+  <div class="card">
+    <div class="title">Thanh toán</div>
+    <div class="sub">Vui lòng nhập thông tin nhận hàng và chọn phương thức thanh toán.</div>
+
+    <form method="POST" action="{{ url_for('checkout') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="field">
+        <label class="label">Họ và tên *</label>
+        <input class="input" type="text" name="shipping_name" placeholder="Nguyễn Văn A" required>
+      </div>
+      <div class="field">
+        <label class="label">Số điện thoại *</label>
+        <input class="input" type="tel" name="shipping_phone" placeholder="09xxxxxxxx" required>
+      </div>
+      <div class="field">
+        <label class="label">Địa chỉ nhận hàng *</label>
+        <textarea class="textarea" name="shipping_address" placeholder="Số nhà, đường, phường/xã, quận/huyện, tỉnh/thành..." required></textarea>
+      </div>
+      {% if is_guest %}
+      <div class="field">
+        <label class="label">Email *</label>
+        <input class="input" type="email" name="guest_email" placeholder="email@domain.com" required>
+        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.35rem">
+          Dùng để nhận thông tin đơn hàng. Bạn có thể tạo mật khẩu sau.
+        </div>
+      </div>
+      {% endif %}
+      <div class="field">
+        <label class="label">Ghi chú</label>
+        <textarea class="textarea" name="note" placeholder="VD: Giao giờ hành chính, gọi trước khi giao..."></textarea>
+      </div>
+
+      <div class="field">
+        <label class="label">Phương thức thanh toán</label>
+        <div class="radio-row">
+          <label class="radio">
+            <input type="radio" name="payment_method" value="COD" checked>
+            <div>
+              <strong>COD (tiền mặt)</strong>
+              <span>Thanh toán khi nhận hàng</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-pay" id="btn-submit-order">Tạo đơn hàng</button>
+    </form>
+    <script>
+      document.querySelector('form[action="{{ url_for('checkout') }}"]').addEventListener('submit', function(e) {
+        var btn = document.getElementById('btn-submit-order');
+        if (btn.classList.contains('processing')) {
+          e.preventDefault();
+          return;
+        }
+        btn.classList.add('processing');
+        btn.innerHTML = 'Đang xử lý... <span class="material-symbols-outlined" style="font-size:1rem; animation:spin 1s linear infinite">hourglass_empty</span>';
+        btn.style.opacity = '0.7';
+        btn.style.cursor = 'not-allowed';
+      });
+    </script>
+    <style>
+      @keyframes spin { 100% { transform:rotate(360deg); } }
+    </style>
+  </div>
+
+  <div class="card summary">
+    <div style="font-weight:800;margin-bottom:1rem">Tóm tắt đơn hàng</div>
+    {% for item in cart.items %}
+      <div class="sum-row">
+        <span class="lbl">{{ item.product.name }}{% if item.variant %} — {{ item.variant.title }}{% endif %} × {{ item.quantity }}</span>
+        <span style="font-weight:700">{{ "{:,.0f}".format((item.variant.price if item.variant else item.product.price) * item.quantity)|replace(',', '.') }}đ</span>
+      </div>
+    {% endfor %}
+    <div class="sum-row">
+      <span class="lbl">Tạm tính</span>
+      <span style="font-weight:700">{{ "{:,.0f}".format(totals.subtotal if totals else 0)|replace(',', '.') }}đ</span>
+    </div>
+    <div class="sum-row">
+      <span class="lbl">Phí vận chuyển</span>
+      <span style="font-weight:700">{{ "{:,.0f}".format(totals.shipping_fee if totals else 0)|replace(',', '.') }}đ</span>
+    </div>
+    {% if totals and totals.discount > 0 %}
+    <div class="sum-row">
+      <span class="lbl">Giảm giá {% if coupon_code %}({{ coupon_code }}){% endif %}</span>
+      <span style="font-weight:700;color:#10b981">-{{ "{:,.0f}".format(totals.discount)|replace(',', '.') }}đ</span>
+    </div>
+    {% endif %}
+    <div class="sum-total">
+      <span style="font-weight:800">Tổng cộng</span>
+      <span class="val">{{ "{:,.0f}".format(totals.grand_total if totals else 0)|replace(',', '.') }}đ</span>
+    </div>
+    <div style="margin-top:1rem;color:var(--text-muted);font-size:0.8rem">
+      Bằng cách tạo đơn, bạn đồng ý với chính sách mua hàng của cửa hàng.
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends 'seller/base.html' %}
+{% block content %}
+<div class="seller-page-heading"><div><h1>Tất cả đơn hàng</h1><p>Theo dõi đơn hàng từ lúc đặt đến khi giao hàng và hoàn tất.</p></div><a class="btn" href="{{ url_for('seller.export',kind='orders') }}"><span class="material-symbols-outlined">download</span>Xuất danh sách đơn</a></div>
+<section class="panel">
+  <nav class="tabs" aria-label="Trạng thái đơn hàng"><a class="{% if selected=='all' %}active{% endif %}" href="{{ url_for('seller.orders',q=q,date_from=date_from,date_to=date_to) }}">Tất cả<span class="tab-count">{{ counts.all }}</span></a>{% for value,label in status_labels.items() %}<a class="{% if selected==value %}active{% endif %}" href="{{ url_for('seller.orders',status=value,q=q,date_from=date_from,date_to=date_to) }}">{{ label }}<span class="tab-count">{{ counts.get(value,0) }}</span></a>{% endfor %}</nav>
+  <form class="filters" method="get">
+    <input type="hidden" name="status" value="{{ selected }}">
+    <label class="search-field">Tìm đơn hàng<input class="input" name="q" value="{{ q }}" placeholder="Mã đơn, tên hoặc số điện thoại khách"></label>
+    <label>Từ ngày<input class="input" type="date" name="date_from" value="{{ date_from }}"></label>
+    <label>Đến ngày<input class="input" type="date" name="date_to" value="{{ date_to }}"></label>
+    <button class="btn primary">Tìm kiếm</button><a class="btn" href="{{ url_for('seller.orders') }}">Đặt lại</a>
+  </form>
+  <h2 class="result-heading">{{ pagination.total }} đơn hàng</h2>
+  <form id="order-bulk" class="bulk-bar" method="post" action="{{ url_for('seller.order_bulk') }}" data-bulk-form data-confirm="Cập nhật trạng thái cho các đơn đã chọn? Chỉ chọn các đơn cùng bước xử lý.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="check-label"><input type="checkbox" data-select-all="order-bulk">Chọn cả trang</label><span class="selection-status">Đã chọn <b data-selection-count>0</b> đơn</span>
+    <select name="status" aria-label="Trạng thái xử lý hàng loạt"><option value="paid">Xác nhận / Chờ lấy hàng</option><option value="shipped">Giao đơn vị vận chuyển</option><option value="cancelled">Hủy đơn đã chọn</option></select><button class="btn" type="submit">Xử lý đơn đã chọn</button>
+  </form>
+  <div class="order-columns-heading"><span>Sản phẩm</span><span>Tổng thanh toán</span><span>Trạng thái</span><span>Thao tác</span></div>
+  {% for order in pagination.items %}
+  <article class="order-card">
+    <div class="order-card-head"><label class="check-label"><input type="checkbox" data-bulk-item form="order-bulk" name="order_ids" value="{{ order.id }}" aria-label="Chọn đơn {{ order.id }}"><span class="material-symbols-outlined">person</span><strong>{{ order.shipping_name }}</strong></label><span class="muted">{{ order.created_at|vn_time }}</span><a class="order-number" href="{{ url_for('seller.order_detail',order_id=order.id) }}">Mã đơn #{{ order.id }}</a></div>
+    <div class="order-card-body">
+      <div class="order-items">{% for item in order.items[:3] %}<div class="table-product"><img src="{{ item.product.image_url }}" alt="" loading="lazy"><div><strong>{{ item.product.name }}</strong><small>{{ item.variant_title or 'Phiên bản tiêu chuẩn' }}</small><small>SKU: {{ item.sku or item.product.sku }}</small></div><span class="order-item-quantity">× {{ item.quantity }}</span></div>{% endfor %}{% if order.items|length>3 %}<a class="text-link" href="{{ url_for('seller.order_detail',order_id=order.id) }}">Xem thêm {{ order.items|length-3 }} sản phẩm</a>{% endif %}</div>
+      <div class="order-column"><strong>{{ order.total_amount|vnd }}</strong><small>{{ 'Thanh toán khi nhận hàng' if order.payment_method=='COD' else order.payment_method }}</small></div>
+      <div class="order-column"><span class="badge {{ order.status }}">{{ status_labels.get(order.status,order.status) }}</span><small>{{ {'pending':'Chờ shop xác nhận','paid':'Chuẩn bị hàng để bàn giao','shipped':'Chờ người mua nhận hàng','delivered':'Giao hàng thành công','cancelled':'Đã hoàn lại tồn kho','returned':'Đã xử lý hoàn hàng'}.get(order.status,'') }}</small></div>
+      <div class="order-column"><a class="table-action" href="{{ url_for('seller.order_detail',order_id=order.id) }}">Chi tiết đơn hàng</a>{% if order.status in ['paid','shipped'] %}<a class="btn small" href="{{ url_for('seller.order_label',order_id=order.id) }}" target="_blank" rel="noopener"><span class="material-symbols-outlined">print</span>In phiếu</a>{% endif %}</div>
+    </div>
+  </article>
+  {% else %}<div class="empty"><span class="material-symbols-outlined">receipt_long</span>Không có đơn hàng phù hợp.<br><a class="text-link" href="{{ url_for('seller.orders') }}">Xóa bộ lọc</a></div>{% endfor %}
+  {% include 'seller/_pagination.html' %}
+</section>
+{% endblock %}

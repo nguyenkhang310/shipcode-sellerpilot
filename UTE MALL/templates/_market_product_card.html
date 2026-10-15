@@ -1,0 +1,16 @@
+<div class="mall-product-card">
+    <a href="{{ url_for('product_detail', product_id=product.id) }}">
+        <div class="mall-product-image">
+            {% if product.source == 'sellerpilot' and product.is_new %}<span class="mall-badge">Mới</span>{% elif product.is_featured %}<span class="mall-badge">Yêu thích</span>{% endif %}
+            {% if product.old_price and product.old_price > product.price %}
+            <span class="mall-discount">-{{ (((product.old_price-product.price)/product.old_price)*100)|round|int }}%<br>GIẢM</span>
+            {% endif %}
+            <img src="{{ product.image_url or url_for('static', filename='ute-mall.svg') }}" alt="{{ product.name }}" loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='ute-mall.svg') }}'">
+        </div>
+        <div class="mall-product-body">
+            <div class="mall-product-name">{% if product.seller_shop and product.seller_shop.is_verified %}<span class="mall-shop-label">Mall</span>{% endif %}{{ product.name }}</div>
+            <div class="mall-price-row"><span class="mall-price"><small>₫</small>{{ "{:,.0f}".format(product.price)|replace(',', '.') }}</span><span class="mall-sold">Đã bán {{ product.sold_count or 0 }}</span></div>
+            <div class="mall-product-meta"><span class="mall-rating {{ 'neutral' if not product.rating_count else '' }}">{% if product.rating_count %}★ {{ '%.1f'|format(product.rating or 0) }} ({{ product.rating_count }}){% else %}Chưa có đánh giá{% endif %}</span><span>{{ product.location or (product.seller_shop.location if product.seller_shop else 'TP. Hồ Chí Minh') }}</span></div>
+        </div>
+    </a>
+</div>

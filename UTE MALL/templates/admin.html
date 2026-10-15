@@ -1,0 +1,1782 @@
+{% extends 'base.html' %}
+{% block title %}Trang quản trị - UTE MALL{% endblock %}
+
+{% block extra_styles %}
+<style>
+/* ===== ADMIN LAYOUT ===== */
+.admin-layout {
+    display: flex;
+    min-height: calc(100vh - 72px);
+}
+
+.admin-sidebar {
+    width: 260px;
+    background: var(--primary-dark);
+    color: white;
+    padding: 1.5rem 0;
+    flex-shrink: 0;
+    position: sticky;
+    top: 72px;
+    height: calc(100vh - 72px);
+    overflow-y: auto;
+}
+
+.admin-sidebar-title {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: rgba(255,255,255,0.35);
+    padding: 0 1.25rem;
+    margin-bottom: 0.4rem;
+    margin-top: 1.25rem;
+}
+
+.admin-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.7rem 1.25rem;
+    color: rgba(255,255,255,0.65);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.2s;
+    border-left: 3px solid transparent;
+    cursor: pointer;
+}
+
+.admin-nav-link:hover,
+.admin-nav-link.active {
+    background: rgba(255,255,255,0.1);
+    color: white;
+    border-left-color: var(--gold);
+}
+
+.admin-nav-link .material-symbols-outlined { font-size: 1.1rem; }
+
+.admin-main {
+    flex: 1;
+    padding: 2rem;
+    overflow-x: auto;
+    background: #f0f2f5;
+    min-height: calc(100vh - 72px);
+}
+
+/* ===== PAGE HEADER ===== */
+.admin-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.75rem;
+}
+
+.admin-header h1 {
+    font-family: inherit;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--text);
+}
+
+/* ===== KPI CARDS ===== */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.25rem;
+    margin-bottom: 1.75rem;
+}
+
+.stat-card {
+    background: white;
+    border-radius: 16px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+    overflow: hidden;
+}
+
+.stat-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 0 0 16px 16px;
+}
+.stat-card.green::after { background: #10b981; }
+.stat-card.blue::after  { background: #3b82f6; }
+.stat-card.purple::after{ background: #8b5cf6; }
+.stat-card.amber::after { background: #f59e0b; }
+
+.stat-card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,0.1); }
+
+.stat-icon {
+    width: 52px; height: 52px;
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem; flex-shrink: 0;
+}
+
+.stat-info h3 {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.4rem;
+}
+
+.stat-info .num {
+    font-size: 1.7rem;
+    font-weight: 800;
+    color: var(--text);
+    line-height: 1;
+}
+
+.stat-info .sub {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.3rem;
+}
+
+.stat-info .sub.up   { color: #10b981; }
+.stat-info .sub.down { color: #ef4444; }
+
+/* ===== SECTION CARDS ===== */
+.admin-section {
+    background: white;
+    border-radius: 16px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    margin-bottom: 1.5rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.admin-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.25rem;
+    gap: 1rem;
+}
+
+.admin-section-header h2 {
+    font-weight: 700;
+    font-size: 1rem;
+    display: flex; align-items: center; gap: 0.5rem;
+}
+
+/* ===== CHARTS GRID ===== */
+.charts-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.chart-wrapper {
+    background: white;
+    border-radius: 16px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.chart-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 1.25rem;
+    color: var(--text);
+    display: flex; align-items: center; gap: 0.5rem;
+}
+
+/* ===== TABLE ===== */
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.admin-table th {
+    padding: 0.7rem 1rem;
+    text-align: left;
+    background: #f8fafc;
+    font-weight: 700;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    border-bottom: 2px solid var(--border);
+}
+
+.admin-table td {
+    padding: 0.9rem 1rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+
+.admin-table tbody tr:hover { background: #fafbfc; }
+.admin-table tbody tr:last-child td { border-bottom: none; }
+
+.product-row-img {
+    width: 44px; height: 52px;
+    object-fit: cover;
+    border-radius: 8px;
+    background: var(--surface2);
+}
+
+/* ===== BADGES ===== */
+.badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 50px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.badge-green    { background: #d1fae5; color: #065f46; }
+.badge-red      { background: #fee2e2; color: #dc2626; }
+.badge-yellow   { background: #fef3c7; color: #92400e; }
+.badge-blue     { background: #dbeafe; color: #1e40af; }
+.badge-purple   { background: #ede9fe; color: #5b21b6; }
+.badge-gray     { background: #f3f4f6; color: #6b7280; }
+
+/* ===== ACTION BUTTONS ===== */
+.action-btns-row { display: flex; gap: 0.4rem; }
+
+.action-btn {
+    width: 32px; height: 32px;
+    border-radius: 8px; border: none;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s; text-decoration: none;
+}
+
+.action-btn .material-symbols-outlined { font-size: 1rem; }
+.action-btn.edit   { background: #dbeafe; color: #1e40af; }
+.action-btn.delete { background: #fee2e2; color: #dc2626; }
+.action-btn.edit:hover   { background: #1e40af; color: white; }
+.action-btn.delete:hover { background: #dc2626; color: white; }
+
+/* ===== ADD PRODUCT FORM ===== */
+.quick-add-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.form-group { margin-bottom: 0; }
+
+.form-label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+    color: var(--text);
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+    width: 100%;
+    padding: 0.65rem 0.875rem;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    background: white;
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(10,92,54,0.08);
+}
+
+.quick-add-form .full-width { grid-column: 1 / -1; }
+
+/* Image upload area */
+.upload-area {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    text-align: center;
+    transition: all 0.2s;
+    cursor: pointer;
+    position: relative;
+}
+
+.upload-area:hover,
+.upload-area.dragover {
+    border-color: var(--primary);
+    background: rgba(10,92,54,0.03);
+}
+
+.upload-area input[type="file"] {
+    position: absolute; inset: 0;
+    opacity: 0; cursor: pointer; width: 100%; height: 100%;
+}
+
+.upload-preview {
+    display: none;
+    width: 80px; height: 80px;
+    object-fit: cover;
+    border-radius: 8px;
+    margin: 0 auto 0.5rem;
+}
+
+.upload-icon { font-size: 2rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+.upload-text { font-size: 0.8rem; color: var(--text-muted); }
+.upload-text strong { color: var(--primary); }
+
+/* Top products rank */
+.rank-num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 0.8rem;
+}
+.rank-1 { background: #fef3c7; color: #92400e; }
+.rank-2 { background: #f3f4f6; color: #374151; }
+.rank-3 { background: #fde8d8; color: #9a3412; }
+.rank-4, .rank-5 { background: #f3f4f6; color: #6b7280; }
+
+/* Status breakdown */
+.status-bar-wrap { margin-bottom: 0.75rem; }
+.status-bar-label {
+    display: flex; justify-content: space-between;
+    font-size: 0.8rem; margin-bottom: 0.25rem;
+}
+.status-bar-track {
+    height: 6px; border-radius: 3px;
+    background: #f3f4f6; overflow: hidden;
+}
+.status-bar-fill {
+    height: 100%; border-radius: 3px;
+    transition: width 1s ease;
+}
+
+/* Order status select */
+.status-select {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+@media (max-width: 1200px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .charts-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 1024px) {
+    .admin-sidebar { display: none; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+    .stats-grid { grid-template-columns: 1fr; }
+    .quick-add-form { grid-template-columns: 1fr; }
+    .admin-main { padding: 1rem; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="admin-layout">
+    <!-- SIDEBAR -->
+    <aside class="admin-sidebar">
+        <div style="padding:1rem 1.25rem; border-bottom:1px solid rgba(255,255,255,0.08); margin-bottom:0.5rem">
+            <div style="font-weight:700; color:white; font-size:0.95rem">Admin Panel</div>
+            <div style="font-size:0.78rem; color:rgba(255,255,255,0.45)">{{ current_user.username }}</div>
+        </div>
+
+        <div class="admin-sidebar-title">Quản lý</div>
+        <a href="#" class="admin-nav-link active" id="nav-overview" onclick="showTab('overview', this); return false;">
+            <span class="material-symbols-outlined">dashboard</span> Tổng quan
+        </a>
+        <a href="#" class="admin-nav-link" id="nav-analytics" onclick="showTab('analytics', this); return false;">
+            <span class="material-symbols-outlined">bar_chart</span> Phân tích
+        </a>
+        <a href="#" class="admin-nav-link" id="nav-products" onclick="showTab('products', this); return false;">
+            <span class="material-symbols-outlined">inventory_2</span> Sản phẩm
+        </a>
+        <a href="#" class="admin-nav-link" id="nav-orders" onclick="showTab('orders', this); return false;">
+            <span class="material-symbols-outlined">receipt_long</span> Đơn hàng
+        </a>
+        <a href="#" class="admin-nav-link" id="nav-contacts" onclick="showTab('contacts', this); return false;">
+            <span class="material-symbols-outlined">mail</span> Liên hệ
+        </a>
+        <a href="#" class="admin-nav-link" id="nav-marketing" onclick="showTab('marketing', this); return false;">
+            <span class="material-symbols-outlined">campaign</span> Marketing
+        </a>
+
+        <div class="admin-sidebar-title">Hệ thống</div>
+        <a href="{{ url_for('index') }}" class="admin-nav-link">
+            <span class="material-symbols-outlined">home</span> Về trang chủ
+        </a>
+        <a href="{{ url_for('logout') }}" class="admin-nav-link">
+            <span class="material-symbols-outlined">logout</span> Đăng xuất
+        </a>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="admin-main">
+
+        <!-- ========== TAB: TỔNG QUAN ========== -->
+        <div id="tab-overview">
+            <div class="admin-header">
+                <h1>Tổng quan</h1>
+                <span style="font-size:0.875rem; color:var(--text-muted)">
+                    <span class="material-symbols-outlined" style="font-size:1rem;vertical-align:middle">calendar_today</span>
+                    {{ now.strftime('%d/%m/%Y') }}
+                </span>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card green">
+                    <div class="stat-icon" style="background:#ecfdf5"><span class="material-symbols-outlined" style="color:#10b981">inventory_2</span></div>
+                    <div class="stat-info">
+                        <h3>Sản phẩm</h3>
+                        <div class="num">{{ products_count }}</div>
+                        <div class="sub">trong kho</div>
+                    </div>
+                </div>
+                <div class="stat-card blue">
+                    <div class="stat-icon" style="background:#eff6ff"><span class="material-symbols-outlined" style="color:#3b82f6">group</span></div>
+                    <div class="stat-info">
+                        <h3>Thành viên</h3>
+                        <div class="num">{{ users_count }}</div>
+                        <div class="sub">đã đăng ký</div>
+                    </div>
+                </div>
+                <div class="stat-card purple">
+                    <div class="stat-icon" style="background:#f5f3ff"><span class="material-symbols-outlined" style="color:#8b5cf6">receipt_long</span></div>
+                    <div class="stat-info">
+                        <h3>Tổng đơn hàng</h3>
+                        <div class="num">{{ analytics.orders_count }}</div>
+                        <div class="sub up">+{{ analytics.orders_today }} hôm nay</div>
+                    </div>
+                </div>
+                <div class="stat-card amber">
+                    <div class="stat-icon" style="background:#fffbeb"><span class="material-symbols-outlined" style="color:#f59e0b">payments</span></div>
+                    <div class="stat-info">
+                        <h3>Doanh thu</h3>
+                        <div class="num" style="font-size:1.2rem">{{ "{:,.0f}".format(analytics.total_revenue / 1000)|replace(',', '.') }}K</div>
+                        <div class="sub up">+{{ "{:,.0f}".format(analytics.revenue_today / 1000)|replace(',', '.') }}K hôm nay</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick charts -->
+            <div class="charts-grid">
+                <div class="chart-wrapper">
+                    <div class="chart-title">
+                        <span class="material-symbols-outlined" style="color:var(--primary)">show_chart</span>
+                        Doanh thu 7 ngày qua
+                    </div>
+                    <canvas id="revenueChart" height="120"></canvas>
+                </div>
+                <div class="chart-wrapper">
+                    <div class="chart-title">
+                        <span class="material-symbols-outlined" style="color:#8b5cf6">donut_large</span>
+                        Phân bổ theo danh mục
+                    </div>
+                    <canvas id="categoryChart" height="160"></canvas>
+                </div>
+            </div>
+
+            <!-- Recent contacts -->
+            <div class="admin-section">
+                <div class="admin-section-header">
+                    <h2><span class="material-symbols-outlined">mail</span> Liên hệ gần đây</h2>
+                    <a href="#" onclick="showTab('contacts', document.getElementById('nav-contacts')); return false;" style="font-size:0.8rem; color:var(--primary);">Xem tất cả →</a>
+                </div>
+                {% if contacts %}
+                <table class="admin-table">
+                    <thead><tr><th>Tên</th><th>Email</th><th>Tin nhắn</th><th>Thời gian</th></tr></thead>
+                    <tbody>
+                        {% for contact in contacts[:5] %}
+                        <tr>
+                            <td><strong>{{ contact.name }}</strong></td>
+                            <td>{{ contact.email }}</td>
+                            <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ contact.message }}</td>
+                            <td style="white-space:nowrap;color:var(--text-muted);font-size:0.8rem">{{ contact.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div style="text-align:center;padding:2rem;color:var(--text-muted)">Chưa có email liên hệ nào.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- ========== TAB: ANALYTICS ========== -->
+        <div id="tab-analytics" style="display:none">
+            <div class="admin-header">
+                <h1>Phân tích kinh doanh</h1>
+                <span style="font-size:0.875rem;color:var(--text-muted)">Dữ liệu realtime</span>
+            </div>
+
+            <!-- KPI Row -->
+            <div class="stats-grid">
+                <div class="stat-card amber">
+                    <div class="stat-icon" style="background:#fffbeb"><span class="material-symbols-outlined" style="color:#f59e0b">monetization_on</span></div>
+                    <div class="stat-info">
+                        <h3>Tổng doanh thu</h3>
+                        <div class="num" style="font-size:1.15rem">{{ "{:,.0f}".format(analytics.total_revenue)|replace(',', '.') }}đ</div>
+                        <div class="sub">toàn thời gian</div>
+                    </div>
+                </div>
+                <div class="stat-card green">
+                    <div class="stat-icon" style="background:#ecfdf5"><span class="material-symbols-outlined" style="color:#10b981">trending_up</span></div>
+                    <div class="stat-info">
+                        <h3>Doanh thu tháng này</h3>
+                        <div class="num" style="font-size:1.1rem">{{ "{:,.0f}".format(analytics.revenue_month)|replace(',', '.') }}đ</div>
+                        <div class="sub up">{{ analytics.orders_month }} đơn hàng</div>
+                    </div>
+                </div>
+                <div class="stat-card blue">
+                    <div class="stat-icon" style="background:#eff6ff"><span class="material-symbols-outlined" style="color:#3b82f6">today</span></div>
+                    <div class="stat-info">
+                        <h3>Doanh thu hôm nay</h3>
+                        <div class="num" style="font-size:1.1rem">{{ "{:,.0f}".format(analytics.revenue_today)|replace(',', '.') }}đ</div>
+                        <div class="sub up">{{ analytics.orders_today }} đơn hàng</div>
+                    </div>
+                </div>
+                <div class="stat-card purple">
+                    <div class="stat-icon" style="background:#f5f3ff"><span class="material-symbols-outlined" style="color:#8b5cf6">receipt_long</span></div>
+                    <div class="stat-info">
+                        <h3>Giá trị TB/đơn</h3>
+                        <div class="num" style="font-size:1.1rem">
+                            {% if analytics.orders_count > 0 %}
+                            {{ "{:,.0f}".format(analytics.total_revenue / analytics.orders_count)|replace(',', '.') }}đ
+                            {% else %}—{% endif %}
+                        </div>
+                        <div class="sub">average order value</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="charts-grid">
+                <div class="chart-wrapper">
+                    <div class="chart-title">
+                        <span class="material-symbols-outlined" style="color:var(--primary)">show_chart</span>
+                        Doanh thu 7 ngày qua (VNĐ)
+                    </div>
+                    <canvas id="revenueChart2" height="120"></canvas>
+                </div>
+                <div class="chart-wrapper">
+                    <div class="chart-title">
+                        <span class="material-symbols-outlined" style="color:#8b5cf6">pie_chart</span>
+                        Doanh thu theo danh mục
+                    </div>
+                    <canvas id="categoryChart2" height="160"></canvas>
+                </div>
+            </div>
+
+            <div class="charts-grid">
+                <div class="chart-wrapper">
+                    <div class="chart-title">
+                        <span class="material-symbols-outlined" style="color:#3b82f6">bar_chart</span>
+                        Số đơn hàng 30 ngày qua
+                    </div>
+                    <canvas id="ordersChart" height="120"></canvas>
+                </div>
+                <div class="chart-wrapper">
+                    <div class="chart-title">
+                        <span class="material-symbols-outlined" style="color:#f59e0b">donut_small</span>
+                        Trạng thái đơn hàng
+                    </div>
+                    <!-- Status breakdown -->
+                    {% set total_orders = analytics.orders_count if analytics.orders_count > 0 else 1 %}
+                    {% set statuses = [
+                        ('Chờ xử lý', analytics.status_counts.pending, '#f59e0b'),
+                        ('Đã thanh toán', analytics.status_counts.paid, '#3b82f6'),
+                        ('Đang giao', analytics.status_counts.shipped, '#8b5cf6'),
+                        ('Hoàn thành', analytics.status_counts.delivered, '#10b981'),
+                        ('Đã huỷ', analytics.status_counts.cancelled, '#ef4444')
+                    ] %}
+                    {% for label, count, color in statuses %}
+                    <div class="status-bar-wrap">
+                        <div class="status-bar-label">
+                            <span style="color:var(--text);font-weight:500">{{ label }}</span>
+                            <span style="color:var(--text-muted)">{{ count }} ({{ "{:.0f}".format(count / total_orders * 100) }}%)</span>
+                        </div>
+                        <div class="status-bar-track">
+                            <div class="status-bar-fill" style="width:{{ (count / total_orders * 100)|round }}%;background:{{ color }}"></div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Top products -->
+            <div class="admin-section">
+                <div class="admin-section-header">
+                    <h2><span class="material-symbols-outlined">emoji_events</span> Top 5 sản phẩm bán chạy</h2>
+                </div>
+                {% if analytics.top_products %}
+                <table class="admin-table">
+                    <thead><tr><th>Hạng</th><th>Sản phẩm</th><th>Đã bán</th><th>Doanh thu</th></tr></thead>
+                    <tbody>
+                        {% for i, p in analytics.top_products|enumerate %}
+                        <tr>
+                            <td><span class="rank-num rank-{{ i+1 }}">{{ i+1 }}</span></td>
+                            <td><strong>{{ p.name }}</strong></td>
+                            <td>{{ p.sold }} sản phẩm</td>
+                            <td style="color:var(--primary);font-weight:700">{{ "{:,.0f}".format(p.revenue)|replace(',', '.') }}đ</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div style="text-align:center;padding:2rem;color:var(--text-muted)">
+                    <span class="material-symbols-outlined" style="font-size:2.5rem;display:block;margin-bottom:0.5rem">shopping_bag</span>
+                    Chưa có dữ liệu đơn hàng. Hãy thêm đơn hàng để xem thống kê.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- ========== TAB: SẢN PHẨM ========== -->
+        <div id="tab-products" style="display:none">
+            <div class="admin-header">
+                <h1>Quản lý sản phẩm</h1>
+            </div>
+
+            <!-- ADD PRODUCT FORM -->
+            <div class="admin-section">
+                <div class="admin-section-header">
+                    <h2><span class="material-symbols-outlined">add_circle</span> Thêm sản phẩm mới</h2>
+                </div>
+                <form action="{{ url_for('admin_add_product') }}" method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="quick-add-form">
+                        <div class="form-group">
+                            <label class="form-label">Tên sản phẩm *</label>
+                            <input type="text" name="name" class="form-input" placeholder="VD: Áo Sơ Mi Oxford Trắng" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">SKU sản phẩm</label>
+                            <input type="text" name="sku" class="form-input" placeholder="VD: AO-SM-001 (để trống sẽ tự tạo)">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Danh mục chi tiết <span style="color:#dc2626">*</span></label>
+                            <select name="category_action" class="form-select">
+                                {% for cat in categories %}
+                                    <optgroup label="{{ cat.name }}">
+                                        <option value="{{ cat.id }}|">Xem tất cả {{ cat.name }}</option>
+                                        {% if cat.name == 'Áo' %}
+                                        <option value="{{ cat.id }}|Nam">Áo Nam</option>
+                                        <option value="{{ cat.id }}|Nữ">Áo Nữ</option>
+                                        <option value="{{ cat.id }}|Thun">Áo Thun</option>
+                                        <option value="{{ cat.id }}|Sơ mi">Áo Sơ mi</option>
+                                        <option value="{{ cat.id }}|Khoác">Áo Khoác</option>
+                                        {% elif cat.name == 'Quần' %}
+                                        <option value="{{ cat.id }}|Nam">Quần Nam</option>
+                                        <option value="{{ cat.id }}|Nữ">Quần Nữ</option>
+                                        <option value="{{ cat.id }}|Dài">Quần Dài / Jeans</option>
+                                        <option value="{{ cat.id }}|Short">Quần Short / Lửng</option>
+                                        {% elif cat.name == 'Váy' %}
+                                        <option value="{{ cat.id }}|Đầm">Đầm</option>
+                                        <option value="{{ cat.id }}|Chân váy">Chân váy</option>
+                                        <option value="{{ cat.id }}|Midi">Váy Midi / Maxi</option>
+                                        {% elif cat.name == 'Phụ kiện' %}
+                                        <option value="{{ cat.id }}|Nón">Mũ / Nón</option>
+                                        <option value="{{ cat.id }}|Túi">Túi xách / Balo</option>
+                                        <option value="{{ cat.id }}|Trang sức">Trang sức</option>
+                                        {% endif %}
+                                    </optgroup>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Giá bán (đ) *</label>
+                            <input type="text" id="price_display" class="form-input" placeholder="VD: 500,000" oninput="formatPrice(this, 'price_value')" required>
+                            <input type="hidden" name="price" id="price_value" value="0">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Giá gốc (đ) — để trống nếu không sale</label>
+                            <input type="text" id="old_price_display" class="form-input" placeholder="VD: 750,000" oninput="formatPrice(this, 'old_price_value')">
+                            <input type="hidden" name="old_price" id="old_price_value" value="">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Tồn kho <span style="color:#dc2626">*</span></label>
+                            <input type="number" name="stock" class="form-input" min="0" value="100" required>
+                        </div>
+
+
+                        <!-- Hình ảnh tỷ lệ 1:1, ảnh bìa, video giống shopee -->
+                        <style>
+                        .shopee-sec { background:#fff; padding:1.5rem; border-radius:4px; box-shadow:0 1px 4px rgba(0,0,0,0.05); margin-bottom:1.5rem; grid-column: 1/-1;}
+                        .shopee-title { font-size:1.5rem; font-weight:600; margin-bottom:1.5rem; color:#333; font-family:sans-serif;}
+                        .shopee-row { margin-bottom:2rem; }
+                        .shopee-label { font-size:1rem; font-weight:600; color:#333; margin-bottom:1rem; display:flex; align-items:center; gap:4px; }
+                        .shopee-req { color:var(--primary); font-family:sans-serif; }
+                        .shopee-grid { display:flex; gap:16px; flex-wrap:wrap; }
+                        .up-box { width:96px; height:96px; border:1px dashed var(--primary); background:rgba(10,92,54,0.02); border-radius:4px; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--primary); position:relative; cursor:pointer; flex-shrink:0; transition:0.2s;}
+                        .up-box:hover { background:rgba(10,92,54,0.06); }
+                        .up-box input { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+                        .up-box .icon { font-size:2rem; }
+                        .up-box .txt { font-size:0.75rem; text-align:center; padding:0 2px; line-height:1.2; margin-top:4px;}
+                        .up-item { width:96px; height:96px; border:1px solid #d9d9d9; border-radius:4px; display:flex; align-items:center; justify-content:center; position:relative; background:#fafafa; overflow:hidden; flex-shrink:0;}
+                        .up-item img, .up-item video { width:100%; height:100%; object-fit:contain; }
+                        .up-item .del-btn { position:absolute; top:0; right:0; background:rgba(0,0,0,0.5); color:white; font-size:10px; width:20px; height:20px; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:10; border-bottom-left-radius:4px; transition:0.2s; }
+                        .up-item .del-btn:hover { background:rgba(220,38,38,0.9); }
+                        .shopee-note { font-size:0.875rem; color:#999; margin-top:0.75rem; line-height:1.5; }
+                        .shopee-note ul { margin:0; padding-left:1.2rem; }
+                        </style>
+
+                        <div class="shopee-sec">
+                            <div class="shopee-title">Thông tin cơ bản</div>
+
+                            <!-- Ảnh bìa -->
+                            <div class="shopee-row">
+                                <div class="shopee-label"><span class="shopee-req">*</span> Ảnh bìa (Ảnh chính)</div>
+                                <div style="display:flex;gap:1.5rem;align-items:flex-start">
+                                    <div class="up-box" id="coverBox">
+                                        <span class="material-symbols-outlined icon">add_photo_alternate</span>
+                                        <span class="txt">(0/1)</span>
+                                        <input type="file" name="image_file" accept="image/*" onchange="handleShopeeCover(this)">
+                                    </div>
+                                    <div class="shopee-note" style="margin-top:0;flex:1">
+                                        <ul>
+                                            <li>Tải lên hình ảnh tỷ lệ 1:1.</li>
+                                            <li>Ảnh bìa sẽ được hiển thị tại các trang Kết quả tìm kiếm, Gợi ý hôm nay,...</li>
+                                            <li>Việc sử dụng hình ảnh sắc nét, đẹp sẽ thu hút thêm lượt truy cập.</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Ảnh sản phẩm -->
+                            <div class="shopee-row">
+                                <div class="shopee-label"><span class="shopee-req">*</span> Hình ảnh sản phẩm</div>
+                                <div style="display:flex;align-items:center;gap:1.5rem;margin-bottom:1rem;font-size:0.875rem;color:#333">
+                                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" checked name="ratio" style="accent-color:var(--primary);width:16px;height:16px"> Hình ảnh tỷ lệ 1:1</label>
+                                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="ratio" style="accent-color:var(--primary);width:16px;height:16px"> Hình ảnh tỷ lệ 3:4</label>
+                                </div>
+                                <div class="shopee-grid" style="align-items:center">
+                                    <div class="up-box" id="btnImages">
+                                        <span class="material-symbols-outlined icon">image</span>
+                                        <span class="txt" id="txtImageCount">Thêm hình<br>ảnh (0/8)</span>
+                                        <input type="file" name="image_files" id="multiImageInput" accept="image/*" multiple onchange="handleShopeeImages(this)">
+                                    </div>
+                                    <div id="shopeeImagePreview" style="display:contents;"></div>
+                                </div>
+                                <div class="shopee-note">
+                                    Mọi hình ảnh tải lên sẽ tuân thủ với tiêu chuẩn quy định của nền tảng của chúng tôi. Chúng tôi tự động chống sao chép và đóng dấu bản quyền cho các hình ảnh. Bạn có thể thay đổi thiết lập trong Cài đặt thông tin điểm bán.
+                                </div>
+                            </div>
+
+                            <!-- Video -->
+                            <div class="shopee-row" style="margin-bottom:0">
+                                <div class="shopee-label">Video sản phẩm</div>
+                                <div style="display:flex;gap:1.5rem;align-items:flex-start">
+                                    <div class="up-box" id="videoBox" style="border-color:#d9d9d9;color:var(--primary)">
+                                        <span class="material-symbols-outlined icon" style="color:var(--primary)">video_file</span>
+                                        <span class="txt">Thêm video</span>
+                                        <input type="file" name="video_file" accept="video/*" onchange="handleShopeeVideo(this)">
+                                    </div>
+                                    <div class="shopee-note" style="margin-top:0;flex:1">
+                                        <ul>
+                                            <li>Size: Max 50MB, resolution should not less than 1x1px</li>
+                                            <li>Độ dài: 10s-60s</li>
+                                            <li>Định dạng: MP4, MOV, AVI</li>
+                                            <li>Lưu ý: sản phẩm có thể hiển thị trong khi video đang được xử lý. Video sẽ tự động hiển thị sau khi đã xử lý thành công.</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+
+
+                        <!-- Description -->
+                        <div class="form-group full-width">
+                            <label class="form-label">Mô tả sản phẩm</label>
+                            <textarea name="description" class="form-textarea" rows="4"
+                                placeholder="Mô tả chi tiết sản phẩm: chất liệu, kiểu dáng, tính năng nổi bật, hướng dẫn bảo quản...
+VD: Áo sơ mi Oxford cao cấp, chất liệu cotton 100% thoáng mát, form regular fit phù hợp mọi vóc dáng. Thích hợp đi làm, đi chơi. Máy giặt ở nhiệt độ thường."></textarea>
+                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.35rem">
+                                💡 Mô tả càng chi tiết → khách hàng càng tin tưởng → tỉ lệ chuyển đổi cao hơn
+                            </div>
+                        </div>
+
+                        <div style="grid-column:1/-1;display:flex;gap:1.5rem;align-items:center;padding:0.75rem;background:#f8fafc;border-radius:10px">
+                            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.875rem;font-weight:500">
+                                <input type="checkbox" name="is_new" value="1" style="accent-color:var(--primary);width:16px;height:16px">
+                                <span class="badge badge-green">NEW</span> Sản phẩm mới
+                            </label>
+                            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.875rem;font-weight:500">
+                                <input type="checkbox" name="is_on_sale" value="1" style="accent-color:#ef4444;width:16px;height:16px">
+                                <span class="badge badge-red">SALE</span> Đang khuyến mãi
+                            </label>
+                        </div>
+
+                        <!-- SIZES SECTION -->
+                        <div class="form-group full-width" style="background:#f8fafc;border:1.5px solid #cbd5e1;border-radius:10px;padding:1.25rem;grid-column:1/-1;">
+                            <label class="form-label" style="display:flex;align-items:center;gap:0.5rem;color:#334155;font-size:0.95rem;">
+                                <span class="material-symbols-outlined" style="font-size:1.2rem">straighten</span>
+                                Kích thước / Size sản phẩm
+                            </label>
+                            <input type="text" name="sizes_input" id="sizes_input" class="form-input"
+                                placeholder="VD: S, M, L, XL, XXL  —  hoặc: 30, 32, 34  —  hoặc: One Size"
+                                style="margin-bottom:0.75rem;border-color:#cbd5e1">
+                            <div style="font-size:0.8rem;color:#475569;line-height:1.7;padding-left:0.25rem;">
+                                💡 <strong>Nhập các size cách nhau bởi dấu phẩy.</strong><br>
+                                • Thời trang: <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace;color:#334155;border:1px solid #e2e8f0">S, M, L, XL, XXL</code><br>
+                                • Quần: <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace;color:#334155;border:1px solid #e2e8f0">28, 30, 32, 34, 36</code><br>
+                                • Phụ kiện/Mắt kính: <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace;color:#334155;border:1px solid #e2e8f0">One Size</code><br>
+                                • Giày: <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace;color:#334155;border:1px solid #e2e8f0">38, 39, 40, 41, 42, 43</code><br>
+                                <span style="display:inline-block;margin-top:0.25rem;color:#64748b;font-style:italic">• (Để trống nếu sản phẩm không cần chọn size)</span>
+                            </div>
+                            <!-- Quick fill buttons -->
+                            <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:1rem;align-items:center;">
+                                <span style="font-size:0.8rem;color:#475569;font-weight:600;margin-right:0.25rem;">Điền nhanh:</span>
+                                <button type="button" onclick="fillSizes('XS, S, M, L, XL, XXL')" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='#e2e8f0';this.style.borderColor='#94a3b8'" onmouseout="this.style.background='#f1f5f9';this.style.borderColor='#cbd5e1'">Áo (XS→XXL)</button>
+                                <button type="button" onclick="fillSizes('S, M, L, XL, XXL')" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='#e2e8f0';this.style.borderColor='#94a3b8'" onmouseout="this.style.background='#f1f5f9';this.style.borderColor='#cbd5e1'">Áo (S→XXL)</button>
+                                <button type="button" onclick="fillSizes('28, 30, 32, 34, 36, 38')" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='#e2e8f0';this.style.borderColor='#94a3b8'" onmouseout="this.style.background='#f1f5f9';this.style.borderColor='#cbd5e1'">Quần (28→38)</button>
+                                <button type="button" onclick="fillSizes('36, 37, 38, 39, 40, 41, 42, 43')" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='#e2e8f0';this.style.borderColor='#94a3b8'" onmouseout="this.style.background='#f1f5f9';this.style.borderColor='#cbd5e1'">Giày (36→43)</button>
+                                <button type="button" onclick="fillSizes('One Size')" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='#e2e8f0';this.style.borderColor='#94a3b8'" onmouseout="this.style.background='#f1f5f9';this.style.borderColor='#cbd5e1'">One Size</button>
+                                <button type="button" onclick="fillSizes('')" style="background:#fee2e2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s;margin-left:auto" onmouseover="this.style.background='#fecaca';this.style.borderColor='#f87171'" onmouseout="this.style.background='#fee2e2';this.style.borderColor='#fca5a5'">Xóa trống</button>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="margin-top:1.25rem">
+                        <span class="material-symbols-outlined" style="font-size:1rem">add</span>
+                        Thêm sản phẩm
+                    </button>
+                </form>
+            </div>
+
+            <!-- PRODUCT LIST -->
+            <div class="admin-section">
+                <div class="admin-section-header">
+                    <h2><span class="material-symbols-outlined">inventory_2</span> Danh sách sản phẩm ({{ products_count }})</h2>
+                </div>
+                <div style="overflow-x:auto">
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>Ảnh</th>
+                                <th>Tên sản phẩm</th>
+                                <th>Danh mục</th>
+                                <th>Giá</th>
+                                <th>Mô tả</th>
+                                <th>Trạng thái</th>
+                                <th>Thao tác</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for product in products %}
+                            <tr>
+                                <td>
+                                    {% if product.image_url %}
+                                    <img src="{{ product.image_url }}" alt="{{ product.name }}" class="product-row-img">
+                                    {% else %}
+                                    <div class="product-row-img" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center">
+                                        <span class="material-symbols-outlined" style="color:#9ca3af;font-size:1.2rem">image</span>
+                                    </div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <strong>{{ product.name }}</strong><br>
+                                    <span style="font-size:0.75rem;color:var(--text-muted)">SKU: {{ product.sku or ('UTE-' ~ product.id) }} · {{ product.variants|length }} biến thể</span>
+                                </td>
+                                <td>{{ product.category.name if product.category else '-' }}</td>
+                                <td>
+                                    <strong style="color:var(--primary)">{{ "{:,.0f}".format(product.price)|replace(',', '.') }}đ</strong>
+                                    {% if product.old_price %}
+                                    <br><span style="text-decoration:line-through;font-size:0.75rem;color:var(--text-muted)">{{ "{:,.0f}".format(product.old_price)|replace(',', '.') }}đ</span>
+                                    {% endif %}
+                                </td>
+                                <td style="max-width:200px">
+                                    {% if product.description %}
+                                    <span style="font-size:0.8rem;color:var(--text-muted);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">
+                                        {{ product.description[:80] }}{% if product.description|length > 80 %}...{% endif %}
+                                    </span>
+                                    {% else %}
+                                    <span style="font-size:0.75rem;color:#d1d5db;font-style:italic">Chưa có mô tả</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if product.is_new %}<span class="badge badge-green">New</span> {% endif %}
+                                    {% if product.is_on_sale %}<span class="badge badge-red">Sale</span> {% endif %}
+                                    {% if not product.is_new and not product.is_on_sale %}<span class="badge badge-gray">Thường</span>{% endif %}
+                                </td>
+                                <td>
+                                    <div class="action-btns-row">
+                                        <a href="{{ url_for('product_detail', product_id=product.id) }}" class="action-btn edit" title="Xem sản phẩm">
+                                            <span class="material-symbols-outlined">visibility</span>
+                                        </a>
+                                        <button type="button" class="action-btn btn-edit-product" title="Chỉnh sửa"
+                                            style="background:#dcfce7;color:#166534;border:none;cursor:pointer"
+                                            data-id="{{ product.id }}"
+                                            data-sku="{{ product.sku or '' }}"
+                                            data-name="{{ product.name|e }}"
+                                            data-price="{{ '{:.0f}'.format(product.price) }}"
+                                            data-old-price="{{ '{:.0f}'.format(product.old_price) if product.old_price else '' }}"
+                                            data-category-id="{{ product.category_id or '' }}"
+                                            data-subcategory="{{ product.subcategory or '' }}"
+                                            data-description="{{ product.description|e if product.description else '' }}"
+                                            data-is-new="{{ 'true' if product.is_new else 'false' }}"
+                                            data-is-on-sale="{{ 'true' if product.is_on_sale else 'false' }}"
+                                            data-stock="{{ product.stock or 100 }}"
+                                            data-image-url="{{ product.image_url or '' }}"
+                                            data-sizes="{{ product.sizes or '' }}">
+                                            <span class="material-symbols-outlined">edit</span>
+                                        </button>
+                                        <form method="POST" action="{{ url_for('admin_delete_product', product_id=product.id) }}" style="margin:0" onsubmit="return confirm('Xóa sản phẩm \\'{{ product.name }}\\'?')">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <button type="submit" class="action-btn delete" title="Xóa" style="border:none">
+                                                <span class="material-symbols-outlined">delete</span>
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== TAB: ĐƠN HÀNG ========== -->
+        <div id="tab-orders" style="display:none">
+            <div class="admin-header">
+                <h1>Quản lý đơn hàng</h1>
+                <span style="font-size:0.875rem;color:var(--text-muted)">{{ analytics.orders_count }} đơn hàng</span>
+            </div>
+
+            <div class="admin-section">
+                <div class="admin-section-header">
+                    <h2><span class="material-symbols-outlined">receipt_long</span> Đơn hàng gần đây</h2>
+                </div>
+                {% if analytics.recent_orders %}
+                <div style="overflow-x:auto">
+                    <table class="admin-table">
+                        <thead>
+                            <tr><th>#</th><th>Khách hàng</th><th>Tổng tiền</th><th>Thanh toán</th><th>Trạng thái</th><th>Ngày đặt</th><th>Cập nhật</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for order in analytics.recent_orders %}
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('order_detail', order_id=order.id) }}" style="font-weight:800;color:var(--text);text-decoration:none">
+                                        #{{ order.id }}
+                                    </a>
+                                </td>
+                                <td>{{ order.user.username if order.user else '—' }}</td>
+                                <td style="color:var(--primary);font-weight:700">{{ "{:,.0f}".format(order.total_amount)|replace(',', '.') }}đ</td>
+                                <td>
+                                    {% if order.payment_status == 'paid' %}
+                                        <span class="badge badge-green">Paid</span>
+                                    {% elif order.payment_status == 'initiated' %}
+                                        <span class="badge badge-blue">Initiated</span>
+                                    {% elif order.payment_status == 'failed' %}
+                                        <span class="badge badge-red">Failed</span>
+                                    {% else %}
+                                        <span class="badge badge-gray">Unpaid</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if order.status == 'pending' %}<span class="badge badge-yellow">Chờ xử lý</span>
+                                    {% elif order.status == 'paid' %}<span class="badge badge-blue">Đã thanh toán</span>
+                                    {% elif order.status == 'shipped' %}<span class="badge badge-purple">Đang giao</span>
+                                    {% elif order.status == 'delivered' %}<span class="badge badge-green">Hoàn thành</span>
+                                    {% elif order.status == 'cancelled' %}<span class="badge badge-red">Đã huỷ</span>
+                                    {% endif %}
+                                </td>
+                                <td style="font-size:0.8rem;color:var(--text-muted)">{{ order.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+                                <td>
+                                    <form action="{{ url_for('admin_update_order_status', order_id=order.id) }}" method="POST" style="display:flex;gap:0.5rem;align-items:center">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <select name="status" class="status-select">
+                                            <option value="pending"   {% if order.status=='pending'   %}selected{% endif %}>Chờ xử lý</option>
+                                            <option value="paid"      {% if order.status=='paid'      %}selected{% endif %}>Thanh toán</option>
+                                            <option value="shipped"   {% if order.status=='shipped'   %}selected{% endif %}>Đang giao</option>
+                                            <option value="delivered" {% if order.status=='delivered' %}selected{% endif %}>Hoàn thành</option>
+                                            <option value="cancelled" {% if order.status=='cancelled' %}selected{% endif %}>Huỷ</option>
+                                        </select>
+                                        <button type="submit" class="action-btn edit" title="Lưu" style="width:auto;padding:0 0.5rem;font-size:0.75rem;border-radius:6px">
+                                            <span class="material-symbols-outlined">save</span>
+                                        </button>
+                                        <a href="{{ url_for('order_detail', order_id=order.id) }}" class="action-btn edit" title="Xem" style="width:auto;padding:0 0.5rem;font-size:0.75rem;border-radius:6px;text-decoration:none;display:flex;align-items:center">
+                                            <span class="material-symbols-outlined">visibility</span>
+                                        </a>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div style="text-align:center;padding:3rem;color:var(--text-muted)">
+                    <span class="material-symbols-outlined" style="font-size:3rem;display:block;margin-bottom:0.75rem;opacity:0.4">receipt_long</span>
+                    Chưa có đơn hàng nào.
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="admin-section">
+                <div class="admin-section-header">
+                    <h2><span class="material-symbols-outlined">payments</span> Lịch sử giao dịch thanh toán</h2>
+                </div>
+                {% if payment_transactions %}
+                <div style="overflow-x:auto">
+                    <table class="admin-table">
+                        <thead><tr><th>Thời gian</th><th>Đơn</th><th>Cổng</th><th>Số tiền</th><th>Ref</th><th>Trạng thái</th></tr></thead>
+                        <tbody>
+                        {% for tx in payment_transactions %}
+                            <tr>
+                                <td style="font-size:0.8rem;color:var(--text-muted)">{{ tx.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+                                <td><a href="{{ url_for('order_detail', order_id=tx.order_id) }}" style="text-decoration:none;font-weight:700;color:var(--text)">#{{ tx.order_id }}</a></td>
+                                <td>{{ tx.provider }}</td>
+                                <td>{{ "{:,.0f}".format(tx.amount)|replace(',', '.') }}đ</td>
+                                <td>{{ tx.provider_ref or '—' }}</td>
+                                <td>
+                                    {% if tx.status == 'paid' %}<span class="badge badge-green">Paid</span>
+                                    {% elif tx.status == 'failed' %}<span class="badge badge-red">Failed</span>
+                                    {% else %}<span class="badge badge-yellow">{{ tx.status }}</span>{% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div style="text-align:center;padding:2rem;color:var(--text-muted)">Chưa có giao dịch thanh toán.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- ========== TAB: MARKETING ========== -->
+        <div id="tab-marketing" style="display:none">
+            <div class="admin-header">
+                <h1>Marketing & Cài đặt Voucher</h1>
+                <p style="color:var(--text-muted); margin-top:0.5rem">Thiết lập và quản lý các chương trình khuyến mãi cho khách hàng.</p>
+            </div>
+
+            <div style="margin-bottom:2rem; background: #fff; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.03);">
+                <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.5rem; color: var(--text)">
+                    <span class="material-symbols-outlined" style="color: var(--primary)">loyalty</span> Tạo Voucher Khuyến Mãi Mới
+                </div>
+
+                <form method="POST" action="{{ url_for('admin_add_coupon') }}" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div style="grid-column: 1 / -1; padding: 1.5rem; background: #fafafa; border: 1px solid #eee; border-radius: 8px;">
+                        <h3 style="font-size: 1rem; margin-bottom: 1rem; color: #333;">1. Thông tin cơ bản</h3>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                            <div class="form-group" style="margin:0">
+                                <label class="form-label">Mã nhập (Hiển thị cho khách)</label>
+                                <input class="form-input" name="code" placeholder="VD: SUMMER10" style="text-transform: uppercase" required>
+                            </div>
+                            <div class="form-group" style="margin:0">
+                                <label class="form-label">Hình thức giảm giá</label>
+                                <select class="form-select" name="coupon_type">
+                                    <option value="percent">Giảm theo tỷ lệ phần trăm (%)</option>
+                                    <option value="fixed">Giảm số tiền cố định (đ)</option>
+                                    <option value="shipping">Miễn phí / Giảm ship (đ)</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin:0">
+                                <label class="form-label">Mức giảm định lượng</label>
+                                <input class="form-input" type="number" min="1" name="value" placeholder="VD: 10 (cho 10%) hoặc 50000 (đ)" required>
+                            </div>
+                            <div class="form-group" style="margin:0">
+                                <label class="form-label">Điều kiện: Đơn hàng tối thiểu (đ)</label>
+                                <input class="form-input" type="number" min="0" name="min_subtotal" value="0" placeholder="0 nếu áp dụng mọi đơn">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="grid-column: 1 / -1; padding: 1.5rem; background: #fafafa; border: 1px solid #eee; border-radius: 8px;">
+                        <h3 style="font-size: 1rem; margin-bottom: 1rem; color: #333;">2. Giới hạn & Lịch trình</h3>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                            <div class="form-group" style="margin:0">
+                                <label class="form-label">Tổng số lượt người có thể sử dụng</label>
+                                <input class="form-input" type="number" min="1" name="max_uses" placeholder="VD: 100. (Bỏ trống nếu không giới hạn)">
+                            </div>
+                            <div class="form-group" style="margin:0">
+                                <label class="form-label">Thời hạn sử dụng kết thúc vào</label>
+                                <input class="form-input" type="datetime-local" name="expires_at">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="grid-column: 1 / -1; display:flex; justify-content:flex-end">
+                        <button class="btn btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; display:flex; gap:8px" type="submit">
+                            <span class="material-symbols-outlined">add_circle</span> Lưu & Phát Hành Voucher
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div style="background: #fff; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.03);">
+                <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.5rem; color: var(--text)">
+                    <span class="material-symbols-outlined" style="color: var(--primary)">local_offer</span> Danh Sách Quản Lý
+                </div>
+                {% if coupons %}
+                <table class="admin-table">
+                    <thead><tr><th>Mã Voucher</th><th>Loại</th><th>Mức giảm</th><th>Đơn thấp nhất</th><th>Lượt tải/dùng</th><th>Hạn kết thúc</th><th>Thao tác</th></tr></thead>
+                    <tbody>
+                    {% for c in coupons %}
+                    <tr>
+                        <td><strong style="color:var(--primary); font-size:1.1rem">{{ c.code }}</strong></td>
+                        <td>
+                            {% if c.coupon_type == 'percent' %}<span style="background:#e0f2fe;color:#0284c7;padding:4px 8px;border-radius:4px;font-size:0.8rem">Phần trăm</span>
+                            {% elif c.coupon_type == 'fixed' %}<span style="background:#fef08a;color:#854d0e;padding:4px 8px;border-radius:4px;font-size:0.8rem">Tiền mặt</span>
+                            {% else %}<span style="background:#dcfce7;color:#166534;padding:4px 8px;border-radius:4px;font-size:0.8rem">Freeship</span>{% endif %}
+                        </td>
+                        <td style="font-weight:600">{{ "{:,.0f}".format(c.value)|replace(',', '.') }}{% if c.coupon_type == 'percent' %}%{% else %}đ{% endif %}</td>
+                        <td>{{ "{:,.0f}".format(c.min_subtotal)|replace(',', '.') }}đ</td>
+                        <td><strong>{{ c.used_count }}</strong> {% if c.max_uses %}/ {{ c.max_uses }}{% else %}/ ∞{% endif %}</td>
+                        <td>{% if c.expires_at %}<span style="color:#e11d48;font-weight:600">{{ c.expires_at.strftime('%d/%m/%Y %H:%M') }}</span>{% else %}<span style="color:#059669">Không giới hạn</span>{% endif %}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('admin_delete_coupon', coupon_id=c.id) }}" onsubmit="return confirm('Bạn có chắc chắn muốn xóa/dừng phát hành voucher {{ c.code }} này?')">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button class="action-btn delete" type="submit" title="Gỡ Voucher"><span class="material-symbols-outlined">delete_forever</span></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div style="text-align:center;padding:3rem;color:var(--text-muted);background:#fafafa;border-radius:8px;border:1px dashed #ddd">
+                    <span class="material-symbols-outlined" style="font-size:3rem;color:#ccc;margin-bottom:1rem">sentiment_dissatisfied</span><br>
+                    Cửa hàng chưa phát hành Voucher khuyến mãi nào.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- ========== TAB: LIÊN HỆ ========== -->
+        <div id="tab-contacts" style="display:none">
+            <div class="admin-header">
+                <h1>Quản lý liên hệ</h1>
+            </div>
+            <div class="admin-section">
+                <div class="admin-section-header">
+                    <h2><span class="material-symbols-outlined">mail</span> Tất cả liên hệ ({{ contacts|length }})</h2>
+                </div>
+                {% if contacts %}
+                <table class="admin-table">
+                    <thead><tr><th>Tên</th><th>Email</th><th>Chủ đề</th><th>Nội dung</th><th>Thời gian</th></tr></thead>
+                    <tbody>
+                        {% for contact in contacts %}
+                        <tr>
+                            <td><strong>{{ contact.name }}</strong></td>
+                            <td>{{ contact.email }}</td>
+                            <td>{{ contact.subject or '—' }}</td>
+                            <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ contact.message }}</td>
+                            <td style="white-space:nowrap;font-size:0.8rem;color:var(--text-muted)">{{ contact.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div style="text-align:center;padding:2rem;color:var(--text-muted)">Chưa có liên hệ nào.</div>
+                {% endif %}
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<!-- ===== EDIT PRODUCT MODAL ===== -->
+<div id="editModal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);overflow-y:auto">
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem">
+        <div style="background:white;border-radius:18px;width:100%;max-width:700px;box-shadow:0 24px 60px rgba(0,0,0,0.2);overflow:hidden">
+            <!-- Header -->
+            <div style="background:linear-gradient(135deg,var(--primary) 0%,var(--primary-light) 100%);padding:1.5rem 2rem;display:flex;align-items:center;justify-content:space-between">
+                <div style="display:flex;align-items:center;gap:0.75rem;color:white">
+                    <span class="material-symbols-outlined" style="font-size:1.4rem">edit_square</span>
+                    <div>
+                        <div style="font-weight:700;font-size:1.05rem">Chỉnh sửa sản phẩm</div>
+                        <div id="editModalProductName" style="font-size:0.8rem;opacity:0.8;margin-top:1px"></div>
+                    </div>
+                </div>
+                <button onclick="closeEditModal()" style="background:rgba(255,255,255,0.2);border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;color:white;display:flex;align-items:center;justify-content:center">
+                    <span class="material-symbols-outlined" style="font-size:1.2rem">close</span>
+                </button>
+            </div>
+
+            <!-- Form -->
+            <form id="editProductForm" method="POST" enctype="multipart/form-data" style="padding:2rem">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem">
+                    <!-- Product Name -->
+                    <div class="form-group" style="grid-column:1/-1;margin:0">
+                        <label class="form-label">Tên sản phẩm <span style="color:#dc2626">*</span></label>
+                        <input type="text" name="name" id="edit_name" class="form-input" required>
+                    </div>
+
+                    <div class="form-group" style="grid-column:1/-1;margin:0">
+                        <label class="form-label">SKU sản phẩm</label>
+                        <input type="text" name="sku" id="edit_sku" class="form-input" placeholder="VD: AO-SM-001">
+                    </div>
+
+                    <!-- Price -->
+                    <div class="form-group" style="margin:0">
+                        <label class="form-label">Giá bán (đ) <span style="color:#dc2626">*</span></label>
+                        <input type="text" id="edit_price_display" class="form-input" required oninput="formatPrice(this, 'edit_price')">
+                        <input type="hidden" name="price" id="edit_price" value="0">
+                    </div>
+
+                    <!-- Old price -->
+                    <div class="form-group" style="margin:0">
+                        <label class="form-label">Giá gốc / gạch (đ) <span style="color:#9ca3af;font-weight:400">tuỳ chọn</span></label>
+                        <input type="text" id="edit_old_price_display" class="form-input" placeholder="Để trống nếu không có" oninput="formatPrice(this, 'edit_old_price')">
+                        <input type="hidden" name="old_price" id="edit_old_price" value="">
+                    </div>
+
+                    <!-- Category -->
+                    <div class="form-group" style="margin:0">
+                        <label class="form-label">Danh mục chi tiết<span style="color:#dc2626">*</span></label>
+                        <select name="category_action" id="edit_category_id" class="form-select" required>
+                            {% for cat in categories %}
+                                <optgroup label="{{ cat.name }}">
+                                    <option value="{{ cat.id }}|">Xem tất cả {{ cat.name }}</option>
+                                    {% if cat.name == 'Áo' %}
+                                    <option value="{{ cat.id }}|Nam">Áo Nam</option>
+                                    <option value="{{ cat.id }}|Nữ">Áo Nữ</option>
+                                    <option value="{{ cat.id }}|Thun">Áo Thun</option>
+                                    <option value="{{ cat.id }}|Sơ mi">Áo Sơ mi</option>
+                                    <option value="{{ cat.id }}|Khoác">Áo Khoác</option>
+                                    {% elif cat.name == 'Quần' %}
+                                    <option value="{{ cat.id }}|Nam">Quần Nam</option>
+                                    <option value="{{ cat.id }}|Nữ">Quần Nữ</option>
+                                    <option value="{{ cat.id }}|Dài">Quần Dài / Jeans</option>
+                                    <option value="{{ cat.id }}|Short">Quần Short / Lửng</option>
+                                    {% elif cat.name == 'Váy' %}
+                                    <option value="{{ cat.id }}|Đầm">Đầm</option>
+                                    <option value="{{ cat.id }}|Chân váy">Chân váy</option>
+                                    <option value="{{ cat.id }}|Midi">Váy Midi / Maxi</option>
+                                    {% elif cat.name == 'Phụ kiện' %}
+                                    <option value="{{ cat.id }}|Nón">Mũ / Nón</option>
+                                    <option value="{{ cat.id }}|Túi">Túi xách / Balo</option>
+                                    <option value="{{ cat.id }}|Trang sức">Trang sức</option>
+                                    {% endif %}
+                                </optgroup>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- Stock -->
+                    <div class="form-group" style="margin:0">
+                        <label class="form-label">Tồn kho <span style="color:#dc2626">*</span></label>
+                        <input type="number" name="stock" id="edit_stock" class="form-input" min="0" value="100" required>
+                    </div>
+
+                    <!-- Sizes -->
+                    <div class="form-group" style="grid-column:1/-1;margin:0;background:#f8fafc;border:1.5px solid #cbd5e1;border-radius:10px;padding:1.25rem;">
+                        <label class="form-label" style="display:flex;align-items:center;gap:0.5rem;color:#334155;font-size:0.95rem;">
+                            <span class="material-symbols-outlined" style="font-size:1.2rem">straighten</span>
+                            Kích thước / Size sản phẩm
+                        </label>
+                        <input type="text" name="sizes_input" id="edit_sizes" class="form-input"
+                            placeholder="VD: S, M, L, XL, XXL  —  hoặc: 30, 32, 34  —  hoặc: One Size"
+                            style="margin-bottom:0.75rem;border-color:#cbd5e1">
+                        <div style="font-size:0.8rem;color:#475569;line-height:1.7;padding-left:0.25rem;">
+                            💡 <strong>Nhập các size cách nhau bởi dấu phẩy.</strong><br>
+                            • Thời trang: <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace;color:#334155;border:1px solid #e2e8f0">S, M, L, XL, XXL</code><br>
+                            • Quần: <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace;color:#334155;border:1px solid #e2e8f0">28, 30, 32, 34, 36</code><br>
+                            • Phụ kiện/Mắt kính: <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace;color:#334155;border:1px solid #e2e8f0">One Size</code><br>
+                            • Giày: <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace;color:#334155;border:1px solid #e2e8f0">38, 39, 40, 41, 42, 43</code><br>
+                            <span style="display:inline-block;margin-top:0.25rem;color:#64748b;font-style:italic">• (Để trống nếu sản phẩm không cần chọn size)</span>
+                        </div>
+                        <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:1rem;align-items:center;">
+                            <span style="font-size:0.8rem;color:#475569;font-weight:600;margin-right:0.25rem;">Điền nhanh:</span>
+                            <button type="button" onclick="editFillSizes('XS, S, M, L, XL, XXL')" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='#e2e8f0';this.style.borderColor='#94a3b8'" onmouseout="this.style.background='#f1f5f9';this.style.borderColor='#cbd5e1'">Áo (XS→XXL)</button>
+                            <button type="button" onclick="editFillSizes('S, M, L, XL, XXL')" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='#e2e8f0';this.style.borderColor='#94a3b8'" onmouseout="this.style.background='#f1f5f9';this.style.borderColor='#cbd5e1'">Áo (S→XXL)</button>
+                            <button type="button" onclick="editFillSizes('28, 30, 32, 34, 36, 38')" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='#e2e8f0';this.style.borderColor='#94a3b8'" onmouseout="this.style.background='#f1f5f9';this.style.borderColor='#cbd5e1'">Quần (28→38)</button>
+                            <button type="button" onclick="editFillSizes('36, 37, 38, 39, 40, 41, 42, 43')" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='#e2e8f0';this.style.borderColor='#94a3b8'" onmouseout="this.style.background='#f1f5f9';this.style.borderColor='#cbd5e1'">Giày (36→43)</button>
+                            <button type="button" onclick="editFillSizes('One Size')" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='#e2e8f0';this.style.borderColor='#94a3b8'" onmouseout="this.style.background='#f1f5f9';this.style.borderColor='#cbd5e1'">One Size</button>
+                            <button type="button" onclick="editFillSizes('')" style="background:#fee2e2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;padding:4px 12px;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.2s;margin-left:auto" onmouseover="this.style.background='#fecaca';this.style.borderColor='#f87171'" onmouseout="this.style.background='#fee2e2';this.style.borderColor='#fca5a5'">Xóa trống</button>
+                        </div>
+                    </div>
+
+                    <!-- Description -->
+                    <div class="form-group" style="grid-column:1/-1;margin:0">
+                        <label class="form-label">Mô tả sản phẩm</label>
+                        <textarea name="description" id="edit_description" class="form-input" rows="4" style="resize:vertical" placeholder="Nhập mô tả sản phẩm..."></textarea>
+                    </div>
+
+                    <!-- Image / Hình ảnh -->
+                    <div class="form-group" style="grid-column:1/-1;margin:0;background:#f8fafc;border:1.5px solid #cbd5e1;border-radius:10px;padding:1rem">
+                        <label class="form-label">Hình ảnh sản phẩm</label>
+                        <div style="display:flex;gap:1.5rem;align-items:flex-start">
+                            <div style="width:100px;height:100px;border-radius:8px;overflow:hidden;background:#e2e8f0;flex-shrink:0;border:1px solid #cbd5e1;display:flex;align-items:center;justify-content:center">
+                                <img id="edit_image_preview" src="" alt="Preview" style="width:100%;height:100%;object-fit:cover;display:none">
+                                <span id="edit_image_placeholder" class="material-symbols-outlined" style="color:#94a3b8;font-size:2rem">image</span>
+                            </div>
+                            <div style="flex:1;display:grid;gap:0.5rem;font-size:0.875rem">
+                                <div>
+                                    <strong>Trường hợp 1: Giữ nguyên / Đổi URL Ảnh mạng</strong>
+                                    <input type="text" name="direct_image_url" id="edit_image_url" class="form-input" placeholder="Dán link ảnh (bỏ trống nếu tải file lên)" oninput="updateEditPreview(this.value)">
+                                </div>
+                                <div style="margin-top:0.5rem">
+                                    <strong>Trường hợp 2: Tải lên ảnh mới (Ghi đè)</strong>
+                                    <input type="file" id="edit_image_files" name="image_files" accept="image/*" class="form-input" style="padding:0.4rem;background:#fff" multiple onchange="handleEditFileUpload(this)">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Checkboxes -->
+                    <div style="grid-column:1/-1;display:flex;gap:2rem;padding:0.75rem;background:#f8fafc;border-radius:10px">
+                        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.875rem;font-weight:500">
+                            <input type="checkbox" id="edit_is_new" name="is_new" value="1" style="accent-color:var(--primary);width:16px;height:16px">
+                            <span class="badge badge-green">NEW</span> Sản phẩm mới
+                        </label>
+                        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.875rem;font-weight:500">
+                            <input type="checkbox" id="edit_is_on_sale" name="is_on_sale" value="1" style="accent-color:#ef4444;width:16px;height:16px">
+                            <span class="badge badge-red">SALE</span> Đang khuyến mãi
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Footer buttons -->
+                <div style="display:flex;gap:0.75rem;justify-content:flex-end;margin-top:1.75rem;padding-top:1.25rem;border-top:1px solid #f3f4f6">
+                    <button type="button" onclick="closeEditModal()" class="btn btn-outline" style="padding:0.6rem 1.5rem">Huỷ</button>
+                    <button type="submit" class="btn btn-primary" style="padding:0.6rem 1.75rem">
+                        <span class="material-symbols-outlined" style="font-size:1rem">save</span>
+                        Lưu thay đổi
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+// ===== TAB SWITCHING =====
+function showTab(tab, el) {
+    document.querySelectorAll('[id^="tab-"]').forEach(t => t.style.display = 'none');
+    document.getElementById('tab-' + tab).style.display = 'block';
+    document.querySelectorAll('.admin-nav-link').forEach(l => l.classList.remove('active'));
+    if (el) el.classList.add('active');
+}
+
+// Check URL param for initial tab
+const urlParams = new URLSearchParams(window.location.search);
+const initTab = urlParams.get('tab');
+if (initTab) {
+    const navEl = document.getElementById('nav-' + initTab);
+    showTab(initTab, navEl);
+}
+
+// ===== PRICE FORMATTING =====
+function formatPrice(input, hiddenId) {
+    let rawValue = input.value.replace(/,/g, '').replace(/[^\d]/g, '');
+    let hiddenInput = document.getElementById(hiddenId);
+    if (!rawValue) {
+        input.value = '';
+        hiddenInput.value = '';
+        return;
+    }
+    input.value = parseInt(rawValue).toLocaleString('en-US');
+    hiddenInput.value = rawValue;
+}
+
+// ===== SIZES QUICK FILL =====
+function fillSizes(val) {
+    const el = document.getElementById('sizes_input');
+    if (el) el.value = val;
+}
+
+// ===== EDIT PRODUCT MODAL =====
+function openEditModal(btn) {
+    const d = btn.dataset;
+    // Set form action
+    document.getElementById('editProductForm').action = '/admin/product/edit/' + d.id;
+    // Fill header
+    document.getElementById('editModalProductName').textContent = '#' + d.id + ' — ' + d.name;
+    // Fill fields
+    document.getElementById('edit_name').value = d.name;
+    document.getElementById('edit_sku').value = d.sku || '';
+    document.getElementById('edit_price').value = d.price;
+    document.getElementById('edit_price_display').value = parseInt(d.price).toLocaleString('en-US');
+    document.getElementById('edit_old_price').value = d.oldPrice || '';
+    if (d.oldPrice) {
+        document.getElementById('edit_old_price_display').value = parseInt(d.oldPrice).toLocaleString('en-US');
+    } else {
+        document.getElementById('edit_old_price_display').value = '';
+    }
+
+    document.getElementById('edit_stock').value = d.stock || 100;
+    document.getElementById('edit_description').value = d.description || '';
+
+    // Clear file input and load existing image URL
+    document.getElementById('edit_image_files').value = '';
+    document.getElementById('edit_image_url').value = d.imageUrl || '';
+    updateEditPreview(d.imageUrl || '');
+
+    document.getElementById('edit_is_new').checked = (d.isNew === 'true');
+    document.getElementById('edit_is_on_sale').checked = (d.isOnSale === 'true');
+
+    // Category & Subcategory matching
+    const catSelect = document.getElementById('edit_category_id');
+    const targetVal = d.categoryId + '|' + (d.subcategory || '');
+    let matched = false;
+    for (let opt of catSelect.options) {
+        if (opt.value === targetVal) {
+            opt.selected = true;
+            matched = true;
+        }
+    }
+    // Fallback to just category if exact subcategory not found
+    if (!matched) {
+        for (let opt of catSelect.options) {
+            if (opt.value === d.categoryId + '|') {
+                opt.selected = true;
+            }
+        }
+    }
+    // Sizes: parse JSON string → comma-separated
+    let sizesDisplay = '';
+    if (d.sizes) {
+        try {
+            const arr = JSON.parse(d.sizes);
+            sizesDisplay = Array.isArray(arr) ? arr.join(', ') : d.sizes;
+        } catch(e) {
+            sizesDisplay = d.sizes;
+        }
+    }
+    document.getElementById('edit_sizes').value = sizesDisplay;
+    // Show modal
+    document.getElementById('editModal').style.display = 'block';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeEditModal() {
+    document.getElementById('editModal').style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+function editFillSizes(val) {
+    document.getElementById('edit_sizes').value = val;
+}
+
+// Event delegation: listen on all edit buttons
+document.querySelectorAll('.btn-edit-product').forEach(function(btn) {
+    btn.addEventListener('click', function() { openEditModal(this); });
+});
+
+// ===== EDIT MODAL IMAGE PREVIEW =====
+function updateEditPreview(url) {
+    const preview = document.getElementById('edit_image_preview');
+    const placeholder = document.getElementById('edit_image_placeholder');
+    if (url) {
+        preview.src = url;
+        preview.style.display = 'block';
+        placeholder.style.display = 'none';
+    } else {
+        preview.src = '';
+        preview.style.display = 'none';
+        placeholder.style.display = 'block';
+    }
+}
+
+function handleEditFileUpload(input) {
+    if (input.files && input.files[0]) {
+        // Clear direct URL input if user uploads a file
+        document.getElementById('edit_image_url').value = '';
+
+        // Setup local preview
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            updateEditPreview(e.target.result);
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
+// Close modal when clicking backdrop
+document.getElementById('editModal').addEventListener('click', function(e) {
+    if (e.target === this) closeEditModal();
+});
+
+// ===== UPLOAD PREVIEW (SHOPEE STYLE) =====
+let uploadedImagesData = [];
+
+function handleShopeeCover(input) {
+    const file = input.files[0];
+    const box = document.getElementById('coverBox');
+    if (!file) return;
+
+    box.querySelectorAll('.up-item').forEach(el => el.remove());
+    box.querySelector('.icon').style.display = 'none';
+    box.querySelector('.txt').style.display = 'none';
+    box.style.border = 'none';
+    box.style.background = 'transparent';
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const div = document.createElement('div');
+        div.className = 'up-item';
+        div.style.borderStyle = 'solid';
+        div.style.position = 'absolute';
+        div.innerHTML = `
+            <img src="${e.target.result}">
+            <div class="del-btn" onclick="removeShopeeCover(event)">✕</div>
+        `;
+        box.appendChild(div);
+    };
+    reader.readAsDataURL(file);
+}
+
+function removeShopeeCover(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const box = document.getElementById('coverBox');
+    const input = box.querySelector('input[type="file"]');
+    input.value = '';
+    box.querySelectorAll('.up-item').forEach(el => el.remove());
+    box.querySelector('.icon').style.display = 'block';
+    box.querySelector('.txt').style.display = 'block';
+    box.style.border = '1px dashed var(--primary)';
+    box.style.background = 'rgba(10,92,54,0.02)';
+}
+
+function handleShopeeImages(input) {
+    const files = Array.from(input.files);
+    uploadedImagesData = uploadedImagesData.concat(files);
+
+    if (uploadedImagesData.length > 8) {
+        alert('Chỉ được chọn tối đa 8 ảnh phụ!');
+        uploadedImagesData = uploadedImagesData.slice(0, 8);
+    }
+
+    updateShopeeImagesPreview();
+}
+
+function updateShopeeImagesPreview() {
+    const container = document.getElementById('shopeeImagePreview');
+    const txtCount = document.getElementById('txtImageCount');
+    const input = document.getElementById('multiImageInput');
+
+    container.innerHTML = '';
+
+    uploadedImagesData.forEach((file, index) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const div = document.createElement('div');
+            div.className = 'up-item';
+            div.style.borderStyle = 'solid';
+            div.innerHTML = `
+                <img src="${e.target.result}">
+                <div class="del-btn" onclick="removeShopeeImage(event, ${index})">✕</div>
+            `;
+            container.appendChild(div);
+        };
+        reader.readAsDataURL(file);
+    });
+
+    txtCount.innerHTML = `Thêm hình<br>ảnh (${uploadedImagesData.length}/8)`;
+
+    const dt = new DataTransfer();
+    uploadedImagesData.forEach(file => dt.items.add(file));
+    input.files = dt.files;
+}
+
+function removeShopeeImage(e, index) {
+    e.preventDefault();
+    e.stopPropagation();
+    uploadedImagesData.splice(index, 1);
+    updateShopeeImagesPreview();
+}
+
+function handleShopeeVideo(input) {
+    const file = input.files[0];
+    const box = document.getElementById('videoBox');
+    if (!file) return;
+
+    box.querySelectorAll('.up-item').forEach(el => el.remove());
+    box.querySelector('.icon').style.display = 'none';
+    box.querySelector('.txt').style.display = 'none';
+    box.style.border = 'none';
+    box.style.background = 'transparent';
+
+    const url = URL.createObjectURL(file);
+    const div = document.createElement('div');
+    div.className = 'up-item';
+    div.style.borderStyle = 'solid';
+    div.style.position = 'absolute';
+    div.style.background = '#000';
+    div.innerHTML = `
+        <video src="${url}" controls style="width:100%;height:100%;object-fit:contain;"></video>
+        <div class="del-btn" onclick="removeShopeeVideo(event)">✕</div>
+    `;
+    box.appendChild(div);
+}
+
+function removeShopeeVideo(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const box = document.getElementById('videoBox');
+    const input = box.querySelector('input[type="file"]');
+    input.value = '';
+    box.querySelectorAll('.up-item').forEach(el => el.remove());
+    box.querySelector('.icon').style.display = 'block';
+    box.querySelector('.txt').style.display = 'block';
+    box.style.border = '1px dashed var(--primary)';
+    box.style.background = 'rgba(10,92,54,0.02)';
+}
+
+
+// ===== CHART DATA =====
+const revenueLabels = {{ analytics.labels_7days | tojson }};
+const revenueData   = {{ analytics.revenue_7days | tojson }};
+const categoryLabels= {{ analytics.category_labels | tojson }};
+const categoryData  = {{ analytics.category_data | tojson }};
+const ordersLabels  = {{ analytics.labels_30days | tojson }};
+const ordersData    = {{ analytics.orders_30days | tojson }};
+
+const chartColors = ['#0a5c36','#3b82f6','#8b5cf6','#f59e0b','#ef4444','#10b981','#ec4899'];
+
+// Revenue chart (overview tab)
+const revenueCtx = document.getElementById('revenueChart');
+if (revenueCtx) {
+    new Chart(revenueCtx, {
+        type: 'line',
+        data: {
+            labels: revenueLabels,
+            datasets: [{
+                label: 'Doanh thu (đ)',
+                data: revenueData,
+                borderColor: '#0a5c36',
+                backgroundColor: 'rgba(10,92,54,0.08)',
+                borderWidth: 2.5,
+                pointBackgroundColor: '#0a5c36',
+                pointRadius: 4,
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false }, tooltip: {
+                callbacks: { label: ctx => ctx.parsed.y.toLocaleString('vi-VN') + 'đ' }
+            }},
+            scales: {
+                y: { beginAtZero: true, ticks: { callback: v => (v/1000).toFixed(0)+'K' } }
+            }
+        }
+    });
+}
+
+// Category pie (overview)
+const catCtx = document.getElementById('categoryChart');
+if (catCtx) {
+    new Chart(catCtx, {
+        type: 'doughnut',
+        data: {
+            labels: categoryLabels.length ? categoryLabels : ['Chưa có dữ liệu'],
+            datasets: [{ data: categoryData.length ? categoryData : [1], backgroundColor: chartColors, borderWidth: 2, borderColor: '#fff' }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }
+        }
+    });
+}
+
+// Revenue chart (analytics tab)
+const revenueCtx2 = document.getElementById('revenueChart2');
+if (revenueCtx2) {
+    new Chart(revenueCtx2, {
+        type: 'bar',
+        data: {
+            labels: revenueLabels,
+            datasets: [{
+                label: 'Doanh thu',
+                data: revenueData,
+                backgroundColor: revenueData.map((_, i) => i === revenueData.length - 1 ? '#0a5c36' : 'rgba(10,92,54,0.35)'),
+                borderRadius: 6,
+                borderSkipped: false,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false }, tooltip: {
+                callbacks: { label: ctx => ctx.parsed.y.toLocaleString('vi-VN') + 'đ' }
+            }},
+            scales: {
+                y: { beginAtZero: true, ticks: { callback: v => (v/1000).toFixed(0)+'K' } }
+            }
+        }
+    });
+}
+
+// Category pie (analytics)
+const catCtx2 = document.getElementById('categoryChart2');
+if (catCtx2) {
+    new Chart(catCtx2, {
+        type: 'pie',
+        data: {
+            labels: categoryLabels.length ? categoryLabels : ['Chưa có dữ liệu'],
+            datasets: [{ data: categoryData.length ? categoryData : [1], backgroundColor: chartColors, borderWidth: 2, borderColor: '#fff' }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom', labels: { font: { size: 11 } } },
+                tooltip: { callbacks: { label: ctx => ctx.label + ': ' + ctx.parsed.toLocaleString('vi-VN') + 'đ' } }
+            }
+        }
+    });
+}
+
+// Orders bar chart (30 days)
+const ordersCtx = document.getElementById('ordersChart');
+if (ordersCtx) {
+    // Only show every 5th label to avoid clutter
+    const sparseLabels = ordersLabels.map((l, i) => i % 5 === 0 ? l : '');
+    new Chart(ordersCtx, {
+        type: 'bar',
+        data: {
+            labels: ordersLabels,
+            datasets: [{
+                label: 'Đơn hàng',
+                data: ordersData,
+                backgroundColor: 'rgba(59,130,246,0.6)',
+                borderColor: '#3b82f6',
+                borderRadius: 4,
+                borderWidth: 1,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { ticks: { callback: (_, i) => sparseLabels[i] || '' } },
+                y: { beginAtZero: true, ticks: { stepSize: 1 } }
+            }
+        }
+    });
+}
+</script>
+{% endblock %}

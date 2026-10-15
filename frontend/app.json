@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "ShipCode SellerPilot",
+    "slug": "sellerpilot",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/shipcode-logo.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/shipcode-logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Cho phép SellerPilot chọn ảnh sản phẩm để tạo bản nháp đăng bán.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "vn.sellerpilot.app",
+      "icon": "./assets/shipcode-logo.png"
+    },
+    "android": {
+      "package": "vn.sellerpilot.app"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/shipcode-logo-app.png"
+    }
+  }
+}

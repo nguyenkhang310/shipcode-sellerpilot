@@ -1,0 +1,35 @@
+const sellerPassword = process.env.QA_SELLER_PASSWORD;
+if (!sellerPassword) throw new Error('Set QA_SELLER_PASSWORD for your local QA seller account.');
+let browser;
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+(async()=>{
+ browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH || process.env.CHROME_EXECUTABLE || undefined});
+ const sc=await browser.newContext({viewport:{width:1440,height:1000}}),bc=await browser.newContext({viewport:{width:1440,height:1000}});
+ const s=await sc.newPage(),b=await bc.newPage();const errors=[],failed=[];
+ for(const p of [s,b]){p.on('pageerror',e=>errors.push(e.message));p.on('response',r=>{if(r.status()>=500&&r.url().startsWith('http://127.0.0.1:5012'))failed.push(r.url())});p.on('dialog',d=>d.accept())}
+ const root=process.env.STOREFRONT_TEST_URL || 'http://127.0.0.1:5012'; const stamp=Date.now(); const username='qa_browser_'+stamp; const name='Bàn phím UTech kiểm thử '+stamp;
+ await s.goto(root+'/login?next=/seller');await s.locator('[name=login_id]').fill('utech');await s.locator('[name=password]').fill(sellerPassword);await s.getByRole('button',{name:'ĐĂNG NHẬP',exact:true}).click();await s.waitForURL(/\/seller\/?$/);
+ await s.locator('.seller-sidebar a[href="/seller/products/new"]').click();await s.locator('[name=name]').fill(name);await s.locator('[name=sku]').fill('QAB-'+stamp);await s.locator('[name=category_id]').selectOption('4');await s.locator('[name=image_url]').fill('/static/ute-mall.svg');await s.locator('[name=price]').fill('550000');await s.locator('[name=stock]').fill('3');await s.getByRole('button',{name:'Lưu sản phẩm',exact:true}).click();await s.waitForURL('**/seller/products');
+ const row=s.locator('tr').filter({hasText:name});const productUrl=await row.getByRole('link',{name:'Xem ↗',exact:true}).getAttribute('href');console.log('PUBLISHED',productUrl);
+ await row.locator('[name=product_ids]').check();
+ await s.locator('#product-bulk [name=status]').selectOption('archived');
+ await s.locator('#product-bulk').getByRole('button',{name:'Áp dụng',exact:true}).click();
+ await s.waitForURL('**/seller/products?status=archived');
+ if((await b.request.get(root+productUrl)).status()!==404)throw Error('Bulk hide did not hide the product from buyers');
+ await s.locator('tr').filter({hasText:name}).locator('[name=product_ids]').check();
+ await s.locator('#product-bulk [name=status]').selectOption('active');
+ await s.locator('#product-bulk').getByRole('button',{name:'Áp dụng',exact:true}).click();
+ await s.waitForURL('**/seller/products?status=active');
+ if((await b.request.get(root+productUrl)).status()!==200)throw Error('Bulk publish did not restore the product');
+ console.log('BULK_VISIBILITY_OK');
+ await b.goto(root+'/register');await b.locator('[name=name]').fill(username);await b.locator('[name=email]').fill(username+'@example.test');await b.locator('[name=password]').fill('Test@2026');await b.locator('[name=confirm_password]').fill('Test@2026');await b.getByRole('button',{name:'ĐĂNG KÝ',exact:true}).click();await b.waitForURL('**/shop/utech-official');console.log('REGISTER_SHOP_OK');
+ await b.goto(root+productUrl);await b.getByRole('button',{name:'Mua ngay',exact:true}).click();await b.waitForURL('**/checkout');await b.locator('[name=shipping_name]').fill('Nguyễn Minh Anh');await b.locator('[name=shipping_phone]').fill('0901234567');await b.locator('[name=shipping_address]').fill('Địa chỉ kiểm thử UTE MALL, TP. Hồ Chí Minh');await b.getByRole('button',{name:'Tạo đơn hàng',exact:true}).click();await b.waitForURL(/\/order\/\d+$/);const oid=b.url().split('/').pop();console.log('CHECKOUT',oid);
+ await s.goto(root+'/seller/orders/'+oid);await s.getByRole('button',{name:'Xác nhận đơn',exact:true}).click();await s.waitForLoadState('networkidle');await s.getByRole('button',{name:'Giao đơn vị vận chuyển',exact:true}).click();await s.waitForLoadState('networkidle');console.log('FULFILLED_BY_SELLER');
+ await b.reload();await b.getByRole('button',{name:'Đã nhận được hàng',exact:true}).click();await b.waitForLoadState('networkidle');await b.getByRole('link',{name:'Đánh giá sản phẩm',exact:true}).click();await b.locator('textarea[name=comment]').fill('Sản phẩm đúng mô tả, kiểm thử trình duyệt thành công.');await b.locator('.review-form button[type=submit]').click();await b.waitForLoadState('networkidle');
+ await s.goto(root+'/seller/reviews');const review=s.locator('.review-item').filter({hasText:username}).filter({hasText:'kiểm thử trình duyệt thành công.'});await review.locator('[name=reply]').fill('UTech cảm ơn bạn! Hẹn gặp lại.');await review.getByRole('button',{name:'Phản hồi',exact:true}).click();await s.waitForLoadState('networkidle');await b.reload();await b.locator('.review-reply').filter({hasText:'UTech cảm ơn bạn! Hẹn gặp lại.'}).waitFor();console.log('REVIEW_REPLY_OK');
+ await b.goto(root+'/shop/utech-official');await b.getByRole('button',{name:'+ Theo dõi',exact:true}).click();await b.getByRole('button',{name:'✓ Đang theo dõi',exact:true}).waitFor();await b.getByRole('link',{name:'Chat ngay',exact:true}).click();await b.locator('[name=body]').fill('Tôi cần tư vấn sản phẩm vừa mua.');await b.getByRole('button',{name:'Gửi',exact:true}).click();await b.waitForLoadState('networkidle');
+ await s.goto(root+'/seller/inbox');await s.locator('.chat-list a').filter({hasText:username}).click();await s.locator('[name=body]').fill('UTech đã nhận được yêu cầu hỗ trợ của bạn.');await s.getByRole('button',{name:'Gửi',exact:true}).click();await s.waitForLoadState('networkidle');await b.reload();await b.getByText('UTech đã nhận được yêu cầu hỗ trợ của bạn.').waitFor();console.log('FOLLOW_CHAT_OK');
+ if(errors.length||failed.length)throw Error(JSON.stringify({errors,failed}));
+ console.log('BROWSER_E2E_OK: login, publish, register, checkout, seller fulfilment, receive, review, reply, follow, buyer/seller chat; no JS or HTTP 5xx errors');
+ await browser.close();
+})().catch(async e=>{console.error(e);if(browser)await browser.close();process.exitCode=1});

@@ -1,0 +1,15 @@
+<div class="chart-legend"><i></i>Giá trị đơn hàng <span class="muted">· Di chuột hoặc chọn điểm để xem số liệu</span></div>
+<div class="chart-container">
+  <svg class="chart" viewBox="0 0 940 260" role="group" aria-label="Biểu đồ giá trị đơn hàng, đơn vị đồng">
+    <defs><linearGradient id="chart-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ee4d2d" stop-opacity=".18"/><stop offset="1" stop-color="#ee4d2d" stop-opacity=".01"/></linearGradient></defs>
+    {% for tick in chart.ticks %}<line x1="90" y1="{{ tick.y }}" x2="900" y2="{{ tick.y }}" stroke="#e8ebef" stroke-dasharray="4 4"/><text x="78" y="{{ tick.y+5 }}" text-anchor="end" class="axis-label">{{ ('%.1ftr'|format(tick.value/1000000)) if tick.value>=1000000 else ('%.0fk'|format(tick.value/1000)) if tick.value>=1000 else '%.0f'|format(tick.value) }}</text>{% endfor %}
+    <polygon points="90,210 {{ chart.points }} 900,210" fill="url(#chart-fill)"/>
+    <polyline points="{{ chart.points }}" fill="none" stroke="#ee4d2d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    {% for sample in chart.samples %}
+    <g class="chart-point" tabindex="0" role="img" aria-label="{{ sample.label }}: {{ sample.value|vnd }}" data-chart-label="{{ sample.label }}" data-chart-value="{{ sample.value|vnd }}"><circle cx="{{ sample.x }}" cy="{{ sample.y }}" r="15" fill="transparent"/><circle class="point-dot" cx="{{ sample.x }}" cy="{{ sample.y }}" r="4" fill="white" stroke="#ee4d2d" stroke-width="2"/><title>{{ sample.label }}: {{ sample.value|vnd }}</title></g>
+    {% if loop.first or loop.last or loop.index0 % ((chart.samples|length // 6) or 1)==0 %}<text x="{{ sample.x }}" y="245" text-anchor="middle" class="axis-label">{{ sample.label }}</text>{% endif %}
+    {% endfor %}
+  </svg>
+  <div class="chart-tooltip" role="status" hidden></div>
+</div>
+<details class="chart-data"><summary>Xem bảng số liệu</summary><div class="table-wrap"><table class="data-table"><thead><tr><th>{{ 'Giờ' if chart.days==1 else 'Ngày' }}</th><th>Giá trị đơn hàng</th></tr></thead><tbody>{% for sample in chart.samples %}<tr><td>{{ sample.label }}</td><td>{{ sample.value|vnd }}</td></tr>{% endfor %}</tbody></table></div></details>

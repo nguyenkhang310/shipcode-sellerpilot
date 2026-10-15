@@ -1,0 +1,45 @@
+# Dependencies and generated bundles
+node_modules/
+.venv/
+.expo/
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
+npm-debug.log*
+.DS_Store
+
+# Machine-specific configuration and credentials
+.env
+.env.*
+!.env.example
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+frontend/ios/
+frontend/android/
+
+# Runtime databases, private uploads, mail and backups
+*.db
+*.db-shm
+*.db-wal
+*.sqlite*
+backend/data/
+UTE MALL/instance/
+UTE MALL/static/uploads/
+.local-backups/
+
+# Generated QA artifacts may contain private conversations/photos
+docs/screenshots/
+docs/evaluations/
+docs/ADVISOR_LIVE_EVALUATION.json
+# Original competition PDFs are local reference documents
+UTE SV-Startup/

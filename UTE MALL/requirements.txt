@@ -1,0 +1,13 @@
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+Flask-Migrate==4.0.7
+Flask-WTF==1.2.1
+Flask-Limiter==3.8.0
+SQLAlchemy==2.0.31
+Werkzeug==3.0.3
+Jinja2==3.1.4
+requests==2.32.3
+redis==7.0.1
+python-dotenv==1.0.1
+tzdata==2025.2; sys_platform == "win32"

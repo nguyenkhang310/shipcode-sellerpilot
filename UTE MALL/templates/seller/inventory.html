@@ -1,0 +1,17 @@
+{% extends 'seller/base.html' %}
+{% block content %}
+<div class="seller-page-heading"><div><h1>Quản lý tồn kho</h1><p>Cập nhật số lượng từng phân loại. Tồn kho được đồng bộ với gian hàng.</p></div><a class="btn" href="{{ url_for('seller.export',kind='products') }}"><span class="material-symbols-outlined">download</span>Xuất dữ liệu kho</a></div>
+<section class="panel">
+  <form class="filters" method="get"><label class="search-field">Tìm sản phẩm<input class="input" name="q" value="{{ q }}" placeholder="Tên sản phẩm hoặc mã SKU"></label><label class="check-label stock-filter"><input type="checkbox" name="low" value="1" {% if request.args.get('low')=='1' %}checked{% endif %}>Chỉ sản phẩm tồn kho ≤ 5</label><button class="btn primary">Lọc sản phẩm</button><a class="btn" href="{{ url_for('seller.inventory') }}">Đặt lại</a></form>
+  <h2 class="result-heading">{{ pagination.total }} sản phẩm</h2>
+  {% for product in pagination.items %}
+  <form method="post" class="inventory-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="product_id" value="{{ product.id }}">
+    <div class="table-product"><img src="{{ product.image_url }}" alt="" loading="lazy"><div><strong>{{ product.name }}</strong><small>SKU: {{ product.sku }}</small><small>Tổng tồn: <b>{{ product.stock }}</b>{% if product.stock<=5 %} · <span class="stock-warning">Cần nhập thêm hàng</span>{% endif %}</small></div></div>
+    <div class="inventory-variants">{% for variant in product.variants if variant.is_active %}<label><span>{{ variant.title }}<small>{{ variant.sku }}</small></span><input class="input" name="stock_{{ variant.id }}" type="number" min="0" max="1000000" value="{{ variant.stock }}" required></label>{% else %}<label>Tồn kho<input class="input" name="stock" type="number" min="0" max="1000000" value="{{ product.stock }}" required></label>{% endfor %}</div>
+    <button class="btn primary">Cập nhật kho</button>
+  </form>
+  {% else %}<div class="empty"><span class="material-symbols-outlined">inventory</span>Không có sản phẩm phù hợp.</div>{% endfor %}
+  {% include 'seller/_pagination.html' %}
+</section>
+{% endblock %}

@@ -1,0 +1,22 @@
+{
+  "name": "shipcode-sellerpilot",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace frontend",
+    "start": "npm run start --workspace frontend",
+    "ios": "npm run ios --workspace frontend",
+    "android": "npm run android --workspace frontend",
+    "web": "npm run web --workspace frontend",
+    "build": "npm run build --workspace frontend",
+    "build:ios": "npm run build:ios --workspace frontend",
+    "typecheck": "npm run typecheck --workspace frontend",
+    "test:api": "node --test frontend/tests/api-transport.cjs"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

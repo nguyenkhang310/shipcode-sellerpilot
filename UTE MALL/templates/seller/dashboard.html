@@ -1,0 +1,49 @@
+{% extends 'seller/base.html' %}
+{% block content %}
+<div class="seller-page-heading">
+  <div><h1>Tổng quan Shop</h1><p>Xin chào {{ seller_shop.name }}, cùng bắt đầu một ngày bán hàng hiệu quả.</p></div>
+  <a class="btn primary" href="{{ url_for('seller.product_new') }}"><span class="material-symbols-outlined">add</span>Thêm sản phẩm</a>
+</div>
+<div class="dashboard-layout">
+  <div class="dashboard-primary">
+    <section class="panel todo-panel">
+      <div class="panel-head"><div><h2>Danh sách cần làm</h2><p>Những việc bạn cần xử lý để shop vận hành tốt hơn</p></div><span class="material-symbols-outlined section-icon">task_alt</span></div>
+      <div class="todo-grid">
+        {% for endpoint,params,count,label in [('orders',{'status':'pending'},counts.get('pending',0),'Chờ xác nhận'),('orders',{'status':'paid'},counts.get('paid',0),'Chờ lấy hàng'),('orders',{'status':'shipped'},counts.get('shipped',0),'Đang giao'),('returns',{},seller_alerts.returns,'Trả hàng / Hoàn tiền'),('inventory',{'low':1},low_stock,'Sản phẩm sắp hết'),('products',{'status':'draft'},draft_products,'Sản phẩm nháp'),('reviews',{'unanswered':1},seller_alerts.reviews,'Đánh giá chưa trả lời'),('products',{'status':'active'},total_products,'Sản phẩm đang bán')] %}
+        <a href="{{ url_for('seller.'~endpoint,**params) }}"><b>{{ count }}</b><span>{{ label }}</span></a>
+        {% endfor %}
+      </div>
+    </section>
+    <section class="panel sales-panel">
+      <div class="panel-head"><div><h2>Phân tích bán hàng</h2><p>Giá trị và số lượng đơn không hủy / hoàn · Giờ Việt Nam</p></div><a class="text-link" href="{{ url_for('seller.analytics',days=chart.days if chart.days!=1 else 7) }}">Xem chi tiết<span class="material-symbols-outlined">chevron_right</span></a></div>
+      <div class="period-toolbar"><nav class="segmented" aria-label="Thời gian thống kê">{% for days,label in [(1,'Hôm nay'),(7,'7 ngày qua'),(30,'30 ngày qua')] %}<a href="{{ url_for('seller.dashboard',days=days) }}" class="{% if chart.days==days %}active{% endif %}" {% if chart.days==days %}aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</nav><span class="muted">{{ chart.labels[0] }} – {{ chart.labels[-1] }}{{ ' hôm nay' if chart.days==1 else '' }}</span></div>
+      <div class="sales-metrics">
+        <div class="selected"><span>Giá trị đơn hàng</span><strong>{{ chart.total|vnd }}</strong><small>Tổng giá trị trong kỳ</small></div>
+        <div><span>Đơn hàng</span><strong>{{ chart.orders }}</strong><small>Không gồm đơn hủy / hoàn</small></div>
+        <div><span>Giá trị đơn trung bình</span><strong>{{ chart.average|vnd }}</strong><small>Trên mỗi đơn hàng</small></div>
+      </div>
+      {% include 'seller/_chart.html' %}
+    </section>
+    <section class="panel">
+      <div class="panel-head"><div><h2>Công cụ quản lý Shop</h2><p>Truy cập nhanh các công việc thường dùng</p></div></div>
+      <div class="quick-tools">
+        {% for endpoint,icon,label,description in [('product_new','add_box','Đăng sản phẩm','Tạo sản phẩm và phân loại'),('marketing','confirmation_number','Mã giảm giá','Tạo ưu đãi cho khách mua'),('inventory','inventory','Quản lý tồn kho','Cập nhật số lượng hàng'),('inbox','forum','Tin nhắn khách hàng','Xem và trả lời hội thoại')] %}
+        <a href="{{ url_for('seller.'~endpoint) }}"><span class="tool-icon material-symbols-outlined">{{ icon }}</span><strong>{{ label }}</strong><span>{{ description }}</span></a>
+        {% endfor %}
+      </div>
+    </section>
+    <section class="panel recent-orders">
+      <div class="panel-head"><h2>Đơn hàng mới nhất</h2><a class="text-link" href="{{ url_for('seller.orders') }}">Tất cả đơn hàng<span class="material-symbols-outlined">chevron_right</span></a></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Đơn hàng / Người mua</th><th>Thời gian đặt</th><th>Tổng thanh toán</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>
+      {% for order in recent_orders %}<tr><td><a class="strong" href="{{ url_for('seller.order_detail',order_id=order.id) }}">#{{ order.id }}</a><small class="cell-secondary">{{ order.shipping_name }}</small></td><td>{{ order.created_at|vn_time }}</td><td class="money">{{ order.total_amount|vnd }}</td><td><span class="badge {{ order.status }}">{{ status_labels.get(order.status,order.status) }}</span></td><td><a class="table-action" href="{{ url_for('seller.order_detail',order_id=order.id) }}">Chi tiết</a></td></tr>{% else %}<tr><td colspan="5" class="empty">Chưa có đơn hàng.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+  </div>
+  <aside class="dashboard-rail" aria-label="Thông tin shop">
+    <section class="panel shop-profile-card"><div class="shop-card-cover"><span class="material-symbols-outlined">devices</span><span>UTE MALL · TECHNOLOGY</span></div><div class="shop-card-content"><span class="avatar">UT</span><span class="badge active">{{ 'Tạm nghỉ' if seller_shop.vacation_mode else 'Đang hoạt động' }}</span><h2>{{ seller_shop.name }}</h2><p>{{ seller_shop.location or 'Gian hàng công nghệ' }}</p><div class="shop-score"><div><strong>{{ '%.1f'|format(seller_shop.rating) }}<span class="stars"> ★</span></strong><span>Đánh giá shop</span></div><div><strong>{{ '{:,}'.format(seller_shop.follower_count).replace(',','.') }}</strong><span>Người theo dõi</span></div></div><a class="btn full-width" href="{{ url_for('shop_page',slug=seller_shop.slug) }}" target="_blank" rel="noopener">Xem gian hàng<span class="material-symbols-outlined">open_in_new</span></a></div></section>
+    <section class="panel today-card"><div class="panel-head"><h2>Shop hôm nay</h2><span class="live-label"><i></i>Cập nhật khi tải trang</span></div><div class="today-value">{{ today_revenue|vnd }}</div><p>Giá trị {{ today_orders }} đơn hàng hợp lệ</p><a class="text-link" href="{{ url_for('seller.finance') }}">Xem doanh thu<span class="material-symbols-outlined">arrow_forward</span></a></section>
+    <section class="panel"><div class="panel-head"><h2>Hoạt động gần đây</h2><a class="text-link" href="{{ url_for('seller.activity') }}" aria-label="Xem nhật ký hoạt động"><span class="material-symbols-outlined">arrow_forward</span></a></div><ol class="activity-timeline">{% for item in activity %}<li><span class="timeline-dot"></span><p>{{ item.action }}</p><small>{{ item.created_at|vn_time }}</small></li>{% else %}<li><p>Chưa có hoạt động. Hãy bắt đầu bằng việc thêm sản phẩm.</p></li>{% endfor %}</ol></section>
+    <a class="help-card" href="{{ url_for('policy') }}"><span class="material-symbols-outlined">support_agent</span><div><strong>Hỗ trợ người bán</strong><p>Chính sách mua bán, giao hàng và đổi trả tại UTE MALL.</p><span>Tìm hiểu thêm →</span></div></a>
+  </aside>
+</div>
+{% endblock %}
