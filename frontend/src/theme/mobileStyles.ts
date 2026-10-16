@@ -106,7 +106,6 @@ export function createMobileStyles(c: typeof LIGHT_IOS, dark: boolean, brand: ty
     sourceText: { fontSize: 11, color: muted },
     thinking: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
     thinkingText: { color: muted, fontSize: 14 },
-    followUps: { gap: 8, marginTop: 10 },
     followUp: { borderRadius: 15, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: line, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: card },
     followUpText: { flex: 1, fontSize: 13, color: ink, lineHeight: 19 },
     composerArea: { paddingHorizontal: 17, paddingTop: 10, paddingBottom: 0 },

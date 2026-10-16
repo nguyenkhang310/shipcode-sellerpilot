@@ -25,6 +25,8 @@ export const getProducts = (q = '', low = false, offset = 0, signal?: AbortSigna
 export const getOrders = (status = 'all', q = '', offset = 0, signal?: AbortSignal) => apiRequest<StorePage<StoreOrder>>('/management/orders?' + new URLSearchParams({ status, q, offset: String(offset) }), { signal });
 export const getConversations = (signal?: AbortSignal) => apiRequest<{ items: ConversationSummary[] }>('/conversations', { signal });
 export const getConversation = (id: string, signal?: AbortSignal) => apiRequest<ConversationDetail>('/conversations/' + encodeURIComponent(id), { signal });
+export const pinConversation = (id: string, isPinned: boolean) => apiRequest<{ id: string; is_pinned: boolean }>('/conversations/' + encodeURIComponent(id), { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ is_pinned: isPinned }) });
+export const deleteConversation = (id: string) => apiRequest<{ id: string; deleted: boolean }>('/conversations/' + encodeURIComponent(id), { method: 'DELETE' });
 
 export async function decidePriceProposal(
   proposalId: number,

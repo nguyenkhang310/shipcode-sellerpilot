@@ -18,12 +18,13 @@ function Scene({ active, reduceMotion, children }: { active: boolean; reduceMoti
   const { ui } = useTheme();
   const value = useRef(new Animated.Value(active ? 1 : 0)).current;
   useEffect(() => {
-    const animation = Animated.timing(value, { toValue: active ? 1 : 0, duration: reduceMotion ? 0 : 180, easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== 'web' });
+    if (!active) { value.stopAnimation(); value.setValue(0); return; }
+    const animation = Animated.timing(value, { toValue: 1, duration: reduceMotion ? 0 : 210, easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== 'web', isInteraction: false });
     animation.start(); return () => animation.stop();
   }, [active, reduceMotion, value]);
   // Only the incoming content fades over an opaque page. Crossfading both full
   // screens makes order rows show through the chat while switching tabs.
-  return <View pointerEvents={active ? 'auto' : 'none'} accessibilityElementsHidden={!active} importantForAccessibility={active ? 'auto' : 'no-hide-descendants'} aria-hidden={!active} style={[ui.scene, { zIndex: active ? 1 : 0, display: active ? 'flex' : 'none' }]}><Animated.View style={{ flex: 1, opacity: value.interpolate({ inputRange: [0, 1], outputRange: [.88, 1] }) }}>{children}</Animated.View></View>;
+  return <View pointerEvents={active ? 'auto' : 'none'} accessibilityElementsHidden={!active} importantForAccessibility={active ? 'auto' : 'no-hide-descendants'} aria-hidden={!active} style={[ui.scene, { zIndex: active ? 1 : 0, display: active ? 'flex' : 'none' }]}><Animated.View style={{ flex: 1, opacity: value, transform: [{ translateY: value.interpolate({ inputRange: [0, 1], outputRange: [5, 0] }) }] }}>{children}</Animated.View></View>;
 }
 
 export function AppShell({ darkMode, onDarkModeChange }: { darkMode: boolean; onDarkModeChange: (value: boolean) => void }) {
@@ -31,7 +32,7 @@ export function AppShell({ darkMode, onDarkModeChange }: { darkMode: boolean; on
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<MainTab>(() => initialTab() === 'assistant' ? 'assistant' : 'home');
   const [route, setRoute] = useState<ManagementRoute | null>(null);
-  const { data, days, loading, error, onDays, refresh, ensureFresh } = useManagement();
+  const { data, days, loading, error, onDays, refresh, ensureFresh } = useManagement(tab === 'home');
   const [toast, setToast] = useState(''), [reduceMotion, setReduceMotion] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [webViewportHeight, setWebViewportHeight] = useState<number | undefined>();
@@ -73,7 +74,7 @@ export function AppShell({ darkMode, onDarkModeChange }: { darkMode: boolean; on
   // otherwise frame.y already includes the top inset and an offset counts it twice.
   return <View style={ui.outer}><View style={[ui.app, webViewportHeight !== undefined && { maxHeight: webViewportHeight }]}><StatusBar style={darkMode ? 'light' : 'dark'} /><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0} style={{ flex: 1 }}><View style={{ flex: 1, paddingTop: insets.top }}>
     <TopBar tab={tab} hasTasks={Boolean(data && Object.values(data.tasks).some(value => value > 0))} onProfile={() => { Keyboard.dismiss(); setRoute({ kind: 'settings' }); }} onTasks={() => { Keyboard.dismiss(); setRoute({ kind: 'tasks' }); }} onHistory={() => { Keyboard.dismiss(); chat.current?.openHistory(); }} onNewChat={() => { Keyboard.dismiss(); chat.current?.newConversation(); }} />
-    <View style={ui.host}><Scene active={tab === 'home'} reduceMotion={reduceMotion}><DashboardScreen data={data} loading={loading} error={error} days={days} onDays={onDays} onRefresh={() => void refresh()} onOpen={setRoute} onAsk={ask} onStore={openStore} /></Scene><Scene active={tab === 'assistant'} reduceMotion={reduceMotion}><AssistantChat ref={chat} keyboardVisible={keyboardVisible} onShopChanged={() => void refresh()} onToast={showToast} /></Scene>{(['products', 'orders', 'shop'] as const).map(key => <Scene key={key} active={tab === key} reduceMotion={reduceMotion}><ManagementSheet embedded active={tab === key} route={PANEL_ROUTES[key]!} onClose={() => {}} onOpen={setRoute} data={data} onAsk={ask} onStore={openStore} connectionError={error} refreshing={loading} darkMode={darkMode} onDarkMode={onDarkModeChange} onRefresh={() => void refresh()} /></Scene>)}</View>
+    <View style={ui.host}><Scene active={tab === 'home'} reduceMotion={reduceMotion}><DashboardScreen data={data} loading={loading} error={error} days={days} onDays={onDays} onRefresh={() => void refresh()} onOpen={setRoute} onAsk={ask} onStore={openStore} /></Scene><Scene active={tab === 'assistant'} reduceMotion={reduceMotion}><AssistantChat ref={chat} keyboardVisible={keyboardVisible} reduceMotion={reduceMotion} onShopChanged={() => void refresh()} onToast={showToast} /></Scene>{(['products', 'orders', 'shop'] as const).map(key => <Scene key={key} active={tab === key} reduceMotion={reduceMotion}><ManagementSheet embedded active={tab === key} route={PANEL_ROUTES[key]!} onClose={() => {}} onOpen={setRoute} data={data} onAsk={ask} onStore={openStore} connectionError={error} refreshing={loading} darkMode={darkMode} onDarkMode={onDarkModeChange} onRefresh={() => void refresh()} /></Scene>)}</View>
   </View></KeyboardAvoidingView>
     {!keyboardVisible ? <BottomNav tab={tab} onTab={switchTab} reduceMotion={reduceMotion} /> : null}
     <ManagementSheet route={route} onClose={() => setRoute(null)} onOpen={setRoute} data={data} onAsk={ask} onStore={openStore} connectionError={error} refreshing={loading} darkMode={darkMode} onDarkMode={onDarkModeChange} onRefresh={() => void refresh()} />

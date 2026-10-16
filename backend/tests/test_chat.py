@@ -165,7 +165,8 @@ def test_chat_same_price_and_unknown_are_safe(client):
 
 def test_chat_request_validation(client):
     assert client.post("/api/v1/chat", json={"message": "   "}).status_code == 422
-    assert client.post("/api/v1/chat", json={"message": "x" * 2001}).status_code == 422
+    assert client.post("/api/v1/chat", json={"message": "x" * 4000}).status_code == 200
+    assert client.post("/api/v1/chat", json={"message": "x" * 4001}).status_code == 422
 
 
 def test_direct_api_rejects_unchanged_price(client):

@@ -96,7 +96,7 @@ export function DashboardScreen({ data, loading, error, days, onDays, onRefresh,
             </Text>
             {periodReady ? <SalesTrend key={data.days} data={data} /> : <View style={{ height: 215, flexShrink: 0, alignItems: 'center', justifyContent: 'center' }}><Text style={ui.loadingText}>{loading ? 'Đang lấy số liệu từ shop…' : 'Chưa lấy được số liệu kỳ này'}</Text></View>}
             <View style={ui.revenueFoot}>
-              <View style={ui.grow}><Text style={ui.revenueLabel}>Đơn hợp lệ</Text><Text style={ui.revenueFootValue}>{periodReady ? count(data.order_count) : '—'}</Text></View>
+              <View style={ui.grow}><Text style={ui.revenueLabel}>Đơn hợp lệ</Text><Text testID="dashboard-order-count" style={ui.revenueFootValue}>{periodReady ? count(data.order_count) : '—'}</Text></View>
               <View style={ui.grow}><Text style={ui.revenueLabel}>Trung bình mỗi đơn</Text><Text adjustsFontSizeToFit numberOfLines={1} style={ui.revenueFootValue}>{periodReady ? money(data.average_order_vnd) : '—'}</Text></View>
             </View>
           </View>

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.models.chat_request import ChatRequestRecord
 from app.schemas.chat import ChatResponse
 from app.services.chat_dispatch import dispatch_chat
+from app.services.conversation_state import ensure_conversation_open
 
 logger = logging.getLogger(__name__)
 ACTIVE = ('queued', 'running')
@@ -42,6 +43,7 @@ class ChatRequestManager:
         self.settings = settings
         self.tasks = {}
         self.conversations = {}
+        self.deleting = set()
         self.execution = asyncio.Lock()
 
     def recover(self):
@@ -57,12 +59,16 @@ class ChatRequestManager:
 
     def submit(self, payload, shop):
         key = request_key(shop, payload.request_id or uuid4())
+        self.ensure_conversation_available(key[0], payload.conversation_id)
         fingerprint = hashlib.sha256(json.dumps(
             [payload.message, str(payload.conversation_id) if payload.conversation_id else None],
             ensure_ascii=False).encode()).hexdigest()
         with self.sessions() as session:
+            ensure_conversation_open(session, key[0], payload.conversation_id)
             row = session.get(ChatRequestRecord, key)
             if row:
+                self.ensure_conversation_available(key[0], row.conversation_id)
+                ensure_conversation_open(session, key[0], row.conversation_id)
                 if row.fingerprint is not None and row.fingerprint != fingerprint:
                     raise HTTPException(409, detail={'code': 'request_id_conflict',
                         'message': 'Mã tin nhắn đã được dùng cho nội dung khác.'})
@@ -89,6 +95,11 @@ class ChatRequestManager:
         self.conversations[conversation] = key
         self.tasks[key] = asyncio.create_task(self._run(key, resolved, shop))
         return key
+
+    def ensure_conversation_available(self, tenant, conversation_id):
+        if conversation_id and (tenant, str(conversation_id)) in self.deleting:
+            raise HTTPException(410, detail={'code': 'conversation_deleted',
+                'message': 'Cuộc trò chuyện đang được xóa. Bạn mở cuộc trò chuyện mới nhé.'})
 
     async def _run(self, key, payload, shop):
         try:

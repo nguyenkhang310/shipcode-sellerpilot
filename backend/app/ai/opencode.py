@@ -14,6 +14,7 @@ from app.ai.contracts import (
     AIProviderError, ClassificationResult, ModelCommand, ParsedCommand, ProviderHealth,
 )
 from app.ai.advisor_contracts import AdviceExtraction
+from app.ai.context import bounded_history
 
 logger = logging.getLogger(__name__)
 FREE_MODEL = "muse-spark-1.3-contributor-free"
@@ -80,8 +81,7 @@ class OpenCodeClient:
     async def respond(self, message: str, *, history: list[dict], facts: dict):
         # Structured JSON preserves data boundaries. No customer/order PII is added here.
         context = {
-            "history": [{"role": row["role"], "content": row["content"][:1600]}
-                        for row in history[-24:]],
+            "history": bounded_history(history),
             "shop_facts": facts,
             "current_message": message,
         }
@@ -93,14 +93,14 @@ class OpenCodeClient:
         supports_images = model.get("capabilities", {}).get("input", {}).get("image", False)
         prompt = json.dumps({
             "known_product": facts,
-            "history": history[-12:],
+            "history": bounded_history(history, turns=12),
             "images_attached": bool(images and supports_images),
         }, ensure_ascii=False)
         return await self._ask("sellerpilot-listing", prompt,
                                files=images if supports_images else None)
 
     async def analyze_advice(self, message: str, *, history: list[dict], context: dict):
-        prompt = json.dumps({'current_message': message, 'history': history[-16:], 'memory': context,
+        prompt = json.dumps({'current_message': message, 'history': bounded_history(history, turns=16), 'memory': context,
                              'json_schema': AdviceExtraction.model_json_schema()}, ensure_ascii=False)
         return await self._ask('sellerpilot-advisor', prompt)
 
@@ -110,17 +110,23 @@ class OpenCodeClient:
         error = info.get("error")
         if error:
             code = error.get("data", {}).get("statusCode")
-            raise AIProviderError("provider_rejected" if code in (401, 403, 429) else "provider_unavailable")
+            raise AIProviderError("provider_rejected" if code in (401, 403, 429) else "provider_unavailable",
+                stage='model_gateway', retryable=code in (500, 502, 503, 504))
+        # Model identity and zero cost are mandatory even when retrying. Never
+        # accept a paid/wrong model or a tool result as an ordinary chat reply.
         if (info.get("role") != "assistant" or info.get("providerID") != "opencode"
-                or info.get("modelID") != FREE_MODEL or info.get("finish") != "stop"
-                or not info.get("time", {}).get("completed") or info.get("cost") != 0):
-            raise AIProviderError("invalid_response")
+                or info.get("modelID") != FREE_MODEL or isinstance(info.get('cost'), bool)
+                or info.get("cost") != 0):
+            raise AIProviderError("invalid_response", stage='model_identity_or_cost')
         parts = payload["parts"]
         if any(part.get("type") == "tool" for part in parts):
-            raise AIProviderError("tool_not_allowed")
+            raise AIProviderError("tool_not_allowed", stage='tool_result')
+        if info.get("finish") != "stop" or not info.get("time", {}).get("completed"):
+            logger.warning('OpenCode incomplete reply: finish=%s', info.get('finish'))
+            raise AIProviderError("invalid_response", stage='incomplete_reply', retryable=True)
         answer = "\n".join(part["text"] for part in parts if part.get("type") == "text").strip()
         if not answer or len(answer) > 12000:
-            raise AIProviderError("invalid_response")
+            raise AIProviderError("invalid_response", stage='empty_or_oversized_reply', retryable=True)
         return answer
 
     async def _cleanup(self, session_id):
@@ -133,6 +139,24 @@ class OpenCodeClient:
                     logger.warning("OpenCode session cleanup failed (%s)", response.status_code)
 
     async def _ask(self, agent: str, prompt: str, *, files: list[dict] | None = None):
+        try:
+            # One bounded retry for transient gateway failures or incomplete
+            # generations. Each attempt has its own session and cleanup. These
+            # agents cannot perform shop writes, so this never repeats an action.
+            async with asyncio.timeout(self.timeout):
+                for attempt in range(2):
+                    try:
+                        return await self._ask_once(agent, prompt, files=files)
+                    except AIProviderError as error:
+                        logger.warning('OpenCode generation rejected: agent=%s reason=%s stage=%s attempt=%s',
+                                       agent, error.reason, error.stage or 'unknown', attempt + 1)
+                        if attempt or not error.retryable:
+                            raise
+                        await asyncio.sleep(0.25)
+        except TimeoutError as error:
+            raise AIProviderError('provider_timeout', stage='generation_deadline') from error
+
+    async def _ask_once(self, agent: str, prompt: str, *, files: list[dict] | None = None):
         session_id = None
         pending = None
         try:
@@ -168,14 +192,15 @@ class OpenCodeClient:
         except AIProviderError:
             raise
         except (TimeoutError, httpx.TimeoutException) as error:
-            raise AIProviderError("provider_timeout") from error
+            raise AIProviderError("provider_timeout", stage='http_deadline') from error
         except httpx.HTTPStatusError as error:
             reason = "provider_rejected" if error.response.status_code in (401, 403, 429) else "provider_unavailable"
-            raise AIProviderError(reason) from error
+            raise AIProviderError(reason, stage='http_status',
+                retryable=error.response.status_code in (500, 502, 503, 504)) from error
         except httpx.HTTPError as error:
-            raise AIProviderError("provider_unavailable") from error
+            raise AIProviderError("provider_unavailable", stage='http_connection', retryable=True) from error
         except (ValueError, KeyError, TypeError, AttributeError) as error:
-            raise AIProviderError("invalid_response") from error
+            raise AIProviderError("invalid_response", stage='response_envelope', retryable=True) from error
         finally:
             if pending is not None:
                 if not pending.done():

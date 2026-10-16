@@ -89,5 +89,5 @@ export type ManagementData = {
   tasks: { pending_orders: number; packing_orders: number; shipping_orders: number; low_stock_products: number; unanswered_reviews: number };
   active_products: number; top_products: StoreProduct[]; integration_mode: 'local_store';
 };
-export type ConversationSummary = { id: string; title: string; updated_at: string; turns: number };
+export type ConversationSummary = { id: string; title: string; updated_at: string; turns: number; is_pinned?: boolean };
 export type ConversationDetail = { id: string; turns: { message: string; response: ChatData; created_at: string }[] };

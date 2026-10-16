@@ -10,7 +10,7 @@ from app.schemas.product_drafts import ProductDraftData
 class ChatRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    message: str = Field(min_length=1, max_length=2_000)
+    message: str = Field(min_length=1, max_length=4_000)
     conversation_id: UUID | None = None
     request_id: UUID | None = None
 

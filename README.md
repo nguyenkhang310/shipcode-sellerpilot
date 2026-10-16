@@ -17,14 +17,20 @@ SellerPilot kết nối với gian hàng **UTech Official** trong UTE MALL. Đâ
 
 - Tổng quan hôm nay/7/30 ngày, biểu đồ giá trị đơn hàng, trạng thái đơn và việc cần xử lý.
 - Danh mục có ảnh, tìm theo tên/SKU, hàng sắp hết và chi tiết đơn hàng.
-- Chat có lịch sử, bộ nhớ theo shop/SKU và tư vấn dựa trên dữ liệu backend cung cấp.
+- Chat có lịch sử, vuốt trái để ghim/bỏ ghim hoặc xóa hội thoại, bộ nhớ theo shop/SKU và tư vấn dựa trên dữ liệu backend cung cấp.
 - Tính hòa vốn, lợi nhuận, biên lời, giá mục tiêu và tác động của giảm giá từ chi phí chủ shop cung cấp.
 - Đổi giá bằng đề xuất → xác nhận → cập nhật shop → nhật ký.
 - Chọn tối đa 6 ảnh, AI soạn tên/mô tả, hỏi lại thông tin thiếu, duyệt bản nháp rồi đăng lên gian hàng.
+- Gửi ảnh kèm đoạn mô tả tự nhiên trong một lượt: AI nhận tên, giá, tồn và ngành hàng cùng lúc; giữ caption đã viết, phân biệt giá vốn/giá bán, nhận chỉnh sửa nhiều trường và chỉ hỏi phần còn thiếu. Tin nhắn hỗ trợ tối đa 4.000 ký tự.
 - Mã yêu cầu chống xử lý trùng; Dừng hủy tác vụ trên backend; khôi phục kết quả sau mất kết nối.
+- Ngữ cảnh giữ đủ tin nhắn dài trong ngân sách prompt; câu hỏi nối tiếp giữ kỳ thống kê đang bàn. Kế hoạch cho tương lai được tách khỏi số liệu đã ghi nhận.
 - Website mua–bán dùng chung danh mục, giỏ hàng, đơn hàng, voucher, đánh giá và hộp thư.
 
 Các kỳ tổng quan đã xem được giữ trong bộ nhớ tối đa 60 giây để chuyển lại nhanh. Sau thời hạn hoặc khi đổi ngày theo giờ Việt Nam, app lấy dữ liệu mới. Kéo làm mới, nút Đồng bộ và thay đổi shop qua AI sẽ xóa cache các kỳ; số liệu của kỳ cũ không được hiển thị dưới kỳ vừa chọn khi đang tải.
+
+Khi đang xem **Quản lý**, app kiểm tra số liệu mới mỗi 5 giây và cập nhật tại chỗ. Việc kiểm tra tạm dừng khi app chạy nền hoặc chuyển tab; quay về Quản lý sẽ lấy lại dữ liệu. Mất kết nối giữ số liệu đã lấy gần nhất và báo chưa đồng bộ.
+
+Ví dụ, chọn ảnh rồi nhắn: `Mình bán bàn phím Nova K75 màu trắng, giá vốn 500k, bán 990k, kho còn 20 cái. Đăng giúp mình.` AI chuẩn bị bản nháp để duyệt. Nhắn tiếp `Để 850 nghìn thôi, còn 12 chiếc nhé` sẽ sửa bản nháp hiện tại. Sản phẩm chỉ được đăng sau khi chủ shop xác nhận; giá/tồn không được tự đoán từ ảnh.
 
 ## Yêu cầu môi trường
 
@@ -124,6 +130,8 @@ Kiểm tra `opencode --version` chạy được trên terminal trước khi mở
 
 Code chỉ chấp nhận model Free đã cấu hình và kiểm tra metadata chi phí; không tự chuyển sang model tính phí. Model hoặc hạn mức miễn phí có thể không còn sẵn trên bản OpenCode của thành viên. Khi đó chat báo chế độ dự phòng; các truy vấn trực tiếp được hỗ trợ vẫn đọc dữ liệu shop. Đây không phải cam kết dịch vụ miễn phí lâu dài.
 
+Lời gọi OpenCode có tối đa một lần thử lại cho lỗi dịch vụ tạm thời hoặc câu trả lời bị thiếu, trong cùng giới hạn thời gian của lượt gọi. Câu tư vấn tuyên bố thực hiện thay đổi khi chưa có kết quả backend sẽ được yêu cầu viết lại một lần; nếu vẫn sai thì dùng phản hồi dự phòng. Thông báo phân biệt phản hồi không hợp lệ, quá thời gian, giới hạn dịch vụ và mất kết nối. Log chẩn đoán chỉ ghi loại lỗi/bước xử lý, không ghi prompt hoặc nội dung shop.
+
 **Ollama / Qwen** — lựa chọn local:
 
 ```sh
@@ -138,7 +146,48 @@ OLLAMA_MODEL=qwen3:4b-instruct
 
 Ollama phải đang chạy. Model Qwen hiện cấu hình là model văn bản: không thay thế khả năng nhận ảnh của Muse. Lần đầu đọc model từ HDD có thể chậm.
 
-## 4. Chạy ba tiến trình
+## 4. Chạy toàn bộ bằng một terminal
+
+Sau khi đã cài môi trường và bootstrap ở các bước trên, từ root chạy:
+
+```sh
+npm run demo
+```
+
+Lệnh này kiểm tra cổng, chạy migration, mở UTE MALL + API + Expo và in QR/địa chỉ cho iPhone. **Ctrl+C một lần** sẽ dừng cả ba và OpenCode do backend tạo. Không tự cài package, seed lại shop hoặc kill tiến trình đang chiếm cổng. Muốn chỉ kiểm tra môi trường: `npm run demo -- --check`.
+
+Launcher tự dùng IP LAN hiện tại để tránh cấu hình IP cũ trong `frontend/.env`. Nếu muốn dùng URL riêng, khai báo `EXPO_PUBLIC_API_URL` / `EXPO_PUBLIC_STORE_URL` trong môi trường terminal trước khi chạy. iPhone cần cùng Wi-Fi với máy; lần gọi Qwen đầu tiên vẫn có thể chậm vì nạp model từ HDD.
+
+### Tạo đơn tự động trong buổi demo
+
+Giữ `npm run demo` chạy, mở thêm một terminal tại root:
+
+```sh
+backend/.venv/bin/python simulate_orders.py
+```
+
+PowerShell: `& ".\backend\.venv\Scripts\python.exe" simulate_orders.py`.
+
+Mặc định tạo một đơn cho **UTech Official mỗi 8 giây**, dùng giá và sản phẩm đang bán trong SQLite UTE MALL. Mở tab **Quản lý → Hôm nay**: số đơn, giá trị đơn và biểu đồ tự cập nhật trong khoảng 5 giây sau khi đơn được ghi. Đây là đơn mô phỏng, không gọi thanh toán hay đơn vị vận chuyển.
+
+```sh
+# Tạo đúng 10 đơn, cách nhau 5 giây, tất cả chờ xác nhận
+backend/.venv/bin/python simulate_orders.py --count 10 --interval 5 --status pending
+```
+
+`Ctrl+C` dừng tạo đơn. Những đơn đã tạo được giữ lại trong shop và nhận diện bằng ghi chú `[SELLERPILOT-LIVE-DEMO]`; tồn sản phẩm/phân loại cũng được trừ như lúc mua hàng. Script dừng khi hết hàng, không tự tăng tồn. Trạng thái mặc định được trộn giữa chờ xác nhận/đã thanh toán/đang giao/đã giao; `--status` cho phép chọn một trạng thái cố định.
+
+Database lấy từ `STORE_DATABASE_PATH` của terminal hoặc `UTE MALL/.env`, mặc định `UTE MALL/instance/ecommerce.db`. Dùng `--database /đường/dẫn/shop.db` để chỉ định bộ demo khác; đường dẫn tương đối của tùy chọn này tính từ thư mục terminal hiện tại. File phải tồn tại và có schema UTE MALL. Script không bootstrap, không xóa dữ liệu và không sửa shop khác; `--shop` đổi shop đích khi cần.
+
+### Ghim và xóa lịch sử chat
+
+Trong chat, mở nút ba gạch **Lịch sử**, vuốt một hàng sang trái để hiện **Ghim/Bỏ ghim** và **Xóa**. Có thể bấm dấu ba chấm trên hàng thay cho thao tác vuốt. Hội thoại đã ghim nằm trên đầu và được lưu ở backend.
+
+Xóa có xác nhận, dừng lượt AI đang chạy trong hội thoại, xóa nội dung chat và ảnh bản nháp chưa đăng, đồng thời hủy đề xuất chưa xác nhận. Sản phẩm đã đăng, ảnh công khai, đơn hàng và nhật ký giao dịch được giữ nguyên. Bộ nhớ tư vấn của shop được quản lý riêng qua tính năng xóa bộ nhớ.
+
+### Chạy từng dịch vụ khi phát triển
+
+Các lệnh dưới đây là lựa chọn thay thế; không chạy đồng thời với `npm run demo`.
 
 ### Terminal A — UTE MALL
 

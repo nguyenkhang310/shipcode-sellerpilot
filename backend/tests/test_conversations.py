@@ -161,3 +161,45 @@ def test_opencode_style_provider_uses_tool_facts_with_one_model_call(client):
     assert result['tool'] == 'get_inventory'
     assert result['provider'] == 'opencode'
     assert result['answer'] == 'SKU A001 hiện còn 3 sản phẩm.'
+
+
+def test_invalid_response_is_not_reported_as_lost_muse_connection(client):
+    from app.ai.contracts import AIProviderError
+    class InvalidReply:
+        natural_responses = True
+        provider = 'opencode'
+        model = 'muse-spark-1.3-contributor-free'
+        async def respond(self, *_args, **_kwargs):
+            raise AIProviderError('invalid_response', stage='incomplete_reply')
+    client.app.state.ai_provider = InvalidReply()
+    result = chat(client, 'Sao vậy, không kết nối được à?')
+    assert result['mode'] == 'fallback' and result['fallback_reason'] == 'invalid_response'
+    assert 'chưa vượt qua kiểm tra' in result['answer']
+    assert 'chưa kết nối' not in result['answer']
+
+
+def test_unsafe_copy_is_rewritten_once_without_repeating_shop_actions(client, shop_db_path):
+    class CorrectedReply:
+        natural_responses = True
+        provider = 'opencode'
+        model = 'muse-spark-1.3-contributor-free'
+        calls = 0
+        async def respond(self, message, *, history, facts):
+            self.calls += 1
+            if self.calls == 1:
+                return 'Mình đã cập nhật giá cho shop.'
+            assert facts['reply_correction']['reason'] == 'unexecuted_write_claim'
+            return 'Đề xuất: rà soát tồn kho và nội dung sản phẩm trong 7 ngày tới.'
+    provider = CorrectedReply()
+    client.app.state.ai_provider = provider
+    result = chat(client, 'Lập kế hoạch hành động 7 ngày cho shop')
+    assert provider.calls == 2 and result['mode'] == 'ai' and result['fallback_reason'] is None
+    assert 'Đề xuất:' in result['answer']
+    assert 'reply_correction' not in result['facts']
+    with sqlite3.connect(shop_db_path) as connection:
+        assert connection.execute("SELECT price FROM product_variant WHERE sku='A001'").fetchone()[0] == 150000
+    with client.app.state.session_factory() as session:
+        from sqlalchemy import func, select
+        from app.models.action import ActionProposal
+        assert session.scalar(select(func.count()).select_from(AgentRun)) == 1
+        assert session.scalar(select(func.count()).select_from(ActionProposal)) == 0

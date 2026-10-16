@@ -46,6 +46,7 @@ async def upload_product_image(
     shop: UTEMallRepository = Depends(get_shop),
 ) -> ChatResponse:
     content = await image.read(MAX_IMAGE_BYTES + 1)
+    request.app.state.chat_requests.ensure_conversation_available(shop.seller_shop_slug or 'local', conversation_id)
     try:
         data = create_product_draft(
             session, shop, content=content,
@@ -62,13 +63,14 @@ async def upload_product_image(
 
 
 @router.post("/image-data", response_model=ChatResponse, status_code=201)
-def upload_product_image_data(
+async def upload_product_image_data(
     payload: ProductImageDataRequest,
     request: Request,
     session: Session = Depends(get_session),
     shop: UTEMallRepository = Depends(get_shop),
 ) -> ChatResponse:
     """Receive a compressed image without relying on native multipart file URIs."""
+    request.app.state.chat_requests.ensure_conversation_available(shop.seller_shop_slug or 'local', payload.conversation_id)
     encoded = payload.image_base64
     if encoded.startswith("data:"):
         encoded = encoded.partition(",")[2]
@@ -114,6 +116,7 @@ async def upload_product_images_data(
     shop: UTEMallRepository = Depends(get_shop),
 ) -> ChatResponse:
     """Create one product draft with an ordered gallery of up to six images."""
+    request.app.state.chat_requests.ensure_conversation_available(shop.seller_shop_slug or 'local', payload.conversation_id)
     contents = [_decode_image_data(encoded) for encoded in payload.images_base64]
     try:
         if payload.request_id:
@@ -175,13 +178,20 @@ def product_draft_gallery_image(
 
 
 @router.post("/{draft_id}/publish", response_model=ProductDraftResponse)
-def publish(
+async def publish(
     draft_id: int,
+    request: Request,
     session: Session = Depends(get_session),
     shop: UTEMallRepository = Depends(get_shop),
 ) -> ProductDraftResponse:
     try:
-        return ProductDraftResponse(data=draft_to_dict(publish_product_draft(session, shop, draft_id)))
+        manager = request.app.state.chat_requests
+        # Publishing and deleting history must agree about which images are
+        # public. Serialize them so deletion cannot remove a published gallery.
+        async with manager.execution:
+            draft = get_product_draft(session, shop, draft_id)
+            manager.ensure_conversation_available(shop.seller_shop_slug or 'local', draft.conversation_id)
+            return ProductDraftResponse(data=draft_to_dict(publish_product_draft(session, shop, draft_id)))
     except ProductDraftNotFoundError as error:
         raise _not_found(error) from error
     except ProductDraftConflictError as error:
@@ -191,17 +201,21 @@ def publish(
 
 
 @router.post("/{draft_id}/cancel", response_model=ProductDraftResponse)
-def cancel(
+async def cancel(
     draft_id: int,
     request: Request,
     session: Session = Depends(get_session),
     shop: UTEMallRepository = Depends(get_shop),
 ) -> ProductDraftResponse:
     try:
-        draft = cancel_product_draft(
-            session, shop, draft_id, request.app.state.settings.shop_product_upload_dir
-        )
-        return ProductDraftResponse(data=draft_to_dict(draft))
+        manager = request.app.state.chat_requests
+        async with manager.execution:
+            draft = get_product_draft(session, shop, draft_id)
+            manager.ensure_conversation_available(shop.seller_shop_slug or 'local', draft.conversation_id)
+            draft = cancel_product_draft(
+                session, shop, draft_id, request.app.state.settings.shop_product_upload_dir
+            )
+            return ProductDraftResponse(data=draft_to_dict(draft))
     except ProductDraftNotFoundError as error:
         raise _not_found(error) from error
     except ProductDraftConflictError as error:

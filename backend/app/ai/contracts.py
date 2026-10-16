@@ -76,9 +76,11 @@ class ClassificationResult(BaseModel):
 
 
 class AIProviderError(RuntimeError):
-    def __init__(self, reason: FallbackReason):
+    def __init__(self, reason: FallbackReason, *, stage: str | None = None, retryable: bool = False):
         super().__init__(reason)
         self.reason = reason
+        self.stage = stage
+        self.retryable = retryable
 
 
 class AIProvider(Protocol):

@@ -206,3 +206,84 @@ def test_cancelling_generation_aborts_and_deletes_only_its_opencode_session():
             assert not provider._generation_lock.locked()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('failure', ['incomplete', 'empty', 'gateway', 'http'])
+def test_transient_failure_retries_once_with_fresh_session_and_cleans_both(failure):
+    sessions, cleaned = [], []
+
+    def respond(request):
+        if request.url.path == '/provider':
+            return httpx.Response(200, json=free_provider_payload())
+        if request.url.path == '/session':
+            sessions.append('ses_retry_' + str(len(sessions)))
+            return httpx.Response(200, json={'id': sessions[-1]})
+        if request.url.path.endswith('/message'):
+            if len(sessions) == 1:
+                if failure == 'http':
+                    return httpx.Response(503, json={'error': 'synthetic outage'})
+                payload = completed_payload('')
+                if failure == 'incomplete':
+                    payload['info']['finish'] = 'length'
+                if failure == 'gateway':
+                    payload['info']['error'] = {'data': {'statusCode': 503}}
+                return httpx.Response(200, json=payload)
+            return httpx.Response(200, json=completed_payload('Câu trả lời đã hoàn chỉnh.'))
+        if request.method == 'DELETE':
+            cleaned.append(request.url.path.rsplit('/', 1)[-1])
+        return httpx.Response(200, json=True)
+
+    async def run():
+        async with httpx.AsyncClient(base_url='http://opencode.test', transport=httpx.MockTransport(respond)) as http:
+            return await OpenCodeClient(http).respond('Tư vấn kế hoạch', history=[], facts={})
+    assert asyncio.run(run()) == 'Câu trả lời đã hoàn chỉnh.'
+    assert len(sessions) == 2 and cleaned == sessions
+
+
+@pytest.mark.parametrize('failure', ['paid', 'wrong_model', 'tool', 'rate_limit'])
+def test_nontransient_or_untrusted_result_is_never_retried(failure):
+    sessions = []
+
+    def respond(request):
+        if request.url.path == '/provider':
+            return httpx.Response(200, json=free_provider_payload())
+        if request.url.path == '/session':
+            sessions.append('ses_blocked')
+            return httpx.Response(200, json={'id': 'ses_blocked'})
+        if request.url.path.endswith('/message'):
+            if failure == 'rate_limit':
+                return httpx.Response(429, json={})
+            data = completed_payload('unsafe', cost=0.1 if failure == 'paid' else 0,
+                model='paid-model' if failure == 'wrong_model' else FREE_MODEL,
+                parts=[{'type': 'tool'}] if failure == 'tool' else None)
+            return httpx.Response(200, json=data)
+        return httpx.Response(200, json=True)
+
+    async def run():
+        async with httpx.AsyncClient(base_url='http://opencode.test', transport=httpx.MockTransport(respond)) as http:
+            with pytest.raises(AIProviderError):
+                await OpenCodeClient(http).respond('Chào', history=[], facts={})
+    asyncio.run(run())
+    assert len(sessions) == 1
+
+
+def test_retry_is_bounded_by_one_total_deadline_and_cancellation_cleans_session():
+    async def run():
+        attempts, cleaned = [], []
+        async def respond(request):
+            if request.url.path == '/provider':
+                return httpx.Response(200, json=free_provider_payload())
+            if request.url.path == '/session':
+                attempts.append('ses_timeout')
+                return httpx.Response(200, json={'id': 'ses_timeout'})
+            if request.url.path.endswith('/message'):
+                await asyncio.Event().wait()
+            if request.method == 'DELETE':
+                cleaned.append('ses_timeout')
+            return httpx.Response(200, json=True)
+        async with httpx.AsyncClient(base_url='http://opencode.test', transport=httpx.MockTransport(respond)) as http:
+            with pytest.raises(AIProviderError) as caught:
+                await OpenCodeClient(http, timeout=.1).respond('Chào', history=[], facts={})
+            assert caught.value.reason == 'provider_timeout'
+        assert attempts == cleaned == ['ses_timeout']
+    asyncio.run(run())

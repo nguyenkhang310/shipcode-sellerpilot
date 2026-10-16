@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from uuid import uuid4
 from datetime import date, datetime
@@ -15,6 +16,9 @@ from app.ai.fallback import (
     extract_threshold,
     normalize_text,
     parse_fallback,
+    reporting_days,
+    PRICE_RE,
+    parse_money,
 )
 from app.integrations.ute_mall import ShopItemNotFoundError, UTEMallRepository
 from app.integrations import management
@@ -27,6 +31,49 @@ from app.services.seller_tools import (
     create_price_proposal,
     proposal_to_dict,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def reply_issue(answer: str, facts: dict | None = None, *, seller_context: str = '') -> str | None:
+    for match in re.finditer(r"\bđã\s+(?:cập nhật|đổi giá|thay đổi giá|đăng bán|đăng sản phẩm|gửi tin|xác nhận đơn|hủy đơn)", answer, re.IGNORECASE):
+        prefix = answer[:match.start()].rstrip()
+        # "Nếu bạn đã đăng sản phẩm..." is a condition, not an executed write.
+        if not re.search(r'\b(?:nếu|khi|sau khi)(?:\s+(?:bạn|mình|shop|chủ shop))?\s*$', prefix, re.IGNORECASE):
+            return 'unexecuted_write_claim'
+    if re.search(r"không cần (?:xử lý|xác nhận|gửi).{0,20}lại|lớn nhất trong tasks", answer, re.IGNORECASE):
+        return 'unsupported_fulfillment_claim'
+    if facts and not facts.get('shop', {}).get('created_at') and not re.search(
+            r'mới\s+(?:mở|thành lập|hoạt động)|shop\s+mới', seller_context, re.I):
+        for match in re.finditer(r'(?:shop|gian hàng)\s+(?:của bạn\s+)?mới\s+(?:mở|thành lập|hoạt động|nên)', answer, re.I):
+            if not re.search(r'(?:nếu|khi|giả sử)(?:\s+đây là)?\s*$', answer[:match.start()], re.I):
+                return 'unsupported_shop_age'
+    pricing = facts.get('pricing_analysis') if facts else None
+    if pricing:
+        # Keep stated profit tied to Decimal calculations while allowing the
+        # model to explain fee deductions and discuss hypothetical sale prices.
+        allowed_profit = {item['profit_per_unit_vnd'] for key in ('at_selling_price', 'after_discount', 'target_price')
+                          if (item := pricing.get(key)) and 'profit_per_unit_vnd' in item}
+        text = normalize_text(answer.replace('*', '').replace('`', ''))
+        for match in PRICE_RE.finditer(text):
+            amount, unit = match.groups()
+            prefix = text[max(0, match.start() - 70):match.start()]
+            states_profit = re.search(r'(?:tiền lời|lợi nhuận|lời|lãi)(?:\s+(?:ước tính|còn|khoảng|là|mỗi máy|mỗi sản phẩm|mỗi đơn))*[\s:≈~=>-]*$', prefix)
+            if unit and states_profit and parse_money(amount, unit) not in allowed_profit:
+                return 'unsupported_pricing_amount'
+    return None
+
+
+def fallback_explanation(reason: str | None) -> str:
+    messages = {
+        'invalid_response': 'Câu trả lời của AI chưa vượt qua kiểm tra nên mình chưa hiển thị. Bạn thử lại nhé; số liệu shop vẫn đọc được bình thường.',
+        'provider_timeout': 'AI phản hồi quá lâu ở lượt này. Bạn thử lại nhé; các câu hỏi trực tiếp về doanh số và tồn kho vẫn đọc được dữ liệu shop.',
+        'provider_rejected': 'Dịch vụ AI đang từ chối yêu cầu hoặc giới hạn lượt gọi. Bạn thử lại sau một chút nhé; dữ liệu shop vẫn truy cập được.',
+        'free_model_unavailable': 'Model Muse Spark miễn phí hiện chưa sẵn sàng trên OpenCode. Mình vẫn có thể đọc doanh số, SKU và tồn kho của shop.',
+        'model_unavailable': 'Model AI hiện chưa sẵn sàng. Mình vẫn có thể đọc doanh số, SKU và tồn kho của shop.',
+        'tool_not_allowed': 'Phản hồi AI có thao tác chưa được phép nên mình đã dừng lượt này. Chưa có thay đổi nào được thực hiện. Bạn thử diễn đạt lại yêu cầu nhé.',
+    }
+    return messages.get(reason, 'Mình chưa kết nối được dịch vụ AI lúc này. Bạn thử lại sau nhé; các câu hỏi trực tiếp về doanh số, SKU và tồn kho vẫn đọc được dữ liệu shop.')
 
 
 async def handle_chat(
@@ -92,6 +139,17 @@ async def handle_chat(
 
     if simple:
         command = ParsedCommand(intent="unknown")
+    if command.intent in ('sales_advice', 'unknown') and not command.days:
+        days = reporting_days(message)
+        if not days:
+            for prior in reversed(runs):
+                previous_facts = json.loads(prior.facts_json)
+                days = previous_facts.get('period', {}).get('days') or previous_facts.get('days')
+                if isinstance(days, int) and 1 <= days <= 30:
+                    break
+                days = None
+        if days:
+            command = command.model_copy(update={'days': days})
     result = execute_command(session, shop, command)
     preferences = read_memory(session, shop, 'shop')
     if preferences:
@@ -104,14 +162,16 @@ async def handle_chat(
     elif callable(getattr(ai_provider, 'respond', None)) and command.intent in ('sales_advice', 'unknown') and not simple and not is_casual_message(message):
         if command.intent == 'unknown':
             result['facts'].pop('supported_intents', None)
-            result['facts'].update(shop_context(shop))
-        advisor = await enrich_advice(session, shop, ai_provider, message=message,
-            resolved=resolved, conversation_id=conversation_id, runs=runs, history=history)
-        result['facts'].update({key: value for key, value in advisor.items() if value is not None})
-        if advisor['pricing_analysis']:
-            command = ParsedCommand(intent='sales_advice')
-            result.update(answer=pricing_reply(advisor['pricing_analysis']), tool='calculate_pricing',
-                          tool_arguments=advisor['pricing_analysis']['inputs'])
+            result['facts'].update(shop_context(shop, command.days or 7))
+        connection_question = len(message) < 140 and re.search(r'kết nối|ket noi|offline|mất mạng|mat mang', message, re.I)
+        if not connection_question:
+            advisor = await enrich_advice(session, shop, ai_provider, message=message,
+                resolved=resolved, conversation_id=conversation_id, runs=runs, history=history)
+            result['facts'].update({key: value for key, value in advisor.items() if value is not None})
+            if advisor['pricing_analysis']:
+                command = ParsedCommand(intent='sales_advice')
+                result.update(answer=pricing_reply(advisor['pricing_analysis']), tool='calculate_pricing',
+                              tool_arguments=advisor['pricing_analysis']['inputs'])
     # Price proposals and confirmations retain the backend's exact wording.
     # OpenCode may phrase read-only tool results naturally using their actual facts.
     can_generate = command.intent in ("sales_advice", "unknown") or (
@@ -125,23 +185,28 @@ async def handle_chat(
             result["answer"] = simple
         elif hasattr(ai_provider, "respond") and mode == "ai":
             try:
-                generated = await ai_provider.respond(message, history=history, facts=result["facts"])
-                # A language-only response cannot claim a write. Only the proposal
-                # confirmation endpoint can update shop data.
-                if re.search(r"\bđã\s+(?:cập nhật|đổi giá|thay đổi giá|đăng bán|đăng sản phẩm|gửi tin|xác nhận đơn|hủy đơn)", generated, re.IGNORECASE):
-                    raise AIProviderError("invalid_response")
-                if re.search(r"không cần (?:xử lý|xác nhận|gửi).{0,20}lại|lớn nhất trong tasks", generated, re.IGNORECASE):
-                    raise AIProviderError("invalid_response")
+                response_facts = result['facts']
+                for attempt in range(2):
+                    generated = await ai_provider.respond(message, history=history, facts=response_facts)
+                    seller_context = '\n'.join([row['content'] for row in history if row['role'] == 'user'] + [message])
+                    issue = reply_issue(generated, result['facts'], seller_context=seller_context)
+                    if not issue:
+                        break
+                    logger.warning('AI reply needs correction: reason=%s attempt=%s', issue, attempt + 1)
+                    if attempt:
+                        raise AIProviderError('invalid_response', stage=issue)
+                    response_facts = {**result['facts'], 'reply_correction': {
+                        'reason': issue,
+                        'requirements': 'Viết lại dựa trên đúng số liệu. Chỉ đề xuất, không nói đã thực hiện thay đổi. Không suy đoán shop mới mở từ số đơn bằng 0. Mọi số tiền tính lời/giảm giá phải lấy đúng từ pricing_analysis. Đơn đang giao không phải đơn cần gửi lại.',
+                    }}
                 generated = re.sub(r"\s*\((?:pending_orders|packing_orders|shipping_orders)\)", "", generated)
                 generated = re.sub(r"\bstock\s*[=:]?\s*(\d+)", r"còn \1", generated, flags=re.IGNORECASE)
                 result["answer"] = generated
             except AIProviderError as error:
+                logger.warning('Chat used grounded fallback: reason=%s stage=%s', error.reason, error.stage or 'unknown')
                 mode, provider_name, fallback_reason = "fallback", "deterministic_parser", error.reason
     if mode == "fallback" and natural_responses and command.intent == "unknown" and not simple and not forgetting:
-        result["answer"] = (
-            "Mình chưa kết nối được Muse Spark lúc này. Bạn có thể thử lại sau; "
-            "các câu hỏi trực tiếp về doanh số, SKU và tồn kho vẫn đọc được dữ liệu shop."
-        )
+        result["answer"] = fallback_explanation(fallback_reason)
     if forgetting:
         mode, provider_name, model_name, fallback_reason = 'ai', 'deterministic_parser', None, None
     result["suggestions"] = suggestions_for(command, result)
@@ -413,7 +478,7 @@ def execute_command(
                   f"• **Kiểm tra tồn kho:** {facts['tasks']['low_stock_products']} sản phẩm còn không quá 5.\n"
                   f"• **Chăm sóc khách hàng:** {facts['tasks']['unanswered_reviews']} đánh giá chưa phản hồi.\n\n"
                   "Bạn muốn mình đi sâu vào phần nào?")
-        return response(answer, "get_shop_insights", {"days": 7}, facts)
+        return response(answer, "get_shop_insights", {"days": command.days or 7}, facts)
 
     return response(
         "Mình chưa hiểu rõ việc bạn muốn làm. Bạn muốn xem tình hình bán hàng, tìm sản phẩm, "

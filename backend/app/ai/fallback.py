@@ -37,6 +37,21 @@ def normalize_text(message: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", message).strip().lower().split())
 
 
+def reporting_days(message: str) -> int | None:
+    text = normalize_text(message)
+    # A plan's future horizon is not the period whose sales are being read.
+    explicit = re.search(r'\b(\d{1,2})\s+ngày\s+(?:qua|gần đây|vừa rồi)\b', text)
+    if explicit and 1 <= int(explicit.group(1)) <= 30:
+        return int(explicit.group(1))
+    if 'hôm nay' in text or 'hom nay' in text:
+        return 1
+    if any(word in text for word in ('tuần qua', 'tuan qua', 'tuần vừa rồi', 'tuan vua roi')):
+        return 7
+    if any(word in text for word in ('tháng qua', 'thang qua')):
+        return 30
+    return None
+
+
 def parse_fallback(message: str, *, today: date) -> ParsedCommand:
     text = normalize_text(message)
     sku = extract_sku(text)
@@ -50,7 +65,7 @@ def parse_fallback(message: str, *, today: date) -> ParsedCommand:
         'chiến lược', 'chien luoc', 'tăng doanh thu', 'tang doanh thu',
         'giữ khách', 'giu khach', 'khách mục tiêu', 'khach muc tieu',
     )) or re.search(r'\b(?:lời|lãi|loi|lai)\b', text) or re.search(r'(?:có nên|co nen|nên|nen).{0,45}(?:giá|gia|bán|ban|giảm|giam|tăng|tang)', text):
-        return ParsedCommand(intent='sales_advice', sku=sku)
+        return ParsedCommand(intent='sales_advice', sku=sku, days=reporting_days(message))
 
     if any(phrase in text for phrase in CHANGE_PRICE_PHRASES):
         return ParsedCommand(
@@ -59,8 +74,8 @@ def parse_fallback(message: str, *, today: date) -> ParsedCommand:
             new_price_vnd=extract_price(text, sku=sku),
         )
 
-    if any(phrase in text for phrase in ("nên làm gì", "nen lam gi", "tư vấn", "tu van", "viết mô tả", "viet mo ta", "viết bài", "lên kế hoạch", "cải thiện", "ưu tiên", "uu tien", "phân tích", "phan tich")):
-        return ParsedCommand(intent="sales_advice", sku=sku)
+    if any(phrase in text for phrase in ("nên làm gì", "nen lam gi", "tư vấn", "tu van", "viết mô tả", "viet mo ta", "viết bài", "lên kế hoạch", "lập kế hoạch", "lap ke hoach", "kế hoạch hành động", "cải thiện", "ưu tiên", "uu tien", "phân tích", "phan tich")):
+        return ParsedCommand(intent="sales_advice", sku=sku, days=reporting_days(message))
 
     search = re.search(r"(?:tìm kiếm|tim kiem|tìm|tim)(?:\s+sản phẩm|\s+san pham)?\s+(.+)", text)
     if search and not sku and not any(phrase in text for phrase in LOW_STOCK_PHRASES):

@@ -26,12 +26,20 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
             direct.intent == 'change_price' and direct.sku is not None) or (
             direct.intent == 'sales_advice' and not _wants_ai_description(payload.message))
         editing_draft = bool(re.search(r'(?:^|[,;\n])\s*(?:tên(?:\s+sản phẩm)?|giá(?:\s+bán)?|tồn(?:\s+kho)?|số\s+lượng|ngành(?:\s+hàng)?|mô\s+tả)\s*[:=]', payload.message, re.I))
-        if active_draft is not None and not editing_draft and not _wants_ai_description(payload.message):
+        labeled_edit = editing_draft
+        # Inventory keywords occur in listings too ("kho còn 20 cái"). Do not
+        # divert the seller's listing paragraph into a shop inventory query.
+        listing_turn = bool(re.search(r'\bđăng\b|\b(?:tạo|thêm)\s+(?:sản phẩm|mặt hàng)|\b(?:tiêu đề|nội dung|caption)\s*[:=]', payload.message, re.I))
+        commercial_detail = bool(re.search(r'\d[\d.,]*\s*(?:k\b|tr\b|triệu\b|nghìn\b|đ\b|₫)|\b(?:giá|tồn kho|kho còn|còn lại)\s*[:=]?\s*\d', payload.message, re.I))
+        question = bool(re.search(r'\?|bao nhiêu|thế nào|nên bán|nên để|tư vấn|kiểm tra|xem\s+(?:kho|tồn|doanh)', payload.message, re.I))
+        editing_draft = editing_draft or listing_turn or (commercial_detail and not question and not (direct.intent == 'change_price' and direct.sku))
+        if active_draft is not None and not labeled_edit and not listing_turn and not _wants_ai_description(payload.message):
             last = recent_runs(session, shop, conversation_id, limit=1)
             if last and last[-1].tool_name == 'calculate_pricing' and direct.intent == 'unknown':
                 # A bare "100k" after an advisor asks for cost is a cost answer,
                 # not the draft's selling price. Labelled draft edits still resume it.
                 asking_shop = True
+                editing_draft = False
         asking_shop = asking_shop and not editing_draft
         if active_draft is not None and not asking_shop and not is_forget_request(payload.message):
             return ChatResponse(data=await advance_product_draft(

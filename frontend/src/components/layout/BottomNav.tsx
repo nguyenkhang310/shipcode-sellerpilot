@@ -2,8 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
-import { useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, Easing, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ReactNode, useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, Animated, Easing, Image, Platform, Pressable, PressableProps, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/ThemeProvider';
 
@@ -17,6 +17,20 @@ const ITEMS = [
   { key: 'orders', label: 'Đơn hàng', icon: 'receipt' },
   { key: 'shop', label: 'Shop', icon: 'storefront' },
 ] as const;
+
+function TabFeedback({ children, reduceMotion, ...props }: PressableProps & { children: ReactNode; reduceMotion: boolean }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const settle = (pressed: boolean) => {
+    if (reduceMotion) return;
+    Animated.spring(scale, { toValue: pressed ? .94 : 1, stiffness: 380, damping: 27, mass: .65,
+      useNativeDriver: Platform.OS !== 'web', isInteraction: false }).start();
+  };
+  useEffect(() => () => scale.stopAnimation(), [scale]);
+  return <Pressable {...props} onPressIn={() => settle(true)} onPressOut={() => settle(false)}>
+    <Animated.View style={{ flex: 1, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', gap: 3,
+      transform: [{ scale }] }}>{children}</Animated.View>
+  </Pressable>;
+}
 
 export function BottomNav({ tab, onTab, reduceMotion = false }: { tab: MainTab; onTab: (tab: MainTab) => void; reduceMotion?: boolean }) {
   const { ui, isDark, IOS } = useTheme();
@@ -51,9 +65,9 @@ export function BottomNav({ tab, onTab, reduceMotion = false }: { tab: MainTab; 
       </View>
       <View style={ui.dockInner} onLayout={event => setWidth(event.nativeEvent.layout.width)}>
         <Animated.View testID="dock-selection" pointerEvents="none" style={[ui.dockPill, { width: itemWidth, opacity: tab === 'assistant' ? 0 : 1, transform: [{ translateX: x }] }]} />
-        {ITEMS.map(item => item.key === 'assistant' ? <Pressable key={item.key} accessibilityRole="tab" accessibilityLabel="SellerPilot" accessibilityHint="Trò chuyện với trợ lý bán hàng" accessibilityState={{ selected: tab === item.key }} onPress={() => choose(item.key)} style={({ pressed }) => [ui.aiNavItem, pressed && { transform: [{ scale: .94 }] }]}>
+        {ITEMS.map(item => item.key === 'assistant' ? <TabFeedback reduceMotion={reduceMotion} key={item.key} accessibilityRole="tab" accessibilityLabel="SellerPilot" accessibilityHint="Trò chuyện với trợ lý bán hàng" accessibilityState={{ selected: tab === item.key }} aria-selected={tab === item.key} onPress={() => choose(item.key)} style={ui.aiNavItem}>
           <View style={[ui.aiNavRing, tab === 'assistant' && ui.aiNavRingActive]}><Image source={SELLERPILOT_TAB_LOGO} fadeDuration={0} resizeMode="contain" style={ui.aiNavLogo} /></View>
-        </Pressable> : <Pressable key={item.key} accessibilityRole="tab" accessibilityLabel={item.label} accessibilityState={{ selected: tab === item.key }} onPress={() => choose(item.key)} style={({ pressed }) => [ui.dockTab, pressed && { opacity: .65 }]}><Ionicons name={item.icon} size={25} color={tab === item.key ? isDark ? '#64ADFF' : '#007AFF' : isDark ? '#F2F2F7' : '#252527'} /><Text numberOfLines={1} maxFontSizeMultiplier={1.2} style={[ui.dockLabel, itemWidth > 0 && itemWidth < 60 && { fontSize: 10 }, tab === item.key && ui.dockSelected]}>{item.label}</Text></Pressable>)}
+        </TabFeedback> : <TabFeedback reduceMotion={reduceMotion} key={item.key} accessibilityRole="tab" accessibilityLabel={item.label} accessibilityState={{ selected: tab === item.key }} aria-selected={tab === item.key} onPress={() => choose(item.key)} style={ui.dockTab}><Ionicons name={item.icon} size={25} color={tab === item.key ? isDark ? '#64ADFF' : '#007AFF' : isDark ? '#F2F2F7' : '#252527'} /><Text numberOfLines={1} maxFontSizeMultiplier={1.2} style={[ui.dockLabel, itemWidth > 0 && itemWidth < 60 && { fontSize: 10 }, tab === item.key && ui.dockSelected]}>{item.label}</Text></TabFeedback>)}
       </View>
     </View>
   </View>;

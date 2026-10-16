@@ -13,13 +13,14 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.ai.contracts import AIProviderError
-from app.ai.fallback import extract_price, normalize_text
+from app.ai.fallback import PRICE_RE, extract_price, normalize_text, parse_money
 from app.integrations.ute_mall import (
     ProductPublishConflictError,
     UTEMallRepository,
 )
 from app.models.agent_run import AgentRun
 from app.models.product_draft import ProductDraft
+from app.services.conversation_state import ensure_conversation_open
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_PRODUCT_IMAGES = 6
@@ -37,6 +38,12 @@ class ListingCopy(BaseModel):
     description: str | None = Field(default=None, max_length=10_000)
     category_id: int | None = None
     clarification: str | None = Field(default=None, max_length=600)
+    name_evidence: str | None = Field(default=None, max_length=2000)
+    description_evidence: str | None = Field(default=None, max_length=4000)
+    price_vnd: int | None = Field(default=None, ge=1000, le=1_000_000_000, strict=True)
+    stock: int | None = Field(default=None, ge=0, le=1_000_000, strict=True)
+    price_evidence: str | None = Field(default=None, max_length=500)
+    stock_evidence: str | None = Field(default=None, max_length=500)
 
 
 class ProductDraftError(ValueError):
@@ -173,6 +180,7 @@ def create_product_draft_images(
     if not 1 <= len(contents) <= MAX_PRODUCT_IMAGES:
         raise ProductDraftError(f"Mỗi sản phẩm cần từ 1 đến {MAX_PRODUCT_IMAGES} ảnh.")
     conversation_id = conversation_id or str(uuid4())
+    ensure_conversation_open(session, shop.seller_shop_slug or 'local', conversation_id)
     existing = get_active_draft(session, shop, conversation_id)
     if existing:
         raise ProductDraftConflictError("Hãy hoàn tất hoặc hủy sản phẩm đang soạn trước khi thêm ảnh mới.")
@@ -236,6 +244,8 @@ async def advance_product_draft(
     fallback_reason = None
     categories = shop.product_categories()
     repaired = _repair_command_content(draft)
+    was_ready = draft.status == 'ready'
+    original = (draft.name, draft.description, draft.price_vnd, draft.stock, draft.category_id)
     wants_copy = _wants_ai_description(message)
     if wants_copy:
         draft.copy_instructions = message[:2000]
@@ -245,20 +255,15 @@ async def advance_product_draft(
         draft.decided_at = draft.updated_at = datetime.utcnow()
         delete_draft_images(draft, upload_dir)
         answer = "Đã hủy bản nháp và xóa ảnh chưa đăng."
-    elif draft.status == "ready" and not wants_copy:
-        if _is_publish_command(message):
-            published = publish_product_draft(session, shop, draft.id)
-            answer = (
-                f"Đã đăng **{published.name}** lên gian hàng UTech Official. "
-                f"SKU **{published.sku}** đã đồng bộ với mục Sản phẩm và tồn kho."
-            )
-            return _save_draft_turn(
-                session, published, message, answer, used_model, fallback_reason,
-                tool="publish_product", ai_provider=ai_provider,
-            )
-        changed = _edit_ready_draft(draft, message, shop)
-        answer = _ready_answer(draft, prefix="Mình đã cập nhật bản nháp.") if changed else (
-            "Bạn muốn sửa tên, mô tả hay giá? Mình có thể viết lại nội dung cho sản phẩm này."
+    elif draft.status == "ready" and not wants_copy and _is_publish_command(message):
+        published = publish_product_draft(session, shop, draft.id)
+        answer = (
+            f"Đã đăng **{published.name}** lên gian hàng UTech Official. "
+            f"SKU **{published.sku}** đã đồng bộ với mục Sản phẩm và tồn kho."
+        )
+        return _save_draft_turn(
+            session, published, message, answer, used_model, fallback_reason,
+            tool="publish_product", ai_provider=ai_provider,
         )
     else:
         changed = _apply_explicit_details(draft, message, categories)
@@ -266,36 +271,28 @@ async def advance_product_draft(
         field = fields[0] if fields else None
         validation_error = None
         clarification = None
-
-        if field == "name" and "name" not in changed:
-            value = _candidate_product_name(message)
-            if value and 5 <= len(value) <= 200:
-                draft.name = value
-                changed.add("name")
-            elif not wants_copy and not _is_generic_product_command(message):
-                validation_error = "Bạn cho mình tên hoặc loại sản phẩm đang bán nhé."
-        elif field == "price_vnd" and not changed and not wants_copy:
+        simple_name = field == "name" and _simple_name_reply(message)
+        bare = bool(re.fullmatch(r"[\d.,]+\s*(?:đ|₫|vnd|k|nghìn|ngàn|triệu|tr|sản phẩm|cái|chiếc)?", text))
+        if simple_name and not changed:
+            draft.name = _candidate_product_name(message)
+            changed.add("name")
+        elif bare and not changed and field == "price_vnd":
             value = extract_price(text, sku=None)
-            if value is None or not 1_000 <= value <= 1_000_000_000:
-                validation_error = "Bạn nhập giá bán từ 1.000đ đến 1.000.000.000đ nhé. Ví dụ: **249.000đ**."
-            else:
+            if value is not None and 1_000 <= value <= 1_000_000_000:
                 draft.price_vnd = value
-        elif field == "stock" and not changed and not wants_copy:
-            value = _extract_stock(text)
-            if value is None or not 0 <= value <= 1_000_000:
-                validation_error = "Bạn nhập số lượng tồn kho từ 0 đến 1.000.000 nhé."
             else:
+                validation_error = "Bạn nhập giá bán từ 1.000đ đến 1.000.000.000đ nhé."
+        elif bare and not changed and field == "stock":
+            value = _extract_stock(text)
+            if value is not None and 0 <= value <= 1_000_000:
                 draft.stock = value
+            else:
+                validation_error = "Bạn nhập số lượng tồn kho từ 0 đến 1.000.000 nhé."
         elif field == "category_id" and not changed and not wants_copy:
             category = _match_category(message, categories)
             if category:
                 draft.category_id, draft.category_name = category["id"], category["name"]
-            else:
-                validation_error = "Mình chưa xác định chắc ngành hàng. " + _category_question(categories)
-        elif field == "description" and not changed and not wants_copy:
-            value = _description_value(message)
-            if value and len(value) >= 10:
-                draft.description = value[:10_000]
+                changed.add("category_id")
 
         if draft.category_id is None and draft.name:
             inferred = _match_category(draft.name, categories)
@@ -304,33 +301,34 @@ async def advance_product_draft(
 
         # Understand the images when the item is unknown, and compose copy
         # automatically once the seller has supplied the commercial facts.
-        identify_from_images = draft.name is None and (
-            wants_copy or _is_generic_product_command(message) or repaired
-        )
         core_complete = all(getattr(draft, key) is not None for key in ("name", "price_vnd", "stock"))
-        if wants_copy or identify_from_images or (core_complete and not draft.description):
+        # A natural message can contain every field in any order. Interpret the
+        # whole turn before deciding which question to ask, including ready edits.
+        semantic_turn = not bare and not simple_name and (bool(missing_fields(draft)) or not changed)
+        needs_model = wants_copy or semantic_turn or repaired or (core_complete and not draft.description)
+        if needs_model:
             try:
                 copy = await _compose_product_copy(session, ai_provider, draft, categories, upload_dir, message)
                 used_model = True
+                _apply_model_details(draft, copy, message, categories, rewrite=wants_copy)
                 clarification = copy.clarification
-                if not clarification:
-                    if copy.name:
-                        draft.name = copy.name.strip()
-                    if copy.description:
-                        draft.description = copy.description.strip()
-                    if draft.category_id is None and copy.category_id is not None:
-                        category = next(item for item in categories if item["id"] == copy.category_id)
-                        draft.category_id, draft.category_name = category["id"], category["name"]
-                    validation_error = None
+                validation_error = None
             except AIProviderError as error:
                 fallback_reason = error.reason
-                clarification = (
-                    "Mình chưa gọi được AI để soạn nội dung lúc này. Bản nháp và ảnh vẫn được giữ. "
-                    "Bạn nhắn **viết lại nội dung** để thử lại."
-                    if draft.name else
-                    "Mình chưa đọc được ảnh bằng AI. Bạn đang bán sản phẩm gì? "
-                    "Cho mình tên hoặc vài đặc điểm để mình viết tiêu đề và mô tả."
-                )
+                # Keep supplied facts and ask only for what remains. Never pass
+                # a paragraph/instruction off as a product title when AI is offline.
+                if was_ready:
+                    clarification = 'Mình chưa xử lý được yêu cầu sửa lúc này. Thông tin bản nháp vẫn được giữ; bạn thử lại giúp mình nhé.'
+                elif draft.name and not draft.description:
+                    clarification = (
+                        "Mình chưa gọi được AI để soạn nội dung lúc này. Bản nháp và ảnh vẫn được giữ. "
+                        "Bạn gửi mô tả sẵn có, hoặc nhắn **viết lại nội dung** để thử lại."
+                    )
+                elif not draft.name:
+                    clarification = (
+                        "Mình chưa đọc được ảnh bằng AI. Bạn đang bán sản phẩm gì? "
+                        "Cho mình tên hoặc vài đặc điểm để mình viết tiêu đề và mô tả."
+                    )
 
         remaining = missing_fields(draft)
         if clarification:
@@ -340,10 +338,12 @@ async def advance_product_draft(
             if not draft.sku:
                 draft.sku = f"SP-{draft.id:06d}-{secrets.token_hex(2).upper()}"
             draft.status = "ready"
-            answer = _ready_answer(draft)
+            updated = original != (draft.name, draft.description, draft.price_vnd, draft.stock, draft.category_id)
+            prefix = ('Mình đã cập nhật bản nháp.' if updated else 'Bản nháp hiện tại đã đủ thông tin.') if was_ready else 'Mình đã chuẩn bị xong bản nháp.'
+            answer = _ready_answer(draft, prefix=prefix)
         else:
             draft.status = "collecting"
-            answer = validation_error or _question_for(remaining[0], categories)
+            answer = validation_error or _missing_question(remaining, categories)
             if used_model and draft.name and draft.description and not validation_error:
                 answer = f"Mình đã soạn tiêu đề và mô tả cho **{draft.name}**.\n\n" + answer
         if repaired:
@@ -407,6 +407,7 @@ def _owned_draft(session, shop, draft_id):
     draft = session.get(ProductDraft, draft_id)
     if not draft or draft.shop_slug != (shop.seller_shop_slug or "local"):
         raise ProductDraftNotFoundError(draft_id)
+    ensure_conversation_open(session, draft.shop_slug, draft.conversation_id)
     return draft
 
 
@@ -446,21 +447,24 @@ async def _compose_product_copy(session, ai_provider, draft, categories, upload_
     ).order_by(AgentRun.id.desc()).limit(6)).all()))
     history = []
     for run in runs:
-        history.extend([{'role': 'user', 'content': run.message[:1000]},
+        history.extend([{'role': 'user', 'content': run.message[:4000]},
                         {'role': 'assistant', 'content': run.answer[:600]}])
-    history.append({'role': 'user', 'content': message[:2000]})
+    history.append({'role': 'user', 'content': message[:4000]})
     facts = {
         'name': draft.name, 'description': draft.description,
         'category_id': draft.category_id, 'category': draft.category_name,
         'price_vnd': draft.price_vnd, 'stock': draft.stock,
         'copy_instructions': draft.copy_instructions,
         'allowed_categories': categories,
+        'current_message': message,
+        'missing_fields': missing_fields(draft),
+        'response_schema': ListingCopy.model_json_schema(),
     }
     if hasattr(ai_provider, 'compose_listing'):
         images = []
-        # A known product can be rewritten from its confirmed facts. Re-send
-        # images only while identifying it, avoiding repeated vision requests.
-        if not draft.name:
+        # Include the gallery on the first interpretation, even if the seller
+        # supplied a name. Later price/stock corrections can reuse confirmed facts.
+        if not draft.name or not any(run.provider in {'opencode', 'ollama'} and run.model for run in runs):
             for item in draft_stored_images(draft):
                 path = upload_dir / Path(item['filename']).name
                 if path.is_file():
@@ -477,16 +481,58 @@ async def _compose_product_copy(session, ai_provider, draft, categories, upload_
         result = ListingCopy.model_validate_json(raw)
     except (ValidationError, ValueError, TypeError, AttributeError) as error:
         raise AIProviderError('invalid_response') from error
-    if result.clarification:
-        return result
     if result.category_id is not None and result.category_id not in {item['id'] for item in categories}:
         raise AIProviderError('invalid_response')
-    if (not result.name or len(result.name.strip()) < 5
-            or _is_generic_product_command(result.name) or _wants_ai_description(result.name)
-            or not result.description or len(result.description.strip()) < 10
+    if result.name is not None and (len(result.name.strip()) < 5
+            or _is_generic_product_command(result.name) or _wants_ai_description(result.name)):
+        raise AIProviderError('invalid_response')
+    if result.description is not None and (len(result.description.strip()) < 10
             or _is_generic_product_command(result.description) or _wants_ai_description(result.description)):
         raise AIProviderError('invalid_response')
+    if not any((result.name, result.description, result.price_vnd, result.stock is not None, result.category_id, result.clarification)):
+        raise AIProviderError('invalid_response')
     return result
+
+
+def _evidence_in_message(evidence: str | None, message: str) -> bool:
+    return bool(evidence and normalize_text(evidence) in normalize_text(message))
+
+
+def _commercial_context(evidence: str, message: str, *, stock: bool = False) -> bool:
+    text, quote = normalize_text(message), normalize_text(evidence)
+    for match in re.finditer(re.escape(quote), text):
+        context = _plain(text[max(0, match.start() - 70):match.end()])
+        markers = re.findall(r'\b(?:gia von|gia nhap|chi phi|phi ship|phi van chuyen|gia cu|gia goc|gia ban|ban|kho|con|so luong|ram|dung luong)\b', context)
+        if markers and markers[-1] in {'gia von', 'gia nhap', 'chi phi', 'phi ship', 'phi van chuyen', 'gia cu', 'gia goc', 'ram', 'dung luong'}:
+            continue
+        if stock:
+            if re.search(r'\b(?:cai|chiec|san pham|sp)\b', _plain(quote)) or markers and markers[-1] in {'kho', 'con', 'so luong'}:
+                return True
+        elif any(item.group(2) for item in PRICE_RE.finditer(quote)) or markers and markers[-1] in {'gia ban', 'ban'}:
+            return True
+    return False
+
+
+def _apply_model_details(draft, copy: ListingCopy, message: str, categories, *, rewrite: bool):
+    """Model interprets language; backend verifies seller-supplied commercial values."""
+    if copy.price_vnd is not None and _evidence_in_message(copy.price_evidence, message):
+        amounts = [parse_money(*match.groups()) for match in PRICE_RE.finditer(normalize_text(copy.price_evidence))]
+        if amounts == [copy.price_vnd] and _commercial_context(copy.price_evidence, message):
+            draft.price_vnd = copy.price_vnd
+    if copy.stock is not None and _evidence_in_message(copy.stock_evidence, message):
+        numbers = re.findall(r"(?<![\w.,])\d+(?![\w.,])", copy.stock_evidence or '')
+        if numbers == [str(copy.stock)] and _commercial_context(copy.stock_evidence, message, stock=True):
+            draft.stock = copy.stock
+    if not copy.clarification:
+        if copy.name and (draft.name is None or rewrite or _evidence_in_message(copy.name_evidence, message)):
+            draft.name = copy.name.strip()
+        if copy.description and (draft.description is None or rewrite or _evidence_in_message(copy.description_evidence, message)):
+            # Preserve the seller's supplied prose verbatim; generated copy is
+            # used only when no source description was supplied or rewriting was requested.
+            draft.description = copy.description_evidence.strip() if _evidence_in_message(copy.description_evidence, message) else copy.description.strip()
+        if copy.category_id is not None and (draft.category_id is None or _evidence_in_message(copy.name_evidence, message)):
+            category = next(item for item in categories if item['id'] == copy.category_id)
+            draft.category_id, draft.category_name = category['id'], category['name']
 
 
 def _record_run(session, draft, *, message, answer, tool, facts, provider="deterministic_parser", model=None, fallback_reason=None):
@@ -516,8 +562,14 @@ def _chat_data(run, draft, answer, tool):
 
 
 def _extract_stock(text):
-    match = re.search(r"(?<![\d.,])([0-9]{1,7})(?:\s*(?:sản phẩm|san pham|cái|cai|chiếc|chiec))?\b", text)
-    return int(match.group(1)) if match else None
+    match = re.fullmatch(r"\s*([0-9][0-9.,]*)(?:\s*(?:sản phẩm|san pham|cái|cai|chiếc|chiec))?\s*", text)
+    return _stock_number(match.group(1)) if match else None
+
+
+def _stock_number(value: str) -> int | None:
+    if re.fullmatch(r'\d+|\d{1,3}(?:[.,]\d{3})+', value):
+        return int(value.replace('.', '').replace(',', ''))
+    return None
 
 
 def _plain(value):
@@ -526,23 +578,23 @@ def _plain(value):
 
 
 FIELD_LABELS = (
-    r"tên(?:\s+sản phẩm)?|ten(?:\s+san pham)?|"
+    r"tên(?:\s+sản phẩm)?|ten(?:\s+san pham)?|tiêu\s+đề|tieu\s+de|"
     r"giá(?:\s+bán)?|gia(?:\s+ban)?|"
     r"tồn(?:\s+kho)?|ton(?:\s+kho)?|số\s+lượng|so\s+luong|"
     r"ngành(?:\s+hàng)?|nganh(?:\s+hang)?|danh\s+mục|danh\s+muc|"
-    r"mô\s+tả|mo\s+ta"
+    r"mô\s+tả|mo\s+ta|nội\s+dung|noi\s+dung|caption"
 )
 
 
 def _extract_labeled_value(message: str, labels: str) -> str | None:
     match = re.search(
         rf"(?:^|[,;\n])\s*(?:{labels})\s*(?:là\s+|la\s+|[:=\-]\s*)(.+)",
-        message.strip(), flags=re.I,
+        message.strip(), flags=re.I | re.S,
     )
     if not match:
         return None
-    value = re.split(rf"[,;\n]\s*(?=(?:{FIELD_LABELS})\b)", match.group(1), maxsplit=1, flags=re.I)[0]
-    return value.strip(" \t\r\n.,;:\"'") or None
+    value = re.split(rf"[,;\n]\s*(?=(?:{FIELD_LABELS})\s*(?:là\s|la\s|[:=\-]))", match.group(1), maxsplit=1, flags=re.I)[0]
+    return value.strip(" \t\r\n\"'") or None
 
 
 def _is_generic_product_command(message: str) -> bool:
@@ -616,6 +668,17 @@ def _candidate_product_name(message: str) -> str | None:
     return value
 
 
+def _simple_name_reply(message: str) -> bool:
+    """A short product label is safe locally; conversational paragraphs need the model."""
+    text = _plain(message)
+    return bool(5 <= len(message.strip()) <= 100 and '\n' not in message
+                and text not in {'dong y', 'duoc roi', 'cam on', 'rat tot', 'oke nhe', 'ok roi'}
+                and len(text.split()) <= 12
+                and not re.search(r'\b(?:minh|toi|giup|dang|gia|kho|con|doi|sua|cho|hay|nhe|mo ta|noi dung|tieu de)\b', text)
+                and not re.search(r'\d\s*(?:k|tr|trieu|nghin|ngan|đ|₫)\b', text)
+                and _candidate_product_name(message))
+
+
 def _description_value(message: str) -> str | None:
     if _wants_ai_description(message) or _is_publish_command(message) or _is_generic_product_command(message):
         return None
@@ -626,50 +689,61 @@ def _description_value(message: str) -> str | None:
 def _extract_labeled_stock(message: str) -> int | None:
     match = re.search(
         r"\b(?:tồn(?:\s+kho)?|ton(?:\s+kho)?|số\s+lượng|so\s+luong|sl)\s*"
-        r"(?:là\s+|la\s+|[:=\-]\s*)?([0-9]{1,7})\b",
+        r"(?:là\s+|la\s+|[:=\-]\s*)?([0-9][0-9.,]*)\b",
         message, flags=re.I,
     )
-    return int(match.group(1)) if match else None
+    return _stock_number(match.group(1).rstrip('.,')) if match else None
 
 
 def _extract_labeled_price(message: str) -> int | None:
     value = _extract_labeled_value(message, r"giá(?:\s+bán)?|gia(?:\s+ban)?")
     if not value:
-        return None
-    return extract_price(normalize_text(value), sku=None)
+        match = re.search(r'\b(?:giá(?:\s+bán)?|gia(?:\s+ban)?)\s*(?:là|la|[:=])?\s*(.+)', message, re.I)
+        value = match.group(1) if match else ''
+    match = PRICE_RE.match(normalize_text(value))
+    return parse_money(*match.groups()) if match else None
 
 
 def _apply_explicit_details(draft, message: str, categories: list[dict]) -> set[str]:
-    """Apply only clearly labelled facts; never turn an instruction into catalog copy."""
+    """Apply clearly labelled facts, including corrections to an existing draft."""
     changed: set[str] = set()
-    if draft.name is None:
-        name = _extract_labeled_value(message, r"tên(?:\s+sản phẩm)?|ten(?:\s+san pham)?")
-        name = name or _command_product_name(message)
-        if name and _candidate_product_name(name) is not None and 5 <= len(name) <= 200:
-            draft.name = name
-            changed.add("name")
-    if draft.price_vnd is None and re.search(r"\b(?:giá|gia)(?:\s+bán|\s+ban)?\b", message, flags=re.I):
+    name = _extract_labeled_value(message, r"tên(?:\s+sản phẩm)?|ten(?:\s+san pham)?|tiêu\s+đề|tieu\s+de")
+    if not name:
+        candidate = _command_product_name(message)
+        name = candidate if candidate and _simple_name_reply(candidate) else None
+    if name and _candidate_product_name(name) is not None and 5 <= len(name) <= 200:
+        draft.name = name
+        changed.add("name")
+    if re.search(r"\b(?:giá|gia)(?:\s+bán|\s+ban)?\b", message, flags=re.I):
         price = _extract_labeled_price(message)
         if price is not None and 1_000 <= price <= 1_000_000_000:
             draft.price_vnd = price
             changed.add("price_vnd")
-    if draft.stock is None:
-        stock = _extract_labeled_stock(message)
-        if stock is not None and 0 <= stock <= 1_000_000:
-            draft.stock = stock
-            changed.add("stock")
-    if draft.category_id is None:
-        category_text = _extract_labeled_value(message, r"ngành(?:\s+hàng)?|nganh(?:\s+hang)?|danh\s+mục|danh\s+muc")
-        category = _match_category(category_text or draft.name or '', categories)
-        if category:
-            draft.category_id, draft.category_name = category["id"], category["name"]
-            changed.add("category_id")
-    if draft.description is None:
-        description = _extract_labeled_value(message, r"mô\s+tả|mo\s+ta")
-        if description and not _wants_ai_description(description) and len(description) >= 10:
-            draft.description = description[:10_000]
-            changed.add("description")
+    stock = _extract_labeled_stock(message)
+    if stock is not None and 0 <= stock <= 1_000_000:
+        draft.stock = stock
+        changed.add("stock")
+    category_text = _extract_labeled_value(message, r"ngành(?:\s+hàng)?|nganh(?:\s+hang)?|danh\s+mục|danh\s+muc")
+    category = _match_category(category_text or (draft.name if draft.category_id is None else '') or '', categories)
+    if category:
+        draft.category_id, draft.category_name = category["id"], category["name"]
+        changed.add("category_id")
+    description = _extract_labeled_value(message, r"mô\s+tả|mo\s+ta|nội\s+dung|noi\s+dung|caption")
+    if description and not _wants_ai_description(description) and len(description) >= 10:
+        draft.description = _clean_supplied_description(description)[:10_000]
+        changed.add("description")
     return changed
+
+
+def _clean_supplied_description(description: str) -> str:
+    lines = description.strip().splitlines()
+    while lines:
+        last = _plain(lines[-1]).strip(' .!?')
+        if not (_is_publish_command(lines[-1]) or _is_generic_product_command(lines[-1])
+                or re.fullmatch(r'(?:dang|dua)\s+(?:giup|cho)\s+(?:minh|toi|em)(?:\s+(?:nhe|nha|di))*', last)):
+            break
+        lines.pop()
+    return '\n'.join(lines).strip()
 
 
 def _match_category(message, categories):
@@ -726,36 +800,10 @@ def _question_for(field: str, categories: list[dict]) -> str:
     }[field]
 
 
-def _edit_ready_draft(draft, message, shop):
-    text = normalize_text(message)
-    name = _extract_labeled_value(message, r"tên(?:\s+sản phẩm)?|ten(?:\s+san pham)?")
-    if name and 5 <= len(name) <= 200:
-        draft.name = name
-        draft.updated_at = datetime.utcnow()
-        return True
-    description = _extract_labeled_value(message, r"mô\s+tả|mo\s+ta")
-    if description and len(description) >= 10 and not _wants_ai_description(description):
-        draft.description = description[:10_000]
-        draft.updated_at = datetime.utcnow()
-        return True
-    if any(word in text for word in ("giá", "gia")):
-        value = extract_price(text, sku=None)
-        if value is not None and 1_000 <= value <= 1_000_000_000:
-            draft.price_vnd = value
-            draft.updated_at = datetime.utcnow()
-            return True
-    if any(word in text for word in ("tồn", "ton", "số lượng", "so luong")):
-        value = _extract_stock(text)
-        if value is not None and 0 <= value <= 1_000_000:
-            draft.stock = value
-            draft.updated_at = datetime.utcnow()
-            return True
-    category = _match_category(message, shop.product_categories())
-    if category:
-        draft.category_id, draft.category_name = category["id"], category["name"]
-        draft.updated_at = datetime.utcnow()
-        return True
-    return False
+def _missing_question(fields: list[str], categories) -> str:
+    if fields == ['price_vnd', 'stock']:
+        return 'Bạn cho mình **giá bán** và **số lượng tồn kho** nhé. Ví dụ: 249k, còn 20 cái.'
+    return _question_for(fields[0], categories)
 
 
 def _ready_answer(draft, prefix="Mình đã chuẩn bị xong bản nháp."):

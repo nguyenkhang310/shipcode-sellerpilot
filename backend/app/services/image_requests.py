@@ -9,17 +9,22 @@ from app.models.chat_request import ChatRequestRecord
 from app.schemas.chat import ChatResponse
 from app.services.chat_requests import ChatTransaction, request_key
 from app.services.product_drafts import create_product_draft_images
+from app.services.conversation_state import ensure_conversation_open
 
 
 def upload_once(manager, shop, payload, contents, upload_dir):
     key = request_key(shop, payload.request_id)
+    manager.ensure_conversation_available(key[0], payload.conversation_id)
     fingerprint = hashlib.sha256(json.dumps(['images', str(payload.conversation_id),
         [hashlib.sha256(content).hexdigest() for content in contents]]).encode()).hexdigest()
     with manager.sessions() as source:
         bind = source.get_bind()
     with ChatTransaction(bind=bind, expire_on_commit=False, autoflush=False) as session:
+        ensure_conversation_open(session, key[0], payload.conversation_id)
         row = session.get(ChatRequestRecord, key)
         if row:
+            manager.ensure_conversation_available(key[0], row.conversation_id)
+            ensure_conversation_open(session, key[0], row.conversation_id)
             if row.fingerprint is not None and row.fingerprint != fingerprint:
                 raise HTTPException(409, detail={'code': 'request_id_conflict', 'message': 'Mã tải ảnh đã được dùng cho nội dung khác.'})
             return manager.result(key)

@@ -4,6 +4,7 @@ import re
 from sqlalchemy import select
 
 from app.ai.fallback import extract_price, extract_sku, normalize_text
+from app.ai.context import bounded_history
 from app.models.action import ActionProposal
 from app.models.agent_run import AgentRun
 from app.models.product_draft import ProductDraft
@@ -74,9 +75,12 @@ def history_messages(runs):
         runs = runs[last_reset + 1:]
     result = []
     for run in runs[-12:]:
-        result.extend([{"role": "user", "content": run.message[:1600]},
-                       {"role": "assistant", "content": run.answer[:1600]}])
-    return result
+        result.append({'role': 'user', 'content': run.message})
+        # A failed generation is not evidence that the next generation is also
+        # offline. Keep the seller's question without feeding error text back.
+        if not (run.intent == 'unknown' and run.mode == 'fallback' and run.fallback_reason):
+            result.append({'role': 'assistant', 'content': run.answer})
+    return bounded_history(result)
 
 
 def run_data(session, run):
