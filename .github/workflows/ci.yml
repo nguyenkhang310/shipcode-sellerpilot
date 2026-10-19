@@ -19,6 +19,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:api
+      - run: npm run test:extension
       - run: npm run build
       - run: npm run build:ios
 
@@ -58,3 +59,4 @@ jobs:
       - run: python tests/bootstrap_test.py
       - run: python bootstrap_demo.py --check
       - run: python -W ignore tests/commerce_test.py
+      - run: python -W ignore tests/demo_reviews_test.py

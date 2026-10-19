@@ -10,6 +10,7 @@ from sqlalchemy.dialects.sqlite import insert
 
 from app.ai.advisor_contracts import AdviceExtraction, AdvicePreparation
 from app.ai.contracts import AIProviderError
+from app.ai.catalog_query import catalog_lookup
 from app.ai.fallback import extract_sku, normalize_text
 from app.ai.money import money_mentions, single_money, affirmed_quote
 from app.ai.money import plain
@@ -320,8 +321,13 @@ async def enrich_advice(session, shop, provider, *, message, resolved, conversat
     if not sku and not extraction.new_scenario and not extraction.product_query:
         sku = extract_sku(normalize_text(resolved)) or previous.get('sku')
     candidates = []
+    catalog_search = None
     if extraction.product_query and not sku:
-        candidates = management.products(shop, extraction.product_query, limit=4)['items']
+        lookup = catalog_lookup('Tìm ' + extraction.product_query)
+        catalog_search = management.products(shop, limit=4,
+            **(lookup or {'query': extraction.product_query}))
+        catalog_search.update(lookup or {'query': extraction.product_query})
+        candidates = catalog_search['items']
         if len(candidates) == 1:
             sku = candidates[0]['sku']
     if sku:
@@ -402,5 +408,6 @@ async def enrich_advice(session, shop, provider, *, message, resolved, conversat
             'seller_preferences': preferences, 'memory_updates_saved': saved,
             'draft_context': draft_context,
             'selected_product': selected, 'candidate_products': candidates if len(candidates) > 1 else [],
+            'catalog_search': catalog_search,
             'pricing_context': {'scope': scope, 'sku': sku, 'topic': extraction.topic} if pricing else None,
             'pricing_analysis': pricing, 'context_extraction_error': analysis_error}

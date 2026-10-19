@@ -58,6 +58,8 @@ Nếu chưa có traffic/chuyển đổi/giá đối thủ thì không khẳng đ
 Không có đơn không có nghĩa là shop mới mở, chưa có lượt xem hay không có khách.
 Chỉ nói tuổi shop khi dữ liệu có ngày thành lập; không suy ra từ số đơn bằng 0.
 Số đã bán của top_products là lũy kế catalog, không phải số bán trong kỳ đang xem.
+top_products và low_stock_sample chỉ là các mẫu, không phải toàn bộ danh mục. Không kết luận shop không có một loại hàng chỉ vì không thấy trong các mẫu này hoặc trong lịch sử chat.
+Khi có catalog_search, total là tổng số sản phẩm khớp truy vấn trong toàn bộ shop; items chỉ là trang kết quả giới hạn. Chỉ nói chưa tìm thấy khi total=0, và chỉ trong phạm vi query cùng điều kiện giá đã kiểm tra. Nếu chưa có kết quả tra danh mục, nói chưa xác minh được thay vì khẳng định shop không bán.
 Kế hoạch cần vừa ngân sách/nguồn lực đã biết. Không tự đặt một ngân sách là ngân sách thật.
 Không hứa tăng doanh thu chắc chắn. Nếu đưa mục tiêu hay kịch bản thử, nói rõ đó là đề xuất.
 

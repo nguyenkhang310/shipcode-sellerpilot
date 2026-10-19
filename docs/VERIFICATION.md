@@ -225,3 +225,25 @@ hoặc kết nối Shopee/TikTok.
 - Giao diện kiểm tra bằng Chrome riêng với RPC/dữ liệu giả lập, không dùng tài
   khoản Shopee. Chưa kiểm chứng bộ đọc trên DOM Shopee đăng nhập hoặc đầy đủ tồn
   kho thật; các kiểm thử trên không chứng minh việc đọc toàn shop đã thành công.
+
+### Tích hợp nhánh thach và thay đổi local — 19/10/2026
+
+- Gộp `origin/thach` tại `ceaf09f` với phần đồng bộ trình duyệt và composer local;
+  giữ lịch sử commit của thành viên. Nhánh bổ sung tra danh mục theo nhiều từ khóa,
+  lọc giá trước phân trang, timeout Gemini nhiều key và ảnh tài khoản trên app.
+- Bắt và sửa regression: “Còn hôm nay thì sao?” bị nhận thành tên sản phẩm, làm
+  mất kỳ báo cáo. Câu hỏi theo thời gian và đại từ chưa xác định tiếp tục đi qua
+  ngữ cảnh hội thoại; truy vấn giá chưa hiểu đầy đủ không vào đường tra nhanh.
+- Hỗ trợ khoảng giá “từ… tới…”, phân biệt từ/đến với tên hàng “tủ/đèn”; không áp
+  dụng điều kiện giá do classifier tự đặt mà không có bằng chứng từ tin nhắn.
+- Thu hẹp cách lấy giá theo tham chiếu “giá của nó là…” để không nhận thông số
+  camera/màn hình 4K thành giá 4.000đ. Giữ phân biệt giá vốn, phí và giá bán.
+- Đạt: **499 backend tests** (JUnit: 0 failed/errors/skipped), **30 store tests**
+  gồm bootstrap 6, commerce 18, reviews 6; commerce kiểm tra 181 liên kết người bán.
+  Store scripts chạy trong các tiến trình riêng với SQLite tạm, tránh chia sẻ
+  module Flask giữa nhóm test. Không sửa database shop hoặc dùng model bên ngoài.
+- Đạt TypeScript, 11 test API/chat, 19 test extension, DOM fixture và panel fixture
+  320/380/520px; xuất web/extension (1 bundle, 22 tài nguyên) và iOS/Hermes thành công.
+  Kiểm tra mới được bổ sung vào CI cho extension và reviews của marketplace.
+- Giới hạn nghiệm thu giữ nguyên: fixture không xác minh Shopee đăng nhập thật;
+  xuất iOS bundle không thay thế kiểm thử trên thiết bị hoặc tạo bản IPA.

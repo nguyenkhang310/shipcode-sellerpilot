@@ -352,7 +352,11 @@ class GeminiClient:
             if remaining <= 0:
                 raise AIProviderError('provider_timeout', stage='api_deadline', retryable=True)
             try:
-                timeout = min(15, remaining) if can_backup or len(self.keys.credentials) > 1 else remaining
+                # Extra Gemini credentials are for quota/auth failover. A slow but valid
+                # image request cannot safely be replayed with another key, so keep the
+                # full request deadline instead of shortening every multi-key call to 15s.
+                # Reserve a short window only when a configured backup can handle the call.
+                timeout = min(15, remaining) if can_backup else remaining
                 return await post_json(self.http, GEMINI_URL + self.model + ':generateContent',
                     {'x-goog-api-key': credential.secret}, body, timeout)
             except AIProviderError as error:

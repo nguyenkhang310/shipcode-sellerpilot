@@ -27,6 +27,10 @@ nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
 
 - Tổng quan hôm nay/7/30 ngày, biểu đồ giá trị đơn hàng, trạng thái đơn và việc cần xử lý.
 - Danh mục có ảnh, tìm theo tên/SKU, hàng sắp hết và chi tiết đơn hàng.
+- Chat tra toàn bộ danh mục shop theo nhiều từ khóa và khoảng giá đã nêu,
+  ví dụ `Shop có chuột máy tính dưới 1tr không?`; đếm kết quả trước khi phân trang,
+  không suy loại hàng shop có từ vài sản phẩm mẫu. Áp dụng cho database shop local;
+  extension Shopee thật vẫn theo phạm vi dữ liệu trình duyệt đã đọc được.
 - Chat có lịch sử, vuốt trái để ghim/bỏ ghim hoặc xóa hội thoại, bộ nhớ theo shop/SKU và tư vấn dựa trên dữ liệu backend cung cấp.
 - Tính hòa vốn, lợi nhuận, biên lời, giá mục tiêu và tác động của giảm giá từ chi phí chủ shop cung cấp.
 - Kế hoạch kinh doanh theo số liệu trong kỳ, lịch hành động, kịch bản video có cảnh/thoại/caption và hướng dẫn đo hiệu quả. [Cách dùng và giới hạn](docs/BUSINESS_ADVISOR.md).
@@ -327,6 +331,7 @@ Từ thư mục gốc:
 ```sh
 npm run typecheck
 npm run test:api
+npm run test:extension
 npm run build
 npm run build:ios
 ```
@@ -343,9 +348,14 @@ Kiểm tra UTE MALL từ root:
 ```sh
 "UTE MALL/.venv/bin/python" "UTE MALL/tests/bootstrap_test.py"
 "UTE MALL/.venv/bin/python" -W ignore "UTE MALL/tests/commerce_test.py"
+"UTE MALL/.venv/bin/python" -W ignore "UTE MALL/tests/demo_reviews_test.py"
 ```
 
-Commerce test tạo bản sao SQLite tạm và thay thông tin đăng nhập **chỉ trong bản sao**. Backend tests cũng dùng database tạm; không gọi model bên ngoài. CI chạy kiểm tra TypeScript, API transport, export web/iOS, backend và tạo demo UTE MALL mới để kiểm tra quy trình mua–bán.
+Commerce test tạo bản sao SQLite tạm và thay thông tin đăng nhập **chỉ trong bản sao**. Backend tests cũng dùng database tạm; không gọi model bên ngoài. CI chạy kiểm tra TypeScript, API transport, extension, export web/iOS, backend và tạo demo UTE MALL mới để kiểm tra quy trình mua–bán cùng dữ liệu đánh giá.
+
+Chạy từng script kiểm thử store bằng tiến trình Python riêng như trên. Không gộp
+bằng `unittest discover`: các script cấu hình ứng dụng Flask và database tạm lúc
+import, nên dùng chung tiến trình sẽ làm dữ liệu giữa các nhóm kiểm thử lẫn nhau.
 
 `build:ios` xuất JS/Hermes bundle, **không tạo IPA**. EAS config nằm trong `frontend/eas.json`; cloud build chưa nằm trong quy trình local này.
 

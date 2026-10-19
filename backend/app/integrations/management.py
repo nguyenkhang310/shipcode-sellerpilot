@@ -28,7 +28,7 @@ def _scope(connection, shop, table, alias=""):
     return f"{alias + '.' if alias else ''}shop_id = ?", [shop_id]
 
 
-def _product_rows(connection, shop, query="", limit=20, offset=0, low=False):
+def _product_rows(connection, shop, query="", limit=20, offset=0, low=False, *, min_price_vnd=None, max_price_vnd=None):
     scope, params = _scope(connection, shop, "product", "p")
     columns = _columns(connection, "product")
     image = "p.image_url" if "image_url" in columns else "NULL"
@@ -38,8 +38,17 @@ def _product_rows(connection, shop, query="", limit=20, offset=0, low=False):
     if query:
         # Literal search; user text never becomes SQL.
         connection.create_function("search_text", 1, _search_text, deterministic=True)
-        filters.append("(search_text(p.name) LIKE ? ESCAPE '\\' OR search_text(p.sku) LIKE ? ESCAPE '\\')")
-        params += [_literal_query(query)] * 2
+        # Match every term, even when a brand/colour separates the words in the
+        # actual name. Literal escaping and seller scope apply to every term.
+        for term in query.split():
+            filters.append("(search_text(p.name) LIKE ? ESCAPE '\\' OR search_text(p.sku) LIKE ? ESCAPE '\\')")
+            params += [_literal_query(term)] * 2
+    if min_price_vnd is not None:
+        filters.append('p.price >= ?')
+        params.append(min_price_vnd)
+    if max_price_vnd is not None:
+        filters.append('p.price <= ?')
+        params.append(max_price_vnd)
     if low:
         filters.append("p.stock <= 5 AND p.status = 'active'")
     where = " AND ".join(filters)
@@ -58,11 +67,12 @@ def _product_rows(connection, shop, query="", limit=20, offset=0, low=False):
     return {"items": [dict(row) for row in rows], "total": total, "offset": offset, "limit": limit}
 
 
-def products(shop: UTEMallRepository, query="", limit=20, offset=0, low=False):
+def products(shop: UTEMallRepository, query="", limit=20, offset=0, low=False, *, min_price_vnd=None, max_price_vnd=None):
     try:
         with shop._connect() as connection:
             connection.execute("BEGIN")
-            return _product_rows(connection, shop, query, limit, offset, low)
+            return _product_rows(connection, shop, query, limit, offset, low,
+                                 min_price_vnd=min_price_vnd, max_price_vnd=max_price_vnd)
     except sqlite3.Error as error:
         raise ShopDatabaseError("Cannot read products") from error
 

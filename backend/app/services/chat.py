@@ -19,6 +19,7 @@ from app.ai.fallback import (
     reporting_days,
 )
 from app.ai.money import money_mentions, plain
+from app.ai.catalog_query import catalog_lookup
 from app.ai.text import assistant_text
 from app.integrations.ute_mall import ShopItemNotFoundError, UTEMallRepository
 from app.integrations import management
@@ -122,7 +123,8 @@ async def handle_chat(
 
     direct = parse_fallback(resolved, today=today)
     forgetting = is_forget_request(message)
-    skip_classifier = callable(getattr(ai_provider, "respond", None)) and (
+    catalog_read = direct.intent == 'product_search' and catalog_lookup(message) is not None
+    skip_classifier = catalog_read or callable(getattr(ai_provider, "respond", None)) and (
         direct.intent == "sales_advice"
         or natural_responses and direct.intent in (
             "shop_summary", "inventory_query", "product_search"
@@ -151,7 +153,7 @@ async def handle_chat(
 
     if simple:
         command = ParsedCommand(intent="unknown")
-    direct_reply = bool(getattr(ai_provider, 'prefer_direct_facts', False)) and (
+    direct_reply = catalog_read or bool(getattr(ai_provider, 'prefer_direct_facts', False)) and (
         bool(simple) or is_exact_fact_question(message, command)
     )
     if command.intent in ('sales_advice', 'unknown') and not command.days:
@@ -310,6 +312,10 @@ def enrich_ai_command(
     # Never let model transcription change an explicit SKU or monetary value.
     # An invented model SKU must never choose a product for an action.
     data["sku"] = exact_sku
+    # Price filters must be grounded in the seller's current wording too. A
+    # classifier-supplied budget must not silently hide matching catalogue items.
+    data['min_price_vnd'] = None
+    data['max_price_vnd'] = None
     if command.intent == "change_price":
         exact_price = extract_price(normalized_message, sku=exact_sku or data["sku"])
         data["new_price_vnd"] = exact_price
@@ -323,6 +329,8 @@ def enrich_ai_command(
         data["days"] = fallback.days or command.days
     if fallback.intent == "product_search":
         data["query"] = fallback.query
+        data['min_price_vnd'] = fallback.min_price_vnd
+        data['max_price_vnd'] = fallback.max_price_vnd
     if command.intent == "inventory_query" and data["inventory_scope"] == "low_stock":
         data["low_stock_threshold"] = extract_threshold(normalized_message)
 
@@ -501,11 +509,13 @@ def execute_command(
         query = (command.query or "").strip()
         if not query:
             return response("Bạn đang tìm sản phẩm nào? Cho mình tên hoặc loại hàng nhé.", None, {}, {"missing_fields": ["query"]})
-        found = management.products(shop, query, limit=8)
+        filters = {'min_price_vnd': command.min_price_vnd, 'max_price_vnd': command.max_price_vnd}
+        found = management.products(shop, query, limit=8, **filters)
+        found.update(query=query, **filters)
         lines = "\n\n".join(f"**{i+1}. {p['name']}**\n{format_vnd(round(p['price_vnd']))} · Kho {p['stock']}\nSKU: {p['sku']}" for i,p in enumerate(found["items"]))
         answer = (f"Mình tìm thấy **{found['total']} sản phẩm** khớp “{query}” trong shop.\n\n{lines}\n\nBạn muốn kiểm tra hoặc điều chỉnh sản phẩm nào?" if found["items"] else
                   f"Chưa có sản phẩm khớp “{query}” trong shop. Bạn thử tên ngắn hơn hoặc mã SKU nhé.")
-        return response(answer, "search_products", {"query": query, "limit": 8}, found)
+        return response(answer, "search_products", {"query": query, "limit": 8, **filters}, found)
 
     if command.intent == "sales_advice":
         facts = shop_context(shop, command.days or 7)
@@ -576,12 +586,9 @@ def is_exact_fact_question(message, command):
             r'(?:hom nay|hom qua) (?:shop (?:toi |minh )?)?(?:co |ban duoc )?bao nhieu don(?: hang)?',
         ]
     elif command.intent == 'product_search':
-        # Short catalog lookups, including the home-screen quick action. A
-        # second request or instruction continues through model interpretation.
-        if re.search(r'\b(?:va|roi|nen|khong|ko|viet|phan tich|tu van|goi y|mo ta|giai thich|gia su|neu|bang)\b', text):
-            return False
-        return bool(command.query and len(command.query.split()) <= 5
-                    and re.fullmatch(r'tim(?: kiem)?(?: san pham)? [a-z0-9][a-z0-9 ._-]{0,79}', text))
+        # A rejected budget/compound query must not re-enter the fast path
+        # through the older broad "Tìm ..." pattern.
+        return catalog_lookup(message) is not None
     else:
         return False
     return any(re.fullmatch(pattern, text) for pattern in patterns)

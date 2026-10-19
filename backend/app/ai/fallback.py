@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 from app.ai.contracts import ParsedCommand
 from app.ai.money import money_mentions, affirmed_quote
+from app.ai.catalog_query import catalog_lookup
 
 
 CHANGE_PRICE_PHRASES = (
@@ -77,8 +78,12 @@ def parse_fallback(message: str, *, today: date) -> ParsedCommand:
     if any(phrase in text for phrase in ("nên làm gì", "nen lam gi", "tư vấn", "tu van", "viết mô tả", "viet mo ta", "viết bài", "lên kế hoạch", "lập kế hoạch", "lap ke hoach", "kế hoạch hành động", "lên plan", "len plan", "lập plan", "lap plan", "tiktok", "tik tok", "quay video", "lam video", "làm video", "kịch bản", "kich ban", "cải thiện", "ưu tiên", "uu tien", "phân tích", "phan tich")):
         return ParsedCommand(intent="sales_advice", sku=sku, days=reporting_days(message))
 
+    lookup = catalog_lookup(message)
+    if lookup and not sku:
+        return ParsedCommand(intent='product_search', **lookup)
     search = re.search(r"(?:tìm kiếm|tim kiem|tìm|tim)(?:\s+sản phẩm|\s+san pham)?\s+(.+)", text)
-    if search and not sku and not any(phrase in text for phrase in LOW_STOCK_PHRASES):
+    if (search and not sku and not any(phrase in text for phrase in LOW_STOCK_PHRASES)
+            and not money_mentions(search.group(1), include_bare=False)):
         return ParsedCommand(intent="product_search", query=search.group(1).strip("?.! ")[:200])
 
     if any(phrase in text for phrase in LOW_STOCK_PHRASES):

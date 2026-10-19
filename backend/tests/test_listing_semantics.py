@@ -19,6 +19,29 @@ class SemanticProvider(CopyProvider):
         return json.dumps(self.result, ensure_ascii=False)
 
 
+@pytest.mark.parametrize('message,expected', [
+    ('Đăng bán Camera 4K, tồn kho 10', None),
+    ('Giá của nó chưa chốt. Màn hình 4K, còn 20 cái', None),
+    ('Giá vốn 100k, phí ship 20k', None),
+    ('Giá của nó là 15k/trái và còn khoảng 10 trái', 15000),
+    ('Giá mỗi quả là 15k, giá vốn 5k', 15000),
+    ('Giá của nó là 15k, giá của món này 20k', None),
+])
+def test_natural_price_reference_does_not_treat_specs_or_costs_as_sale_price(message, expected):
+    from app.services.product_drafts import _extract_labeled_price
+    assert _extract_labeled_price(message) == expected
+
+
+def test_posting_a_4k_camera_still_asks_for_a_real_sale_price(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    with client:
+        client.app.state.ai_provider = OfflineProvider()
+        _, reply = upload_and_reply(client)
+        draft = reply('Đăng bán camera 4K, tồn kho 10, tự viết mô tả giúp mình')['product_draft']
+        assert draft['price_vnd'] is None
+        assert 'price_vnd' in draft['missing_fields']
+
+
 def test_gateway_restriction_explains_missing_ai_without_losing_draft_or_publishing(tmp_path):
     from app.ai.contracts import AIProviderError
 
