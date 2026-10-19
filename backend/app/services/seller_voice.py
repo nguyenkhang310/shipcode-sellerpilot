@@ -74,6 +74,9 @@ def read_reply(result, *, today: date, preferences: dict):
         return answer
     if tool == 'search_products':
         if not facts['items']:
+            if facts.get('min_price_vnd') is not None or facts.get('max_price_vnd') is not None:
+                return ('Mình chưa tìm thấy sản phẩm khớp tên và khoảng giá bạn yêu cầu trong shop. '
+                        'Điều này không có nghĩa shop không có loại sản phẩm đó; bạn có thể thử khoảng giá khác.')
             return 'Mình chưa tìm thấy sản phẩm phù hợp trong shop. Bạn thử tên ngắn hơn hoặc gửi mã SKU nhé.'
         answer = f"Mình tìm thấy **{facts['total']} sản phẩm** phù hợp trong shop:"
         for item in facts['items'][:3 if concise else 5]:

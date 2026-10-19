@@ -35,6 +35,8 @@ class ParsedCommand(BaseModel):
     day: date | None = None
     low_stock_threshold: int | None = Field(default=None, ge=0, le=10_000)
     query: str | None = Field(default=None, max_length=200)
+    min_price_vnd: int | None = Field(default=None, ge=0, le=1_000_000_001)
+    max_price_vnd: int | None = Field(default=None, ge=0, le=1_000_000_000)
     days: int | None = Field(default=None, ge=1, le=30)
 
     @field_validator("sku")

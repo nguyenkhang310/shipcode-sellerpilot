@@ -677,6 +677,8 @@ def _wants_ai_description(message: str) -> bool:
         or re.search(r"\b(?:viet|soan|tao|toi uu|sua)\b.{0,40}\b(?:caption|tieu de|noi dung)\b", text)
         or re.search(r"\btu\s+(?:viet|soan)\b", text)
         or re.search(r"\b(?:caption|tieu de|noi dung)\b.{0,35}\b(?:viet|soan|sua|hay hon)\b", text)
+        or re.search(r"\b(?:hay|giup)\b.{0,70}\bmo ta(?: san pham)?\b", text)
+        or re.search(r"\bdua vao (?:hinh|anh)\b.{0,45}\bmo ta(?: san pham)?\b", text)
     )
 
 
@@ -737,7 +739,11 @@ def _extract_labeled_stock(message: str) -> int | None:
         message, flags=re.I,
     )
     if not match:
-        match = re.search(r'\b(?:còn|con)(?:\s+(?:lại|lai))?\s+([0-9][0-9.,]*)\s*(?:cái|cai|chiếc|chiec|sản phẩm|san pham|sp)\b', message, re.I)
+        match = re.search(
+            r'\b(?:còn|con)(?:\s+(?:lại|lai|khoảng|khoang|tầm|tam))?\s+'
+            r'([0-9][0-9.,]*)\s*(?:cái|cai|chiếc|chiec|sản phẩm|san pham|sp|trái|trai|quả|qua)\b',
+            message, re.I,
+        )
     return _stock_number(match.group(1).rstrip('.,')) if match else None
 
 
@@ -748,6 +754,13 @@ def _extract_labeled_price(message: str) -> int | None:
         mentions = money_mentions(tail)
         if mentions and mentions[0].start == 0 and affirmed_quote(mentions[0].text, message):
             values.append(mentions[0].value)
+    if not values:
+        # Natural Vietnamese often inserts the product reference between the
+        # label and amount: "giá của nó là 15k/trái". Use the same guarded
+        # commercial-context check as model evidence so costs/fees are not
+        # mistaken for the selling price.
+        values = [item.value for item in money_mentions(message, include_bare=False)
+                  if item.value is not None and _commercial_context(item.text, message)]
     # Multiple competing selling prices require clarification, not a last-value win.
     return values[0] if values and all(value == values[0] for value in values) else None
 
@@ -810,7 +823,7 @@ def _match_category(message, categories):
         "Nhà Cửa & Đời Sống": ("nha cua", "noi that", "gia dung", "phong ngu", "nha bep"),
         "Sắc Đẹp": ("my pham", "sac dep", "son moi", "kem duong", "trang diem", "nuoc hoa"),
         "Sức Khỏe": ("suc khoe", "thuc pham chuc nang", "y te", "khau trang"),
-        "Bách Hóa Online": ("bach hoa", "thuc pham", "do uong", "banh keo"),
+        "Bách Hóa Online": ("bach hoa", "thuc pham", "do uong", "banh keo", "ot", "rau", "cu qua", "nong san", "gia vi"),
         "Thể Thao & Du Lịch": ("the thao", "du lich", "gym", "camping", "bong da"),
         "Mẹ & Bé": ("me va be", "me be", "tre em", "em be", "bim", "sua bot"),
         "Chăm Sóc Thú Cưng": ("thu cung", "cho meo", "thuc an cho", "thuc an meo", "do cho cho", "do cho meo", "pet"),

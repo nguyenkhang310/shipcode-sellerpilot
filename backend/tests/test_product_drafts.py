@@ -254,6 +254,41 @@ def test_labeled_product_details_are_parsed_as_data_in_one_message(tmp_path):
         assert draft["description"] != "AI tự viết"
 
 
+def test_natural_per_item_price_and_approximate_fruit_stock_are_not_asked_again(tmp_path):
+    class PepperProvider(CopyProvider):
+        async def respond(self, message, *, history, facts):
+            assert facts['price_vnd'] == 15_000
+            assert facts['stock'] == 10
+            return json.dumps({
+                'name': 'Ớt cầu vồng',
+                'description': 'Ớt cầu vồng nhiều màu, bán theo từng trái dựa trên hình ảnh sản phẩm.',
+                'category_id': 7,
+                'clarification': None,
+            }, ensure_ascii=False)
+
+    client, _shop_path, _upload_dir = make_client(tmp_path)
+    with client:
+        client.app.state.ai_provider = PepperProvider()
+        uploaded = client.post(
+            '/api/v1/product-drafts',
+            files={'image': ('pepper.jpg', b'\xff\xd8\xffphoto', 'image/jpeg')},
+        ).json()['data']
+        response = client.post('/api/v1/chat', json={
+            'conversation_id': uploaded['conversation_id'],
+            'message': (
+                'Đây là ớt cầu vồng, bạn hãy dựa vào hình và mô tả sản phẩm; '
+                'giá của nó là 15k/trái và còn khoảng 10 trái.'
+            ),
+        })
+        assert response.status_code == 200
+        data = response.json()['data']
+        draft = data['product_draft']
+        assert draft['price_vnd'] == 15_000
+        assert draft['stock'] == 10
+        assert draft['status'] == 'ready'
+        assert 'giá bán' not in data['answer'].lower()
+
+
 def test_multiple_images_are_preserved_in_draft_and_marketplace_gallery(tmp_path):
     client, shop_path, upload_dir = make_client(tmp_path)
     with client:

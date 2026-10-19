@@ -74,6 +74,21 @@ def test_three_authorized_projects_rotate_successful_calls():
     assert calls==['a','b','c','a']
 
 
+def test_multiple_keys_keep_the_configured_request_timeout():
+    timeouts=[]
+    def handler(request):
+        timeouts.append(request.extensions['timeout']['read'])
+        return httpx.Response(200,json=completed())
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            provider=GeminiClient(http,'',timeout=45,
+                credentials=[('a','one'),('b','two'),('c','three')])
+            await provider.respond('TÆ° váº¥n',history=[],facts={})
+    asyncio.run(run())
+    assert len(timeouts)==1
+    assert 44 <= timeouts[0] <= 45
+
+
 @pytest.mark.parametrize('status,expected',[(401,['a','b']),(400,['a'])])
 def test_auth_failure_moves_to_valid_key_but_bad_payload_does_not(status,expected):
     calls=[]
