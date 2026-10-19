@@ -29,8 +29,15 @@ chủ động dừng terminal đó rồi chạy lại `npm run demo` để nạp
 3. Mở `https://banhang.shopee.vn/`, tự đăng nhập Shopee.
 4. Mở SellerPilot → **Liên kết**, rồi bấm **tên tài khoản/shop trên thanh đầu
    trang Shopee** trong 30 giây. Esc hủy chọn. Chỉ click trực tiếp được chấp nhận.
-5. Sau khi tên xuất hiện trên SellerPilot, bấm **Cập nhật** để đọc các trường
-   được hỗ trợ của trang hiện tại. Chat sẽ tự đọc lại khi gửi tin.
+5. Sau khi tên xuất hiện, SellerPilot tự đọc mục Sản phẩm/Tổng quan/Đơn hàng
+   trong một tab nền dùng chung, tự đóng sau lượt đọc nếu bạn không sử dụng tab đó.
+   Không cần tự mở lần lượt các mục. Nút **Cập nhật**
+   bắt đầu lượt thu thập mới; có tiến trình số trang/dòng và nút **Dừng đồng bộ**.
+6. Hỏi `Sản phẩm nào gần hết hàng?` ngay từ trang Tổng quan. Chat dùng dữ liệu đã
+   đồng bộ hoặc dữ liệu đọc được trên trang hiện tại, không tạo tab và không chờ
+   quét hết đơn hàng. Nếu dữ liệu chưa có, AI báo trạng thái đồng bộ thay vì đoán số.
+   Lỗi đọc, dữ liệu hết hạn hoặc mở lại panel không tự khởi chạy lượt đồng bộ mới;
+   bấm **Cập nhật** để chủ động thử lại. Dữ liệu quá 5 phút không dùng làm số liệu hiện tại.
 
 Đổi tài khoản được chọn sẽ tạo phiên mới và lưu riêng lịch sử phiên trước.
 Có thể mở lại phiên trong menu tên tài khoản khi mục tiêu đó còn khớp trang.
@@ -53,9 +60,22 @@ các dịch vụ hiện có chỉ để cập nhật frontend/content script.
   Tham số URL thay đổi sẽ làm vô hiệu bản đọc để tránh điền nhầm sản phẩm.
 - Nhận diện nhãn tài khoản phải duy nhất, hiển thị ngoài nội dung main/form/bảng.
   Không xác nhận được nhãn thì chặn đọc/điền; không tự chọn một kết quả khác.
-- Số liệu chỉ là trang hiện tại. Không tự đọc trang tiếp, kỳ báo cáo hay toàn bộ
-  shop. Không suy kỳ “hôm nay/7 ngày” nếu chưa có bằng chứng. Dữ liệu không rõ
-  không được tự đổi thành 0. Bảng cần có header nhận diện được.
+- Bộ đọc tự tìm liên kết/menu trên trang đã liên kết, mở tab nền cùng cửa sổ,
+  về trang đầu nếu xác nhận được nút, rồi bấm trang tiếp cho đến cuối danh sách.
+  Giới hạn 100 trang/tài nguyên, 3 phút/lượt; không đoán URL hay gọi API nội bộ.
+- Không xác minh được menu, header, nút phân trang, bộ lọc, trang bị lặp hoặc đổi
+  tài khoản thì báo thiếu/giới hạn thay vì tuyên bố đã đọc toàn shop. Trình đọc
+  hỗ trợ table/ARIA và một số dạng div-table; DOM Shopee thực tế cần kiểm chứng.
+- Cache tách theo connection + nhãn tài khoản, hết hạn sau 5 phút. Trả lời luôn
+  kiểm tra lại tài khoản live; cache không vượt kiểm tra này. Không đổi timestamp
+  cũ thành thời điểm lookup. Nếu MV3 bị dừng, job báo interrupted; chỉ dọn tab nền
+  thuộc job và không đóng tab đang được người dùng sử dụng.
+- Tổng tồn, hàng hết (0), hàng sắp hết (>0 và <=5), SKU trùng/xung đột, số chưa
+  đọc được đều tính bằng code trước khi gửi AI. Không lấy doanh thu 0 để suy tồn 0.
+  Đã đọc hết các trang danh sách chưa đồng nghĩa đã xác minh mọi kho/biến thể.
+- Kỳ thời gian báo cáo chưa được đổi tự động. Không suy kỳ “7 ngày” từ dashboard
+  hôm nay. Bảng mẫu đơn hàng gửi AI có cờ sample_truncated; không dùng mẫu để
+  cộng doanh thu hoặc đếm toàn bộ đơn.
 - Nội dung cột sản phẩm/ảnh do người dùng chọn vẫn là dữ liệu gửi nhà cung cấp AI
   cấu hình trong backend. Giảm dữ liệu không đồng nghĩa đã loại mọi PII nếu
   người dùng đặt thông tin cá nhân ngay trong tên sản phẩm hay ảnh.
@@ -67,8 +87,8 @@ các dịch vụ hiện có chỉ để cập nhật frontend/content script.
 | Chức năng | Shopee qua trình duyệt | Shop local |
 | --- | --- | --- |
 | Chat, lịch sử, ghim/xóa, tối đa 6 ảnh | Có, riêng từng kết nối | Nghiệp vụ app hiện có |
-| Tổng quan | Số liệu nhận diện được trên trang; chưa xác minh kỳ tự động | Dashboard từ database |
-| Sản phẩm/đơn hàng | Các dòng/cột nhận diện được trên trang đang mở | Danh sách và thao tác của app |
+| Tổng quan | Số liệu dashboard và tổng tồn đã đồng bộ; chưa xác minh kỳ tự động | Dashboard từ database |
+| Sản phẩm/đơn hàng | Đọc danh sách qua các trang khi nhận diện được phân trang; có độ phủ/giới hạn | Danh sách và thao tác của app |
 | Soạn tên/mô tả từ ảnh, hỏi phần thiếu | Có, backend AI riêng | Có |
 | Điền tên/mô tả/giá/tồn | Có trên form phù hợp, có kiểm tra giá trị còn giữ | Luồng đăng vào shop local |
 | Upload ảnh/ngành hàng/biến thể lên Shopee | Chọn thủ công trên Shopee | Nghiệp vụ local |
@@ -128,3 +148,16 @@ framework reset, không submit; UI test kiểm tra 320/380/520px, tab, chat comp
 autoscroll, lịch sử và kết nối. Kết quả fixture không chứng minh tương thích mọi
 màn hình Shopee. Load unpacked/CSP, chọn ảnh và form thật phải được kiểm tra trên
 Chrome của thành viên trước thuyết trình.
+
+## Nghiệm thu luồng hỏi tồn kho từ trang Tổng quan
+
+1. Giữ trang Tổng quan Shopee, chọn nhãn tài khoản một lần.
+2. Chờ tiến trình sản phẩm. Gửi câu hỏi ngay khi đang đồng bộ không tạo tab mới;
+   nếu chưa có dữ liệu, câu trả lời nêu đang đồng bộ và không bịa tồn kho.
+3. So số trang/SKU và số tồn với danh sách Shopee thực tế. Kiểm tra món tồn 0,
+   tồn 1–5, món >5 và dòng không đọc được; không gộp 0 với chưa biết.
+4. Đổi tài khoản trong tab đang liên kết: không sử dụng cache của tài khoản cũ.
+5. Bấm dừng hoặc đóng panel khi đang đọc: không hiển thị đồng bộ xong giả.
+
+Đã kiểm thử trên fixture, chưa xác minh bộ đọc với tất cả DOM Shopee đăng nhập.
+Không mô tả tỷ lệ thành công hoặc độ phủ toàn shop khi chưa nghiệm thu thực tế.

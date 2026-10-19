@@ -24,21 +24,40 @@ export async function connectionStatus() {
   if (connection.mode === 'local') return {...result, tab_status: 'local'};
   if (!connection.tab_id) return {...result, tab_status: 'unlinked'};
   const tab = await chrome.tabs.get(connection.tab_id).catch(() => null);
-  if (tab && isSellerUrl(tab.url) && tab.active && connection.target) {
+  if (tab && isSellerUrl(tab.url) && connection.target) {
     try {return {...result, tab_status: 'linked', ...await pageMessage(connection, {kind: 'target_status'})};}
     catch {return {...result, tab_status: 'linked', target_matches: false};}
   }
-  return {...result, tab_status: !tab ? 'closed' : isSellerUrl(tab.url) && tab.active ? 'linked' : 'wrong_tab'};
+  return {...result, tab_status: !tab ? 'closed' : isSellerUrl(tab.url) ? 'linked' : 'wrong_tab'};
 }
 export async function boundTab(connection) {
-  if (!connection.tab_id) throw Error('Mở Kênh Người Bán Shopee rồi bấm Liên kết tab.');
+  if (!connection.tab_id) throw Error('Mở Kênh Người Bán Shopee rồi liên kết tài khoản.');
   const tab = await chrome.tabs.get(connection.tab_id).catch(() => null);
-  if (!tab || !isSellerUrl(tab.url) || !tab.active) throw Error('Quay lại đúng tab Shopee đã liên kết, hoặc liên kết tab mới.');
+  if (!tab || !isSellerUrl(tab.url)) throw Error('Tab Shopee đã đóng hoặc đổi trang. Liên kết lại đúng tab của shop.');
   return tab;
+}
+export async function autoConnectShopee() {
+  const current = await state();
+  if (current.mode !== 'shopee' || current.target) return null;
+  const tabs = await chrome.tabs.query({active: true, lastFocusedWindow: true});
+  const candidates = tabs.filter(tab => isSellerUrl(tab.url));
+  if (candidates.length !== 1) return null;
+  const tab = candidates[0];
+  await chrome.scripting.executeScript({target: {tabId: tab.id}, files: ['content/shopee.js']});
+  const result = await chrome.tabs.sendMessage(tab.id, {kind: 'auto_detect_target'});
+  if (!result?.ok || !result.data?.label) return null;
+  const label = result.data.label;
+  await pageMessage({...current, tab_id: tab.id, target: {label}}, {kind: 'read'});
+  return mutate(value => {
+    if (value.id !== current.id || value.target) throw Error('Kết nối đã đổi. Thử lại.');
+    value.tab_id = tab.id;
+    value.target = {label, verification: 'browser_label', selected_at: new Date().toISOString()};
+    return {id: value.id, target: value.target, tab_id: tab.id};
+  });
 }
 export async function pageMessage(connection, message) {
   const tab = await boundTab(connection);
-  if (['read', 'fill'].includes(message.kind) && !connection.target?.label)
+  if (['read', 'fill'].includes(message.kind) && !connection.target?.label && message.kind !== 'auto_detect_target')
     throw Error('Chọn tài khoản Shopee để bắt đầu. Mở Kết nối → Chọn tài khoản trên trang.');
   await chrome.scripting.executeScript({target: {tabId: tab.id}, files: ['content/shopee.js']});
   const result = await chrome.tabs.sendMessage(tab.id, {...message, target: connection.target || null});

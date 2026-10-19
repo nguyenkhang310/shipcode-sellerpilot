@@ -1,4 +1,6 @@
 import {API, pageMessage, state, mutate} from './state.js';
+import {getCachedPage, getSyncStatus} from './shopee-sync.js';
+import {resourceContext, resourcePresent} from './shop-data.js';
 
 let configPromise;
 const config = () => configPromise ||= fetch(chrome.runtime.getURL('connection.local.json')).then(r => r.json());
@@ -23,6 +25,8 @@ async function backend(path, options = {}, signal) {
       : 'Không tìm thấy tác vụ AI. Backend có thể vừa khởi động lại; gửi lại tin nhắn để thử.', 404);
   }
   const body = await response.json();
+  if (response.status === 422 && Array.isArray(body.detail) && body.detail.some(row => row.type === 'extra_forbidden' && row.loc?.includes('shop_context')))
+    fail('Backend chưa nạp luồng đồng bộ mới. Khởi động lại npm run demo rồi gửi lại tin nhắn.', 422);
   if (!response.ok) fail(typeof body.detail === 'string' ? body.detail : 'Kết nối AI chưa sẵn sàng.', response.status);
   return body.data;
 }
@@ -43,14 +47,27 @@ async function ensureCurrent(id) {
   if ((await state()).id !== id) fail('Kết nối shop đã đổi. Mở lại cuộc trò chuyện.', 409);
 }
 async function infer(connection, body, signal, draft) {
+  // Always verify the linked account live; cached data must never bypass this guard.
   const page = await pageMessage(connection, {kind: 'read'});
+  let shopContext = null;
+  if (!draft) {
+    // Sending a message never starts, retries or waits on browser navigation.
+    // A live page may supplement a missing cache, with partial coverage preserved.
+    const resources = Object.fromEntries(await Promise.all(['products', 'dashboard', 'orders'].map(async key => {
+      const cached = await getCachedPage(key, connection.id);
+      return [key, resourceContext(cached || (resourcePresent(page, key) ? page : null), key)];
+    })));
+    const sync = await getSyncStatus(connection.id);
+    shopContext = {connection_id: connection.id, account_label: connection.target.label, ...resources,
+    sync_status: sync.status};
+  }
   const conversation = connection.conversations[body.conversation_id];
   const history = (conversation?.turns || []).slice(-8).flatMap(turn => [
     {role: 'user', content: turn.message.slice(0, 6000)}, {role: 'assistant', content: turn.response.answer.slice(0, 6000)},
   ]);
   const requestId = crypto.randomUUID();
   await backend('/requests', {method: 'POST', body: JSON.stringify({
-    request_id: requestId, connection_id: connection.id, message: body.message, snapshot: page.snapshot, history,
+    request_id: requestId, connection_id: connection.id, message: body.message, snapshot: page.snapshot, history, shop_context: shopContext,
     mode: draft ? 'listing' : 'chat', draft: draft ? Object.fromEntries(['name', 'description', 'price_vnd', 'stock'].map(key => [key, draft[key]])) : {},
     images: draft?.preview_urls || [],
   })}, signal);
@@ -197,7 +214,7 @@ export async function handleApi(path, method, raw, signal) {
       for (const convo of Object.values(current.conversations)) for (const turn of convo.turns) if (turn.response.product_draft?.id === draft.id) turn.response.product_draft = {id: updated.id};});
     return {data: updated};
   }
-  if (path.startsWith('/management/')) fail('Chưa xác minh bộ đọc số liệu cho màn hình Shopee này. Dùng “Đọc trang” và gửi báo cáo cấu trúc để nối dữ liệu thật; không dùng số liệu shop local.', 501);
+  if (path.startsWith('/management/')) fail('Chưa xác minh adapter cho API quản lý local trên Shopee. Giao diện Shopee dùng dữ liệu đồng bộ riêng, không gán số liệu còn thiếu thành 0.', 501);
   fail('Thao tác này chưa được nối và kiểm chứng trên Shopee thật. Không có thay đổi nào được thực hiện.', 501);
 }
 export {backend};

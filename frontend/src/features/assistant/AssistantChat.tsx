@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Platform, Pressable, ScrollView, Share, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { cancelChatRequest, createMessageId, recoverChatRequest } from '../../api/chatRequests';
 import { API_URL, ApiError } from '../../api/client';
@@ -46,7 +46,7 @@ const fallbackLabel = (reason: ChatData['fallback_reason']) => reason === 'inval
 
 export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () => void; onToast?: (message: string) => void; keyboardVisible?: boolean; reduceMotion?: boolean }>(function AssistantChat({ onShopChanged, onToast, keyboardVisible = false, reduceMotion = false }, ref) {
   const { ui, IOS, BRAND, desktop } = useTheme();
-  const { height: windowHeight, fontScale } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth, fontScale } = useWindowDimensions();
   const compact = windowHeight < 740 || keyboardVisible;
   const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -94,6 +94,22 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   const resizeComposerFromLines = (lineCount: number) => {
     setMeasuredInputHeight(Math.max(1, lineCount) * INPUT_LINE_HEIGHT * Math.max(1, fontScale) + INPUT_VERTICAL_PADDING);
   };
+  useLayoutEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const node = input.current as unknown as HTMLTextAreaElement | null;
+    if (!node || typeof node.scrollHeight !== 'number') return;
+    // Measure the actual textarea before paint. A hidden Text's delayed layout
+    // event can otherwise leave the input expanded after the draft gets shorter.
+    const {minHeight, maxHeight} = node.style;
+    const scrollTop = node.scrollTop;
+    // Zero avoids the textarea's default two-row intrinsic height on deletion.
+    node.style.height = '0'; node.style.minHeight = '0'; node.style.maxHeight = 'none';
+    const height = Math.max(INPUT_MIN_HEIGHT, Math.min(INPUT_MAX_HEIGHT, node.scrollHeight));
+    node.style.height = height + 'px'; node.style.minHeight = minHeight; node.style.maxHeight = maxHeight;
+    node.style.overflowY = height >= INPUT_MAX_HEIGHT ? 'auto' : 'hidden';
+    node.scrollTop = node.selectionEnd === node.value.length ? node.scrollHeight : scrollTop;
+    setMeasuredInputHeight(height);
+  }, [draft, windowWidth, fontScale, desktop]);
   const followBottom = (animated = true) => {
     if (!nearBottom.current) return;
     if (!animated) immediateScroll.current = true;
@@ -589,7 +605,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       {quickOpen ? <ScrollView testID="quick-actions" keyboardShouldPersistTaps="handled" style={[ui.grouped, { marginBottom: 10, maxHeight: keyboardVisible ? 180 : 290, flexGrow: 0 }]}><Pressable accessibilityRole="button" accessibilityLabel="Chọn ảnh để đăng sản phẩm" onPress={() => void pickProductImage()} style={[ui.task, { minHeight: 52 }]}><Ionicons name="images-outline" size={21} color={BRAND.navy} /><Text style={ui.taskTitle}>Chọn tối đa 6 ảnh sản phẩm</Text></Pressable>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" onPress={() => { setDraft(prompt.message); setQuickOpen(false); input.current?.focus(); }} style={[ui.task, { minHeight: 47 }]}><Ionicons name={prompt.icon} size={19} color={BRAND.navy} /><Text style={ui.taskTitle}>{prompt.title}</Text></Pressable>)}</ScrollView> : null}
       <View style={ui.composer}><Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh hoặc mở gợi ý" accessibilityState={{ expanded: quickOpen }} onPress={() => setQuickOpen(value => !value)} style={ui.composerPlus}><Ionicons name={quickOpen ? 'close' : 'add'} size={27} color={BRAND.navy} /></Pressable>
         <View style={ui.composerInputFrame}><TextInput ref={input} accessibilityLabel="Nhắn cho SellerPilot" placeholder={pendingImages.length ? 'Thêm yêu cầu…' : 'Hỏi SellerPilot…'} placeholderTextColor={IOS.secondary} value={draft} onChangeText={value => { setDraft(value); if (!value) setInputHeight(INPUT_MIN_HEIGHT); }} multiline maxLength={4000} scrollEnabled={inputHeight >= INPUT_MAX_HEIGHT - 1} returnKeyType="default" blurOnSubmit={false} onFocus={() => setTimeout(() => { if (nearBottom.current) scroll.current?.scrollToEnd({ animated: false }); }, 80)} style={[ui.composerInput, { height: inputHeight }]} editable={!restoring} />
-          <Text pointerEvents="none" accessible={false} aria-hidden onTextLayout={Platform.OS !== 'web' ? event => resizeComposerFromLines(event.nativeEvent.lines.length) : undefined} onLayout={Platform.OS === 'web' ? event => setMeasuredInputHeight(event.nativeEvent.layout.height + INPUT_VERTICAL_PADDING) : undefined} style={ui.composerMeasure}>{draft + '\u200B'}</Text></View>
+          {Platform.OS !== 'web' ? <Text pointerEvents="none" accessible={false} aria-hidden onTextLayout={event => resizeComposerFromLines(event.nativeEvent.lines.length)} style={ui.composerMeasure}>{draft + '\u200B'}</Text> : null}</View>
         <Pressable accessibilityRole="button" accessibilityLabel={busy ? 'Dừng chờ phản hồi' : 'Gửi tin nhắn'} disabled={!busy && ((!draft.trim() && !pendingImages.length) || restoring)} onPress={() => { if (busy) { void stop(); } else void send(); }} style={({ pressed }) => [ui.send, !busy && ((!draft.trim() && !pendingImages.length) || restoring) && ui.sendDisabled, pressed && { opacity: .7 }]}><Ionicons name={busy ? 'stop' : 'arrow-up'} size={23} color={busy || draft.trim() || pendingImages.length ? '#FFF' : IOS.tertiary} /></Pressable>
       </View>
     </View>

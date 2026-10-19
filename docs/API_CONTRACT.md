@@ -128,3 +128,26 @@ Chat hiện dùng deterministic fallback và chỉ được gọi seller tools �
 UTE MALL local, chưa gửi thao tác lên Shopee/TikTok.
 
 CSV headers và validation ở [DATA_DICTIONARY.md](DATA_DICTIONARY.md).
+
+### Shopee browser: dữ liệu đã đồng bộ
+
+`POST /api/v1/browser-connector/requests` nhận thêm `shop_context` tùy chọn,
+không đổi luồng app/local. `connection_id` và nhãn tài khoản phải khớp request
+và `snapshot.text.account_label`. Dữ liệu khác shop, URL sai host, quan sát quá
+5 phút hoặc bộ đếm tồn kho không nhất quán trả 422 trước khi gọi model.
+
+- `products`: timestamp, phạm vi, số trang, độ phủ, tổng tồn đã biết, số chưa biết,
+  SKU xung đột, hàng hết (0), sắp hết (>0 và <=threshold), danh sách mẫu và số bị lược.
+- `dashboard`/`orders`: timestamp, số trang, số dòng đã đọc, mẫu bảng/số liệu và
+  `sample_truncated`; không dùng mẫu bị lược để tính tổng tiền hay tổng số đơn.
+- `complete` chỉ xác nhận phân trang của danh sách quan sát; không xác nhận API,
+  nhiều kho, trạng thái/biến thể không hiển thị hoặc kỳ ngày của dashboard.
+
+Extension tự lấy liên kết/menu từ DOM, dùng chung một tab nền cho một lượt đồng bộ,
+tối đa 100 trang/tài nguyên và 3 phút/lượt. Cache hết hạn 5 phút. Chat chỉ đọc cache
+còn hạn hoặc trang hiện tại với độ phủ tương ứng; không mở tab, không khởi chạy
+đồng bộ và không chờ quét danh sách. Liên kết mới khởi chạy một lượt đồng bộ;
+thử lại bằng nút Cập nhật. Poll trạng thái và mở lại panel không tự thử lại.
+Trước khi gọi model, tài nguyên không có bị bỏ khỏi facts và được diễn đạt trong
+data_availability. Bộ kiểm tra đầu ra chặn việc lộ trường nội bộ hoặc yêu cầu
+người bán tự mở từng mục vì thiếu dữ liệu. Không dùng API hoặc database shop local.

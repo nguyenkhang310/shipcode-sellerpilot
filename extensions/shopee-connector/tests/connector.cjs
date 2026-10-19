@@ -8,7 +8,8 @@ global.chrome = {
   tabs: {get: async id => ({id, active: true, url: 'https://banhang.shopee.vn/'}),
     query: async () => [{id: 7, active: true, url: 'https://banhang.shopee.vn/'}],
     sendMessage: async (_id, message) => ({ok: true, data: message.kind === 'read' ? {
-      document_id: 'fixture-doc', snapshot: {url: 'https://banhang.shopee.vn/', title: 'Fixture', text: '2 đơn', scope: 'visible_page', captured_at: new Date().toISOString()}
+      document_id: 'fixture-doc', snapshot: {url: 'https://banhang.shopee.vn/', title: 'Fixture',
+        text: JSON.stringify({account_label: message.target?.label, metrics: []}), scope: 'visible_page', captured_at: new Date().toISOString()}
     } : message.kind === 'target_status' ? {target_matches: true} : {report: ['name', 'description', 'price_vnd', 'stock'].map(field => ({field, status: 'filled'})), submitted: false}})},
   scripting: {executeScript: async () => {}}, runtime: {getURL: value => 'chrome-extension://fixture/' + value},
 };
@@ -18,6 +19,60 @@ global.fetch = async (url, options) => {
   return {ok: true, json: async () => ({data: {status: 'ok'}})};
 };
 const load = () => Promise.all([import('../state.js'), import('../api.js')]);
+
+test('repeated chat never opens or navigates tabs with missing, partial, failed or expired shop data', async () => {
+  const [state, api] = await load(); saved = {};
+  await state.bindCurrentTab('shopee');
+  await state.mutate(value => {value.target = {label: 'fixture-shop'};});
+  const connection = await state.state(), originalFetch = global.fetch;
+  const originalCreate = chrome.tabs.create, originalUpdate = chrome.tabs.update;
+  const originalSend = chrome.tabs.sendMessage;
+  const requests = [];
+  chrome.tabs.create = chrome.tabs.update = async () => {assert.fail('a chat message must never open/navigate a tab');};
+  chrome.tabs.sendMessage = async (tabId, message) => {
+    assert(['read', 'target_status'].includes(message.kind), 'chat may only read the linked page');
+    return originalSend(tabId, message);
+  };
+  global.fetch = async (url, options = {}) => {
+    if (url.endsWith('connection.local.json')) return {json: async () => ({token: 'test-token-only'})};
+    assert(url.startsWith('http://127.0.0.1:8000/api/v1/browser-connector/requests'));
+    if (options.method === 'POST') {requests.push(JSON.parse(options.body)); return {ok: true, json: async () => ({data: {status: 'running'}})};}
+    return {ok: true, json: async () => ({data: {status: 'completed', result: {answer: 'Phản hồi fixture.', provider: 'fixture'}}})};
+  };
+  try {
+    for (const status of ['idle', 'failed', 'partial', 'completed', 'interrupted']) {
+      const now = new Date().toISOString();
+      const product = {target: connection.target, snapshot: {url: 'https://banhang.shopee.vn/', captured_at: now},
+        tables: [[['Sản phẩm', 'SKU', 'Tồn kho'], ['Bàn phím', 'K1', '3']]],
+        coverage: {pages_read: 1, pagination_complete: status === 'completed'}};
+      if (status === 'completed') product.snapshot.captured_at = new Date(Date.now() - 360000).toISOString();
+      saved['shopee_sync:' + connection.id] = {account_label: connection.target.label,
+        pages: ['partial', 'completed'].includes(status) ? {products: product} : {}, job: {status}};
+      for (let repeat = 0; repeat < 2; repeat++) {
+        const response = await api.handleApi('/chat', 'POST', JSON.stringify({
+          request_id: crypto.randomUUID(), conversation_id: crypto.randomUUID(), message: 'Sản phẩm nào sắp hết hàng?',
+        }));
+        assert.equal(response.data.answer, 'Phản hồi fixture.');
+        const resource = requests.at(-1).shop_context.products;
+        assert.equal(Boolean(resource), status === 'partial', 'partial facts retained; expired facts never relabeled fresh');
+        if (resource) {assert.equal(resource.complete, false); assert.equal(resource.low_stock_items[0].stock, 3);}
+      }
+    }
+    assert.equal(requests.length, 10);
+    // A product list already open in the linked tab remains useful even when
+    // a background sync failed. Never label this one page as the whole shop.
+    chrome.tabs.sendMessage = async (tabId, message) => {
+      assert(['read', 'target_status'].includes(message.kind));
+      const result = await originalSend(tabId, message);
+      if (message.kind === 'read') result.data.tables = [[['Sản phẩm', 'SKU', 'Tồn kho'], ['Tai nghe', 'H1', '2']]];
+      return result;
+    };
+    await api.handleApi('/chat', 'POST', JSON.stringify({request_id: crypto.randomUUID(), message: 'Hàng nào sắp hết?'}));
+    const live = requests.at(-1).shop_context.products;
+    assert.equal(live.low_stock_items[0].sku, 'H1'); assert.equal(live.low_stock_items[0].stock, 2);
+    assert.equal(live.complete, false); assert.equal(live.scope, 'current_page');
+  } finally {global.fetch = originalFetch; chrome.tabs.create = originalCreate; chrome.tabs.update = originalUpdate; chrome.tabs.sendMessage = originalSend;}
+});
 
 test('Shopee source never falls through to the local shop API', async () => {
   const [state, api] = await load(); saved = {}; calls = [];
@@ -139,6 +194,8 @@ test('saved tab binding stays linked after reopening; wrong or closed tabs are d
   const original = chrome.tabs.get;
   try {
     chrome.tabs.get = async id => ({id, active: false, url: 'https://banhang.shopee.vn/'});
+    assert.equal((await state.connectionStatus()).tab_status, 'linked');
+    chrome.tabs.get = async id => ({id, active: true, url: 'https://example.test/'});
     assert.equal((await state.connectionStatus()).tab_status, 'wrong_tab');
     chrome.tabs.get = async () => {throw Error('Closed tab');};
     assert.equal((await state.connectionStatus()).tab_status, 'closed');

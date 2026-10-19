@@ -16,6 +16,46 @@ from app.ai.money import money_hints
 from app.ai.text import assistant_text
 
 
+def browser_availability(context):
+    """User-facing readiness; missing observations are never zero stock/sales."""
+    labels = {'products': 'tồn kho sản phẩm', 'dashboard': 'doanh số', 'orders': 'danh sách đơn hàng'}
+    missing = [label for key, label in labels.items() if getattr(context, key) is None]
+    if context.sync_status == 'running':
+        next_step = 'Đang đồng bộ dữ liệu. Khi tiến trình kết thúc, bạn có thể hỏi lại; không cần mở thêm tab.'
+    else:
+        next_step = 'Bấm **Cập nhật** cạnh tên shop để đồng bộ lại một lần; không cần tự mở từng mục.'
+    return {'chưa_có_dữ_liệu': missing, 'hướng_xử_lý': next_step}
+
+
+def browser_answer(answer, context, availability):
+    """Catch a provider reverting to the old manual-page workflow or leaking fields.
+
+    Keep normal advice and analysis intact. This is an output guard, not an
+    intent router: open conversation still goes to the model with its history.
+    """
+    if context is None:
+        return answer
+    prose = ' '.join(answer.split())
+    internal = re.search(r'\b(?:null|undefined|shop_context|browser_snapshot|pagination_complete)\b|`products`', prose, re.I)
+    manual = re.search(r'(?:bạn|vui lòng|hãy|cần|nhờ).{0,70}(?:mở|chuyển (?:sang|đến)).{0,100}(?:trang|tab|quản lý|kênh người bán)', prose, re.I)
+    # Explicit navigation is appropriate when editing a form, but not as a way
+    # to answer a read-only stock/sales question with a missing-data excuse.
+    missing_excuse = re.search(r'(?:chưa|không).{0,45}(?:dữ liệu|đồng bộ|số liệu|danh sách)', prose, re.I)
+    if not internal and not (manual and missing_excuse and availability['chưa_có_dữ_liệu']):
+        return answer
+    missing = availability['chưa_có_dữ_liệu']
+    mentions = {'tồn kho sản phẩm': r'products|tồn kho|sản phẩm|hết hàng',
+                'doanh số': r'dashboard|doanh số|doanh thu',
+                'danh sách đơn hàng': r'orders|đơn hàng'}
+    named = [label for label, pattern in mentions.items() if re.search(pattern, prose, re.I)]
+    missing = [label for label in missing if label in named] if named else missing
+    if not missing:
+        # Do not turn a schema leak or a stale manual instruction into a false
+        # missing-data claim when that resource is actually available.
+        raise AIProviderError('invalid_response')
+    return 'Mình chưa có dữ liệu ' + ', '.join(missing) + ' đã đồng bộ để kết luận chính xác. ' + availability['hướng_xử_lý']
+
+
 async def browser_assist(payload, provider):
     history = [row.model_dump() for row in payload.history]
     facts = {
@@ -24,8 +64,15 @@ async def browser_assist(payload, provider):
         'data_scope': 'Only the currently visible page; not a complete shop database.',
         'operations_executed': [],
     }
+    if payload.shop_context:
+        facts['shop_context'] = payload.shop_context.model_dump(mode='json', exclude_none=True)
+        facts['data_availability'] = browser_availability(payload.shop_context)
+        facts['data_scope'] = ('Account-scoped observations collected automatically across seller pages. '
+                               'Use each resource timestamp, pagination completeness, unknown/conflicting counts '
+                               'and list scope; neither the current page alone nor a verified Open API shop database.')
     if payload.mode == 'chat':
         answer = assistant_text(await provider.respond(payload.message, history=history, facts=facts))
+        answer = browser_answer(answer, payload.shop_context, facts.get('data_availability'))
         if not answer or len(answer) > 16000:
             raise AIProviderError('invalid_response')
         return {'answer': answer, 'provider': getattr(provider, 'response_provider', getattr(provider, 'provider', 'gemini')),

@@ -23,7 +23,8 @@ router = APIRouter(prefix='/browser-connector', tags=['Shopee browser connector'
 
 @router.get('/health')
 def health():
-    return {'data': {'status': 'ok', 'integration_mode': 'shopee_browser', 'writes': 'user_reviewed_form_fill'}}
+    return {'data': {'status': 'ok', 'integration_mode': 'shopee_browser', 'writes': 'user_reviewed_form_fill',
+                     'shop_context_version': 1}}
 
 
 @router.post('/requests', status_code=202)

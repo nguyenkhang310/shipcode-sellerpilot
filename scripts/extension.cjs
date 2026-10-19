@@ -21,14 +21,14 @@ if (command === 'setup') {
 } else if (command === 'build') {
   if (!fs.existsSync(configFile)) throw Error('Chạy npm run extension:setup trước.');
   const built = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build', '--workspace', 'frontend'], {
-    cwd: root, stdio: 'inherit', env: {...process.env, EXPO_PUBLIC_API_URL: 'http://127.0.0.1:8000/api/v1', EXPO_PUBLIC_STORE_URL: 'http://127.0.0.1:5011'},
+    cwd: root, stdio: 'inherit', env: {...process.env, EXPO_NO_TELEMETRY: '1', CI: '1', EXPO_PUBLIC_API_URL: 'http://127.0.0.1:8000/api/v1', EXPO_PUBLIC_STORE_URL: 'http://127.0.0.1:5011'},
   });
   if (built.status !== 0) process.exit(built.status || 1);
   const output = path.join(source, 'dist');
   fs.rmSync(output, {recursive: true, force: true});
   fs.cpSync(path.join(root, 'frontend/dist/web'), output, {recursive: true});
   prepareExpoAssets(output);
-  for (const name of ['manifest.json', 'service-worker.js', 'state.js', 'api.js', 'bootstrap.js', 'content', 'connection.local.json']) fs.cpSync(path.join(source, name), path.join(output, name), {recursive: true});
+  for (const name of ['manifest.json', 'service-worker.js', 'shopee-sync.js', 'shop-data.js', 'state.js', 'api.js', 'bootstrap.js', 'content', 'connection.local.json']) fs.cpSync(path.join(source, name), path.join(output, name), {recursive: true});
   fs.copyFileSync(path.join(root, 'frontend/assets/shipcode-logo-app.png'), path.join(output, 'icon.png'));
   const indexFile = path.join(output, 'index.html');
   let index = fs.readFileSync(indexFile, 'utf8').replace('<html lang="en">', '<html lang="vi">');

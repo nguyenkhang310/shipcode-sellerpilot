@@ -79,6 +79,39 @@ const path = require('node:path');
     assert.equal((await message({kind: 'read'})).ok, false);
     assert.equal((await message({kind: 'fill', document_id: snapshot.data.document_id, url: snapshot.data.snapshot.url, draft})).ok, false);
     await page.locator('#account').evaluate(el => {el.textContent = 'fixture-shop';});
+    // Discover real menu hrefs and traverse pagination without submitting a form.
+    await page.evaluate(() => {
+      const aside = document.createElement('aside');
+      aside.innerHTML = '<a href="/observed-catalog">Tất cả sản phẩm</a><a href="https://evil.example/">Tất cả đơn hàng</a>';
+      document.body.append(aside);
+      document.querySelector('main').innerHTML = '<h1>Tất cả sản phẩm</h1><table><thead><tr><th>Sản phẩm</th><th>SKU</th><th>Tồn kho</th><th>Điện thoại</th></tr></thead><tbody><tr><td>Bàn phím</td><td>K1</td><td>3</td><td>0900000000</td></tr></tbody></table><nav class="pagination"><button aria-current="page">1</button><button>2</button><button id="next" aria-label="Trang sau">→</button></nav>';
+      document.querySelector('#next').addEventListener('click', () => {
+        document.querySelector('tbody').innerHTML = '<tr><td>Chuột</td><td>M1</td><td>0</td><td>0900000000</td></tr>';
+        document.querySelector('[aria-current]').removeAttribute('aria-current');
+        document.querySelectorAll('.pagination button')[1].setAttribute('aria-current', 'page');
+        document.querySelector('#next').disabled = true;
+      });
+    });
+    const firstPage = await message({kind: 'read'});
+    assert.equal(firstPage.data.navigation.products, 'https://banhang.shopee.vn/observed-catalog');
+    assert.equal(firstPage.data.navigation.orders, null);
+    assert.equal(firstPage.data.pagination.current, 1);
+    assert.equal(firstPage.data.inventory[0].sku, 'K1');
+    assert.equal(firstPage.data.inventory[0].stock, '3');
+    assert(!JSON.stringify(firstPage.data).includes('0900000000'));
+    const turn = await message({kind: 'next_page', document_id: firstPage.data.document_id, page_context: firstPage.data.page_context});
+    assert(turn.ok, turn.error);
+    const secondPage = await message({kind: 'read'});
+    assert.equal(secondPage.data.pagination.current, 2); assert.equal(secondPage.data.pagination.at_last, true);
+    assert.equal(secondPage.data.inventory[0].stock, '0');
+    assert.equal(await page.evaluate(() => window.submitted), false);
+    // Div-based seller tables must follow the same strict header allowlist.
+    await page.evaluate(() => {
+      document.querySelector('main').innerHTML = '<div class="shopee-table"><div class="shopee-table__header"><div class="shopee-table__row"><div class="shopee-table__cell">Sản phẩm</div><div class="shopee-table__cell">Tồn kho</div></div></div><div class="shopee-table__body"><div class="shopee-table__row"><div class="shopee-table__cell"><a href="/portal/product/123/edit">Tai nghe</a></div><div class="shopee-table__cell">5</div></div></div></div>';
+    });
+    const divTable = await message({kind: 'read'});
+    assert.equal(divTable.data.inventory[0].key, 'product:123');
+    assert.equal(divTable.data.inventory[0].stock, '5');
     await page.evaluate(() => {const input = document.createElement('input'); input.type = 'password'; document.body.append(input);});
     assert.equal((await message({kind: 'read'})).ok, false);
     console.log('Passed: trusted account selection, account mismatch read/write guards, structured metrics/tables, private-data exclusion, native field events, Vietnamese multiline, stale document, no submit.');

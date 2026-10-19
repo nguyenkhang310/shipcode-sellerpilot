@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ShipCode SellerPilot",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "minimum_chrome_version": "116",
   "description": "SellerPilot c\u1ea1nh K\u00eanh Ng\u01b0\u1eddi B\u00e1n Shopee: chat, \u1ea3nh s\u1ea3n ph\u1ea9m v\u00e0 h\u1ed7 tr\u1ee3 \u0111i\u1ec1n form c\u00f3 ki\u1ec3m tra.",
   "permissions": [
@@ -14,6 +14,11 @@
     "https://banhang.shopee.vn/*",
     "http://127.0.0.1/*"
   ],
+  "content_scripts": [{
+    "matches": ["https://banhang.shopee.vn/*"],
+    "js": ["content/shopee.js"],
+    "run_at": "document_idle"
+  }],
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"

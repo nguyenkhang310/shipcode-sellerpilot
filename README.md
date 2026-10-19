@@ -8,8 +8,11 @@ SellerPilot kết nối với gian hàng **UTech Official** trong bản Shopee D
 chung các thành phần chat/ảnh, có bố cục desktop riêng, chọn mục tiêu bằng nhãn tài
 khoản trên trang Shopee đã đăng nhập và hỗ trợ điền form. Không gửi nguyên văn
 trang hay lấy số liệu local thay cho dữ liệu Shopee. Nhãn được chọn chưa phải
-Shop ID xác thực qua API; bộ đọc số liệu/bảng còn giới hạn theo bố cục trang,
-chưa đạt đủ nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
+Shop ID xác thực qua API; có luồng tự đọc danh sách qua các trang trong một tab nền
+dùng chung, cache riêng theo shop và tổng hợp tồn kho cho AI. Gửi chat không tự mở
+tab hoặc thử lại đồng bộ lỗi; đồng bộ chạy lúc liên kết mới hoặc bấm Cập nhật.
+Bộ đọc còn phụ thuộc bố cục/phân trang Shopee, chưa đạt đủ
+nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
 
 ## Sản phẩm
 

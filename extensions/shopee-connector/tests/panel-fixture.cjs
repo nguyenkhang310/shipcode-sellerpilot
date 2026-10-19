@@ -21,11 +21,21 @@ const origin = 'https://sellerpilot.extension.test';
       window.fixtureConnection = connection;
       window.rpcCalls = [];
       const turns = [];
+      let sync = {synced: false, syncing: false, status: 'failed', resource: 'products', pages_read: 0, records_read: 0};
       window.chrome = {runtime: {sendMessage: async message => {
         window.rpcCalls.push(message);
         const ok = data => ({ok: true, data: structuredClone(data)});
         if (message.kind === 'connection' || message.kind === 'connection_status') return ok(connection);
         if (message.kind === 'list_scopes') return ok([]);
+        if (message.kind === 'sync_status') return ok(sync);
+        if (message.kind === 'sync_now') {sync = {...sync, syncing: true, status: 'running'}; return ok({status: 'started'});}
+        if (message.kind === 'sync_cancel') {sync = {...sync, syncing: false, status: 'cancelled'}; return ok({});}
+        if (message.kind === 'get_cached_page') return ok({document_id: 'cached', page_context: 'cached', target: connection.target,
+          snapshot: {url: 'https://banhang.shopee.vn/', captured_at: new Date().toISOString()}, fields: [],
+          coverage: {pages_read: 2, pagination_complete: true},
+          metrics: message.page_key === 'dashboard' ? [{label: 'Doanh số', value: '1.500.000đ'}, {label: 'Đơn hàng', value: '2'}] : [],
+          inventory_summary: message.page_key === 'products' ? {records_count: 3, total_units: 13, low_stock_count: 1, out_of_stock_count: 1, quantities_unknown: 0} : undefined,
+          tables: message.page_key === 'products' ? [[['Sản phẩm', 'Giá'], ['Bàn phím', '500.000đ']]] : message.page_key === 'orders' ? [[['Mã đơn hàng', 'Tổng tiền'], ['ORDER-1', '500.000đ']]] : []});
         if (message.kind === 'scan') return ok({document_id: 'fixture', page_context: 'fixture-context', target: connection.target,
           snapshot: {url: 'https://banhang.shopee.vn/', captured_at: new Date().toISOString()},
           fields: [], metrics: [{label: 'Doanh số', value: '1.500.000đ'}, {label: 'Đơn hàng', value: '2'}],
@@ -62,11 +72,21 @@ const origin = 'https://sellerpilot.extension.test';
     });
     await page.goto(origin, {waitUntil: 'networkidle'});
     await page.getByTestId('extension-shell').waitFor();
+    await page.waitForFunction(() => window.rpcCalls.filter(call => call.kind === 'sync_status').length >= 2);
+    assert.equal(await page.evaluate(() => window.rpcCalls.filter(call => call.kind === 'sync_now').length), 0, 'polling a failed sync never retries navigation');
+    await page.reload({waitUntil: 'networkidle'});
+    await page.waitForFunction(() => window.rpcCalls.filter(call => call.kind === 'sync_status').length >= 2);
+    assert.equal(await page.evaluate(() => window.rpcCalls.filter(call => call.kind === 'sync_now').length), 0, 'reopening panel never retries a failed sync');
     assert.equal(await page.getByTestId('bottom-dock').count(), 0);
     assert.equal(await page.getByText('SellerPilot', {exact: true}).count(), 1);
     await page.getByRole('button', {name: 'Cập nhật', exact: true}).click();
+    await page.getByRole('button', {name: 'Dừng đồng bộ', exact: true}).waitFor();
+    await page.getByRole('button', {name: 'Dừng đồng bộ', exact: true}).click();
+    await page.getByRole('button', {name: 'Cập nhật', exact: true}).waitFor();
     await page.getByRole('tab', {name: 'Tổng quan', exact: true}).click();
     await page.getByText('1.500.000đ', {exact: true}).waitFor();
+    await page.getByText('Đã đọc hết danh sách', {exact: false}).waitFor();
+    await page.screenshot({path: path.join(output, 'overview-sync.png')});
     await page.evaluate(() => {window.fixtureConnection.target_matches = false;});
     await page.getByText('Kiểm tra lại tài khoản Shopee', {exact: true}).waitFor();
     assert.equal(await page.getByText('1.500.000đ', {exact: true}).count(), 0, 'account mismatch must clear old metrics');
@@ -84,6 +104,7 @@ const origin = 'https://sellerpilot.extension.test';
       await page.setViewportSize({width, height: 760});
       await input.fill(Array.from({length: 14}, (_, i) => 'Dòng ' + i + ': mô tả sản phẩm tiếng Việt').join('\n'));
       await page.waitForFunction(() => document.querySelector('textarea').clientHeight >= 100);
+      assert(await input.evaluate(node => node.selectionEnd === node.value.length && node.scrollTop > 0), 'last line remains visible when text exceeds input height');
       const field = await input.boundingBox(), composer = await page.getByTestId('chat-composer').boundingBox();
       assert(field.height <= 129 && field.y + field.height <= 760, 'composer stays inside side panel');
       assert(composer.x >= 0 && composer.x + composer.width <= width + 1, 'composer fits panel width');
@@ -110,8 +131,10 @@ const origin = 'https://sellerpilot.extension.test';
     await page.getByRole('button', {name: 'Đóng kết nối', exact: true}).click();
     const apiCalls = await page.evaluate(() => window.rpcCalls.filter(row => row.kind === 'api').map(row => row.path));
     assert(!apiCalls.some(value => value.startsWith('/management/')), 'Shopee shell must not load local dashboard API');
+    assert.equal(await page.evaluate(() => window.rpcCalls.filter(row => row.kind === 'sync_now').length), 1, 'only the explicit update click starts a sync; sending chat never does');
     assert.deepEqual(errors, []); assert.deepEqual(outgoing, []);
     checks.push('Multiline input grows/shrinks, typing feedback, long-answer autoscroll, history modal and connection modal; no local management calls or real network');
+    checks.push('Failed-sync polling, panel reload and chat never retry sync; one explicit update click starts exactly one sync');
     const result = {checks, errors, outgoing};
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result, null, 2));

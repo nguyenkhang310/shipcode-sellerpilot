@@ -162,3 +162,110 @@ def test_cancelling_running_inference_returns_no_answer_and_releases_capacity(br
         time.sleep(.005)
     assert result == {'status': 'cancelled'}
     assert client.post('/api/v1/browser-connector/requests', json=requests[4], headers=HEADERS).status_code == 202
+
+
+def sync_context(request):
+    return {'connection_id': request['connection_id'], 'account_label': 'shop-a', 'sync_status': 'completed',
+            'products': {'source_url': 'https://banhang.shopee.vn/observed-products',
+                         'observed_at': datetime.now(timezone.utc).isoformat(), 'pages_read': 2,
+                         'complete': True, 'scope': 'observed_list', 'reason': None,
+                         'records_count': 3, 'quantities_known': 3, 'quantities_unknown': 0,
+                         'conflicting_records': 0, 'unverified_identities': 0, 'total_units': 13,
+                         'threshold': 5, 'low_stock_count': 1, 'out_of_stock_count': 1,
+                         'low_stock_items': [{'key': 'sku:K1', 'name': 'Bàn phím', 'sku': 'K1', 'stock': 3}],
+                         'out_of_stock_items': [{'key': 'sku:M1', 'name': 'Chuột', 'sku': 'M1', 'stock': 0}],
+                         'omitted_low_stock_count': 0, 'omitted_out_of_stock_count': 0}}
+
+
+def test_synced_inventory_is_available_when_current_page_is_dashboard(browser):
+    client, provider = browser
+    request = payload(message='Sản phẩm nào gần hết hàng?')
+    request['snapshot']['text'] = json.dumps({'account_label': 'shop-a', 'metrics': [{'label': 'Doanh số', 'value': '0đ'}]})
+    request['shop_context'] = sync_context(request)
+    result = finish(client, request)
+    assert result['status'] == 'completed'
+    context = provider.facts[-1]['shop_context']
+    assert context['products']['total_units'] == 13
+    assert context['products']['low_stock_items'][0]['stock'] == 3
+    assert 'across seller pages' in provider.facts[-1]['data_scope']
+    assert 'Không yêu cầu người bán tự mở' in response_prompt(provider.facts[-1])
+
+
+@pytest.mark.parametrize('status', ['failed', 'running', 'interrupted', 'idle'])
+@pytest.mark.parametrize('bad_answer', [
+    'Hệ thống chưa đồng bộ danh sách sản phẩm (`products` đang là `null`).',
+    'Mình chưa có dữ liệu tồn kho. Bạn vui lòng mở trang Quản lý Sản phẩm để mình quét nhé.',
+])
+def test_missing_data_never_exposes_fields_or_sends_user_between_pages(browser, status, bad_answer):
+    client, provider = browser
+
+    async def respond(_message, *, history, facts):
+        provider.facts.append(copy.deepcopy(facts))
+        return bad_answer
+
+    provider.respond = respond
+    request = payload(message='Sản phẩm nào sắp hết hàng?')
+    request['snapshot']['text'] = json.dumps({'account_label': 'shop-a'})
+    request['shop_context'] = {'connection_id': request['connection_id'], 'account_label': 'shop-a', 'sync_status': status}
+    result = finish(client, request)
+    assert result['status'] == 'completed'
+    answer = result['result']['answer']
+    for forbidden in ('null', 'products', 'Quản lý Sản phẩm', 'vui lòng mở', 'shop_context'):
+        assert forbidden not in answer
+    assert ('Đang đồng bộ' if status == 'running' else 'Cập nhật') in answer
+    assert 'tồn kho' in answer
+    assert not any(value is None for value in provider.facts[-1]['shop_context'].values())
+
+
+def test_missing_inventory_does_not_block_open_ended_business_advice(browser):
+    client, provider = browser
+    advice = 'Bạn có thể quay video mở hộp 20 giây: 3 giây đầu nêu nhu cầu, tiếp theo cho thấy cách dùng.'
+
+    async def respond(_message, *, history, facts):
+        return advice
+
+    provider.respond = respond
+    request = payload(message='Cho mình ý tưởng quay video cho sản phẩm mới')
+    request['snapshot']['text'] = json.dumps({'account_label': 'shop-a'})
+    request['shop_context'] = {'connection_id': request['connection_id'], 'account_label': 'shop-a', 'sync_status': 'failed'}
+    assert finish(client, request)['result']['answer'] == advice
+
+
+def test_schema_leak_cannot_claim_inventory_missing_when_inventory_was_supplied(browser):
+    client, provider = browser
+
+    async def respond(_message, *, history, facts):
+        return 'products đang là null nên chưa đọc được tồn kho.'
+
+    provider.respond = respond
+    request = payload(message='Sản phẩm nào sắp hết hàng?')
+    request['snapshot']['text'] = json.dumps({'account_label': 'shop-a'})
+    request['shop_context'] = sync_context(request)
+    result = finish(client, request)
+    assert result['status'] == 'failed'
+    assert result['reason'] == 'invalid_response'
+    assert 'result' not in result
+
+
+@pytest.mark.parametrize('change', ['account', 'connection', 'expired', 'counts', 'bad_low_stock', 'bad_origin'])
+def test_invalid_synchronized_context_never_reaches_model(browser, change):
+    client, provider = browser
+    request = payload()
+    request['snapshot']['text'] = json.dumps({'account_label': 'shop-a'})
+    context = sync_context(request)
+    if change == 'account':
+        context['account_label'] = 'another-shop'
+    elif change == 'connection':
+        context['connection_id'] = str(uuid4())
+    elif change == 'expired':
+        context['products']['observed_at'] = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat()
+    elif change == 'counts':
+        context['products']['quantities_unknown'] = 9
+    elif change == 'bad_low_stock':
+        context['products']['low_stock_items'][0]['stock'] = 8
+    else:
+        context['products']['source_url'] = 'https://evil.example/'
+    request['shop_context'] = context
+    response = client.post('/api/v1/browser-connector/requests', json=request, headers=HEADERS)
+    assert response.status_code == 422
+    assert provider.facts == []

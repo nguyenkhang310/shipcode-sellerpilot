@@ -184,3 +184,44 @@ hoặc kết nối Shopee/TikTok.
   tạm không tạo service worker trên Chrome hiện có, nên chưa xác minh Load unpacked,
   CSP, bộ đọc và form trên Shopee đăng nhập. Thành viên phải Reload extension,
   tải lại tab Shopee, chọn nhãn và kiểm chứng trang thực tế trước thuyết trình.
+
+### Thu thập nhiều trang Shopee và trả lời tồn kho từ Tổng quan — 19/10/2026
+
+- Tự tìm liên kết/menu đang hiện trên trang, dùng tab nền cùng cửa sổ và phân trang
+  có xác minh; không hardcode URL portal, không đọc cookie hoặc gọi API riêng Shopee.
+- Job có tiến trình, hủy, giới hạn, tách theo connection/nhãn tài khoản; không ghi
+  cache lẫn shop, không dùng cache quá 5 phút hay vượt kiểm tra tài khoản live.
+- Tính tồn kho bằng code: dedup SKU/ID, xung đột là chưa biết, phân biệt 0 với thiếu,
+  mặc định sắp hết là >0 và <=5. AI nhận summary và bằng chứng có giới hạn rõ ràng.
+- Câu hỏi tồn kho không phải chờ lượt quét đơn hàng. Schema backend kiểm tra nhãn,
+  UUID kết nối, tuổi dữ liệu, URL và quan hệ giữa các bộ đếm trước khi gọi model.
+- Test: 17 bài extension/packaging/sync; DOM fixture gồm bảng native/div, SKU,
+  liên kết quan sát được, phân trang, không submit và loại PII; UI 320/380/520px,
+  tiến trình/dừng, summary, composer, lịch sử, autoscroll; TypeScript và toàn bộ
+  backend đạt. Live Gemini dùng 3 SKU giả lập: K1 tồn 3, M1 tồn 0, H1 tồn 10;
+  trả lời đúng nhóm sắp hết/hết, không yêu cầu người bán mở mục thủ công.
+- Chrome plugin của phiên này không kết nối được; chưa kiểm chứng DOM Shopee thật.
+  Reload extension và tab Shopee, khởi động lại backend để nạp schema shop_context.
+  Độ phủ toàn shop chỉ được khẳng định sau nghiệm thu trên danh sách thực tế.
+
+### Tách chat khỏi điều hướng trình duyệt — extension 0.2.1, 19/10/2026
+
+- Gửi tin nhắn chỉ đọc dữ liệu còn hạn và trang liên kết hiện tại; không khởi
+  chạy đồng bộ, mở tab, điều hướng tab hay chờ quét. Mất dữ liệu, cache hết hạn,
+  lượt đọc lỗi và mở lại panel không tự thử lại. Liên kết mới hoặc nút Cập nhật
+  mới bắt đầu lượt đồng bộ; nhiều mục dùng chung một tab nền, tự đóng khi xong.
+- Tab được người dùng sử dụng hoặc chuyển ra ngoài Shopee được giữ nguyên;
+  lượt đồng bộ không tiếp tục điều hướng tab đó. Cache vẫn tách theo tài khoản,
+  giữ timestamp thật và không coi dữ liệu quá hạn là số liệu hiện tại.
+- Facts gửi model bỏ tài nguyên rỗng, có hướng xử lý theo trạng thái. Kiểm tra
+  đầu ra chặn tên trường/null và hướng dẫn tự mở từng mục để lấy dữ liệu thiếu.
+  Nếu model phủ nhận dữ liệu thực tế đã cung cấp, trả lỗi thay vì bịa thiếu số liệu.
+- QA phát hiện ô nhập web không thu nhỏ ổn định sau khi thay đoạn dài bằng ngắn.
+  Đổi sang đo textarea trước khi vẽ, bỏ ảnh hưởng chiều cao mặc định hai dòng;
+  giữ cách đo native. Kiểm tra dòng cuối/caret khi nội dung vượt chiều cao tối đa.
+- Đạt: 19 bài extension; 31 bài browser backend; toàn bộ backend; 11 bài API/chat;
+  TypeScript; build 0.2.1. UI fixture đạt 320/380/520px, nhập dài/ngắn, autoscroll,
+  lịch sử, polling lỗi và mở lại panel không retry; chỉ lần bấm Cập nhật gửi sync_now.
+- Giao diện kiểm tra bằng Chrome riêng với RPC/dữ liệu giả lập, không dùng tài
+  khoản Shopee. Chưa kiểm chứng bộ đọc trên DOM Shopee đăng nhập hoặc đầy đủ tồn
+  kho thật; các kiểm thử trên không chứng minh việc đọc toàn shop đã thành công.

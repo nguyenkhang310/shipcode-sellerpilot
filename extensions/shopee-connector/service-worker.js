@@ -1,5 +1,6 @@
-import {state, connectionStatus, bindCurrentTab, pageMessage, listScopes, restoreScope, selectTarget, completeTarget, SOURCE} from './state.js';
+import {state, connectionStatus, bindCurrentTab, pageMessage, listScopes, restoreScope, selectTarget, completeTarget, autoConnectShopee, SOURCE} from './state.js';
 import {handleApi, backend} from './api.js';
+import {syncShopeeData, getCachedPage, getSyncStatus, cancelSync} from './shopee-sync.js';
 const active = new Map();
 const chatJobs = new Map();
 chrome.sidePanel.setPanelBehavior({openPanelOnActionClick: true}).catch(() => {});
@@ -8,7 +9,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.kind === 'target_selected' && sender.id === chrome.runtime.id && sender.tab) {
     Promise.resolve().then(async () => {
       if (active.size) throw Error('Dừng yêu cầu AI trước khi đổi tài khoản.');
-      return completeTarget(message, sender);
+      const res = await completeTarget(message, sender);
+      void syncShopeeData(res.id).catch(() => {});
+      return res;
     }).then(data => reply({ok: true, data}), error => reply({ok: false, error: error.message}));
     return true;
   }
@@ -17,6 +20,26 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   Promise.resolve().then(async () => {
     if (message.kind === 'connection') {const value = await state(); return {id: value.id, mode: value.mode, tab_id: value.tab_id};}
     if (message.kind === 'connection_status') return connectionStatus();
+    if (message.kind === 'auto_connect') {
+      const res = await autoConnectShopee();
+      if (res?.id) void syncShopeeData(res.id).catch(() => {});
+      return res;
+    }
+    if (message.kind === 'sync_now') {
+      const value = await state();
+      return syncShopeeData(value.id, message.resources);
+    }
+    if (message.kind === 'sync_cancel') {
+      cancelSync((await state()).id); return {};
+    }
+    if (message.kind === 'sync_status') {
+      const value = await state();
+      return getSyncStatus(value.id);
+    }
+    if (message.kind === 'get_cached_page') {
+      const value = await state();
+      return getCachedPage(message.page_key, value.id);
+    }
     if (message.kind === 'select_target') {
       if (active.size) throw Error('Dừng yêu cầu AI trước khi đổi tài khoản.');
       return selectTarget();
@@ -30,7 +53,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       if (active.size) throw Error('Dừng yêu cầu đang chạy trước khi đổi kết nối.');
       return restoreScope(message.scope_id);
     }
-    if (message.kind === 'scan') return pageMessage(await state(), {kind: 'read'});
+    if (message.kind === 'scan') {
+      const conn = await state();
+      // A one-page read must not overwrite a complete paginated resource.
+      return pageMessage(conn, {kind: 'read'});
+    }
     if (message.kind === 'bind_field') return pageMessage(await state(), {kind: 'bind', field: message.field});
     if (message.kind === 'backend_health') return backend('/health');
     if (message.kind === 'open_store') {

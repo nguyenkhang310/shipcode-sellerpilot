@@ -19,7 +19,7 @@
     "test:api": "node --test frontend/tests/api-transport.cjs frontend/tests/chat-messages.cjs",
     "extension:setup": "node scripts/extension.cjs setup",
     "extension:build": "node scripts/extension.cjs build",
-    "test:extension": "node --test extensions/shopee-connector/tests/connector.cjs extensions/shopee-connector/tests/package.cjs",
+    "test:extension": "node --test extensions/shopee-connector/tests/connector.cjs extensions/shopee-connector/tests/package.cjs extensions/shopee-connector/tests/sync.cjs",
     "test:extension:dom": "node extensions/shopee-connector/tests/content-fixture.cjs",
     "test:extension:ui": "node extensions/shopee-connector/tests/panel-fixture.cjs"
   },

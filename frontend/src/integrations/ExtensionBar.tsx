@@ -8,33 +8,65 @@ export type BrowserConnection = {id: string; mode: string; target?: {label: stri
   target_selection_pending?: boolean; target_matches?: boolean; document_id?: string; page_context?: string;
   tab_status: 'unlinked' | 'linked' | 'closed' | 'wrong_tab' | 'local'};
 export type BrowserPage = {document_id: string; page_context: string; snapshot: {url: string; captured_at: string};
-  metrics: {label: string; value: string}[]; tables: string[][][]; fields: {label: string; type: string}[]; target: {label: string}};
+  metrics: {label: string; value: string}[]; tables: string[][][]; fields: {label: string; type: string}[]; target: {label: string};
+  coverage?: {pages_read: number; pagination_complete: boolean; reason?: string | null};
+  inventory_summary?: {records_count: number; total_units: number; low_stock_count: number; out_of_stock_count: number; quantities_unknown: number}};
+export type SyncStatus = {synced: boolean; syncing: boolean; status: string; resource?: string; pages_read?: number; records_read?: number;
+  resources?: Record<string, {error?: string; reason?: string | null} | null>};
 type Scope = {id: string; mode: string; target?: {label: string}; created_at?: string; turns: number};
+const SYNC_REASONS: Record<string, string> = {
+  pagination_unverified: 'Chưa xác nhận được phân trang. Dữ liệu mới là một phần danh sách.',
+  active_filters: 'Danh sách đang lọc. Chưa xác nhận dữ liệu ngoài bộ lọc này.',
+  repeated_page: 'Trang dữ liệu bị lặp. Đã dừng để tránh tính trùng.',
+  page_limit: 'Đã đạt giới hạn số trang cho một lượt đọc.',
+  row_limit: 'Bảng có nhiều dòng hơn giới hạn đọc. Chưa lấy đủ dữ liệu.',
+  record_limit: 'Đã đạt giới hạn số dòng cho một lượt đọc.',
+};
 
 export function ExtensionBar({onPage, onConnection}: {onPage?: (page: BrowserPage) => void; onConnection?: (value: BrowserConnection) => void}) {
   const { ui, IOS, desktop } = useTheme();
   const [connection, setConnection] = useState<BrowserConnection | null>(null);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
   const [menu, setMenu] = useState(false), [scopes, setScopes] = useState<Scope[]>([]);
+  const [sync, setSync] = useState<SyncStatus | null>(null);
   const linked = connection?.tab_status === 'linked';
   const matched = linked && connection?.target && connection.target_matches !== false;
+  const syncError = Object.values(sync?.resources || {}).find(value => value?.error || value?.reason);
+  const issue = syncError?.error || syncError?.reason;
+  const syncIssue = issue ? SYNC_REASONS[issue] || issue : 'Chưa đọc đủ dữ liệu. Bấm Cập nhật để thử lại.';
   useEffect(() => {
-    let alive = true, running = false;
+    let alive = true, running = false, hasInitialScanned = false;
     async function refresh() {
       if (running) return;
       running = true;
       try {
-        const value = await extensionCall<BrowserConnection>('connection_status');
+        let value = await extensionCall<BrowserConnection>('connection_status');
         if (!alive) return;
+        if (value.mode === 'shopee' && (!value.target || value.tab_status !== 'linked')) {
+          const auto = await extensionCall<BrowserConnection | null>('auto_connect').catch(() => null);
+          if (auto) {
+            value = await extensionCall<BrowserConnection>('connection_status').catch(() => value);
+          }
+        }
         const scope = new URLSearchParams(location.search).get('scope');
         if (value.target && scope && value.id !== scope) {location.reload(); return;}
         setConnection(value); onConnection?.(value);
+        if (value.target && value.tab_status === 'linked' && value.target_matches !== false) {
+          if (!hasInitialScanned) {
+            hasInitialScanned = true;
+            extensionCall<BrowserPage>('scan').then(p => {
+              if (alive && p) onPage?.(p);
+            }).catch(() => {});
+          }
+          const status = await extensionCall<SyncStatus>('sync_status').catch(() => null);
+          if (alive && status) setSync(status);
+        }
         if (!value.target_selection_pending) setMessage(current => current.startsWith('Bấm tên tài khoản/') ? '' : current);
       } catch (error) {if (alive) setMessage(error instanceof Error ? error.message : 'Chưa đọc được kết nối.');}
       finally {running = false;}
     }
     void refresh();
-    const timer = setInterval(() => void refresh(), 2000);
+    const timer = setInterval(() => void refresh(), 2500);
     return () => {alive = false; clearInterval(timer);};
   }, [onConnection]);
   async function execute(action: () => Promise<void>) {
@@ -50,7 +82,10 @@ export function ExtensionBar({onPage, onConnection}: {onPage?: (page: BrowserPag
     setMessage('Bấm tên tài khoản/shop trên thanh đầu trang Shopee.');
   });
   const scan = () => void execute(async () => {
-    const page = await extensionCall<BrowserPage>('scan'); onPage?.(page);
+    const result = await extensionCall<{status: string}>('sync_now');
+    if (['started', 'already_running'].includes(result.status)) {
+      setSync({synced: false, syncing: true, status: 'running', resource: 'products', pages_read: 0, records_read: 0});
+    }
   });
   const local = () => void execute(async () => {await extensionCall('bind_tab', {mode: 'local'}); location.reload();});
   const status = !connection ? 'Đang kiểm tra…' : connection.mode === 'local' ? 'Shop local'
@@ -64,10 +99,11 @@ export function ExtensionBar({onPage, onConnection}: {onPage?: (page: BrowserPag
         <Text numberOfLines={1} style={[ui.caption, {fontWeight: '600', color: IOS.label, flexShrink: 1}]}>{status}</Text>
         <Ionicons name="chevron-down" size={12} color={IOS.secondary} />
       </Pressable>
-      {busy ? <ActivityIndicator size="small" /> : <Pressable accessibilityRole="button" disabled={!connection} onPress={matched ? scan : choose} style={{paddingHorizontal: 8, minHeight: 30, justifyContent: 'center'}}>
+      {busy || sync?.syncing ? <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}><ActivityIndicator size="small"/>{sync?.syncing ? <Pressable accessibilityRole="button" accessibilityLabel="Dừng đồng bộ" onPress={() => void execute(async () => {await extensionCall('sync_cancel');})} style={{padding: 5}}><Ionicons name="stop-circle-outline" size={19} color={IOS.secondary}/></Pressable> : null}</View> : <Pressable accessibilityRole="button" disabled={!connection} onPress={matched ? scan : choose} style={{paddingHorizontal: 8, minHeight: 30, justifyContent: 'center'}}>
         <Text style={[ui.caption, {color: IOS.blue, fontWeight: '500'}]}>{matched ? 'Cập nhật' : 'Liên kết'}</Text>
       </Pressable>}
     </View>
+    {sync?.syncing ? <Text accessibilityLiveRegion="polite" style={ui.caption}>Đang đọc {sync.resource === 'products' ? 'sản phẩm' : sync.resource === 'orders' ? 'đơn hàng' : 'tổng quan'} · {sync.pages_read || 0} trang · {sync.records_read || 0} dòng</Text> : sync && ['failed', 'partial', 'interrupted'].includes(sync.status) ? <Text numberOfLines={3} style={ui.caption}>{syncIssue}</Text> : null}
     {message ? <Text accessibilityLiveRegion="polite" style={[ui.caption, {fontSize: 12, lineHeight: 17}]}>{message}</Text> : null}
     {!desktop && connection?.mode === 'shopee' ? <Text style={ui.caption}>Dữ liệu trang hiện tại · Chưa kết nối Open API</Text> : null}
     <Modal visible={menu} transparent animationType="fade" onRequestClose={() => setMenu(false)}>
