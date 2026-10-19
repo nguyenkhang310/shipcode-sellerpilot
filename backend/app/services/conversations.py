@@ -5,11 +5,15 @@ from sqlalchemy import select
 
 from app.ai.fallback import extract_price, extract_sku, normalize_text
 from app.ai.context import bounded_history
+from app.ai.text import assistant_text
+from app.ai.money import money_mentions
 from app.models.action import ActionProposal
 from app.models.agent_run import AgentRun
 from app.models.product_draft import ProductDraft
 from app.services.product_drafts import draft_to_dict
 from app.services.seller_tools import proposal_to_dict
+from app.models.product_edit import ProductEditProposal
+from app.services.product_edits import edit_to_dict
 
 
 def recent_runs(session, shop, conversation_id, limit=12):
@@ -63,7 +67,9 @@ def resolve_message(message, runs):
         if explicit and "sku" in missing:
             old_price = extract_price(normalize_text(last.message), sku=extract_sku(normalize_text(last.message)))
             return f"Đổi giá SKU {explicit}" + (f" thành {old_price}đ" if old_price is not None else "")
-        if "new_price_vnd" in missing and facts.get("sku") and re.fullmatch(r"[\d.,\s]+(?:k|đ|₫|triệu|trieu|nghìn)?[.!]?", text):
+        money = money_mentions(text.strip(' .!?'))
+        money_only = len(money) == 1 and money[0].start == 0 and money[0].end == len(text.strip(' .!?'))
+        if "new_price_vnd" in missing and facts.get("sku") and money_only:
             return f"Đổi giá SKU {facts['sku']} thành {message}"
     return message
 
@@ -79,19 +85,25 @@ def history_messages(runs):
         # A failed generation is not evidence that the next generation is also
         # offline. Keep the seller's question without feeding error text back.
         if not (run.intent == 'unknown' and run.mode == 'fallback' and run.fallback_reason):
-            result.append({'role': 'assistant', 'content': run.answer})
+            result.append({'role': 'assistant', 'content': assistant_text(run.answer)})
     return bounded_history(result)
 
 
 def run_data(session, run):
     proposal = session.get(ActionProposal, run.proposal_id) if run.proposal_id else None
     product_draft = session.get(ProductDraft, run.product_draft_id) if run.product_draft_id else None
+    product_edit = session.get(ProductEditProposal,run.product_edit_proposal_id) if run.product_edit_proposal_id else None
+    facts = json.loads(run.facts_json)
+    draft_data = draft_to_dict(product_draft) if product_draft else None
+    if draft_data and product_draft.status == 'collecting':
+        draft_data['missing_fields'] = list(dict.fromkeys(facts.get('pending_fields', []) + draft_data['missing_fields']))
     return {
         "run_id": run.id, "conversation_id": run.conversation_id,
-        "answer": run.answer, "intent": run.intent, "mode": run.mode,
+        "answer": assistant_text(run.answer), "intent": run.intent, "mode": run.mode,
         "provider": run.provider, "model": run.model, "fallback_reason": run.fallback_reason,
-        "tool": run.tool_name, "facts": json.loads(run.facts_json),
+        "tool": run.tool_name, "facts": facts,
         "proposal": proposal_to_dict(proposal) if proposal else None,
-        "product_draft": draft_to_dict(product_draft) if product_draft else None,
+        "product_edit_proposal": edit_to_dict(product_edit) if product_edit else None,
+        "product_draft": draft_data,
         "suggestions": [], "integration_mode": "local_store",
     }

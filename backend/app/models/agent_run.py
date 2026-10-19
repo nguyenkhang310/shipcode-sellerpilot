@@ -14,6 +14,7 @@ class AgentRun(Base):
     shop_slug: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     proposal_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     product_draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    product_edit_proposal_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     message: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)
     intent: Mapped[str] = mapped_column(String(50), index=True)

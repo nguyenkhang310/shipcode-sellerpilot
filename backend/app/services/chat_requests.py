@@ -20,6 +20,7 @@ from app.models.chat_request import ChatRequestRecord
 from app.schemas.chat import ChatResponse
 from app.services.chat_dispatch import dispatch_chat
 from app.services.conversation_state import ensure_conversation_open
+from app.ai.text import assistant_text
 
 logger = logging.getLogger(__name__)
 ACTIVE = ('queued', 'running')
@@ -163,9 +164,13 @@ class ChatRequestManager:
             if row is None:
                 raise HTTPException(404, detail={'code': 'chat_request_not_found',
                     'message': 'Không tìm thấy yêu cầu.'})
+            response = json.loads(row.response_json) if row.response_json else None
+            if isinstance(response, dict) and isinstance(response.get('data'), dict):
+                if isinstance(response['data'].get('answer'), str):
+                    response['data']['answer'] = assistant_text(response['data']['answer'])
             return {'request_id': row.request_id, 'conversation_id': row.conversation_id,
                 'status': row.status,
-                'response': json.loads(row.response_json) if row.response_json else None,
+                'response': response,
                 'error': {'status': row.error_status, 'detail': json.loads(row.error_json)} if row.error_json else None}
 
     def result(self, key):

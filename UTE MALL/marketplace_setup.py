@@ -122,7 +122,7 @@ def initialize_marketplace(app):
             'shop': {'shipping_address':'VARCHAR(500)', 'phone':'VARCHAR(30)', 'contact_email':'VARCHAR(180)', 'vacation_mode':'BOOLEAN NOT NULL DEFAULT 0'},
             'order': {'checkout_reference':'VARCHAR(64)', 'shipping_fee':'FLOAT NOT NULL DEFAULT 0', 'discount_amount':'FLOAT NOT NULL DEFAULT 0'},
             'coupon': {'shop_id':'INTEGER'},
-            'review': {'seller_reply':'TEXT', 'replied_at':'DATETIME'},
+            'review': {'seller_reply':'TEXT', 'replied_at':'DATETIME', 'is_demo':'BOOLEAN NOT NULL DEFAULT 0'},
         }
         # Existing tables must be upgraded before ORM queries touch new fields.
         for table, columns in additions.items():
@@ -141,6 +141,8 @@ def initialize_marketplace(app):
         db.create_all()
         db.session.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS uq_review_buyer_product ON review(product_id,user_id)'))
         db.session.commit()
+        from demo_reviews import ensure_demo_reviews
+        ensure_demo_reviews()
         shop = Shop.query.filter_by(slug='utech-official').first()
         if not shop: return
         _enrich_demo_reviews(shop)

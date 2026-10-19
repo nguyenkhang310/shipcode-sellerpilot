@@ -123,7 +123,7 @@ def test_context_survives_acknowledgement_and_advice(client):
 def test_opencode_style_provider_skips_classifier_for_obvious_casual_chat(client):
     class NaturalAI:
         provider = 'opencode'
-        model = 'muse-spark-1.3-contributor-free'
+        model = 'glm-5.3-flash-free'
         natural_responses = True
         prefer_model_intent = True
 
@@ -144,7 +144,7 @@ def test_opencode_style_provider_skips_classifier_for_obvious_casual_chat(client
 def test_opencode_style_provider_uses_tool_facts_with_one_model_call(client):
     class NaturalAI:
         provider = 'opencode'
-        model = 'muse-spark-1.3-contributor-free'
+        model = 'glm-5.3-flash-free'
         natural_responses = True
         prefer_model_intent = True
 
@@ -168,7 +168,7 @@ def test_invalid_response_is_not_reported_as_lost_muse_connection(client):
     class InvalidReply:
         natural_responses = True
         provider = 'opencode'
-        model = 'muse-spark-1.3-contributor-free'
+        model = 'glm-5.3-flash-free'
         async def respond(self, *_args, **_kwargs):
             raise AIProviderError('invalid_response', stage='incomplete_reply')
     client.app.state.ai_provider = InvalidReply()
@@ -182,7 +182,7 @@ def test_unsafe_copy_is_rewritten_once_without_repeating_shop_actions(client, sh
     class CorrectedReply:
         natural_responses = True
         provider = 'opencode'
-        model = 'muse-spark-1.3-contributor-free'
+        model = 'glm-5.3-flash-free'
         calls = 0
         async def respond(self, message, *, history, facts):
             self.calls += 1
@@ -203,3 +203,11 @@ def test_unsafe_copy_is_rewritten_once_without_repeating_shop_actions(client, sh
         from app.models.action import ActionProposal
         assert session.scalar(select(func.count()).select_from(AgentRun)) == 1
         assert session.scalar(select(func.count()).select_from(ActionProposal)) == 0
+
+
+def test_price_clarification_accepts_slang_units(client):
+    first = chat(client, 'Đổi giá SKU A001')
+    assert first['proposal'] is None
+    result = chat(client, '5 xị', first['conversation_id'])
+    assert result['proposal']['new_price_vnd'] == 500000
+    assert result['proposal']['status'] == 'pending'

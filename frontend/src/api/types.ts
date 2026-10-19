@@ -5,7 +5,7 @@ export type Health = {
   status: 'ok' | 'degraded';
   database: 'ok' | 'unavailable';
   shop_database: 'ok' | 'unavailable';
-  provider: 'ollama' | 'opencode';
+  provider: 'ollama' | 'opencode' | 'antigravity' | 'gemini';
   ai_availability: 'available' | 'unavailable';
   ollama: 'available' | 'unavailable';
   model: string;
@@ -14,8 +14,8 @@ export type Health = {
   integration_mode: 'local_store' | 'not_connected';
 };
 
-export type ChatIntent = 'shop_summary' | 'inventory_query' | 'change_price' | 'product_search' | 'sales_advice' | 'create_product' | 'unknown';
-export type ChatFallbackReason = 'provider_unavailable' | 'provider_timeout' | 'model_unavailable' | 'invalid_response' | 'provider_rejected' | 'free_model_unavailable' | 'tool_not_allowed';
+export type ChatIntent = 'shop_summary' | 'inventory_query' | 'change_price' | 'product_search' | 'sales_advice' | 'create_product' | 'update_product' | 'unknown';
+export type ChatFallbackReason = 'provider_unavailable' | 'provider_timeout' | 'model_unavailable' | 'invalid_response' | 'provider_rejected' | 'provider_rate_limited' | 'free_tier_restricted' | 'free_model_unavailable' | 'tool_not_allowed';
 
 export type PriceProposal = {
   id: number;
@@ -33,7 +33,7 @@ export type PriceProposal = {
 
 export type ProductDraft = {
   id: number;
-  status: 'collecting' | 'ready' | 'published' | 'cancelled' | 'conflict';
+  status: 'collecting' | 'ready' | 'published' | 'cancelled' | 'conflict' | 'filled';
   preview_url: string;
   preview_urls: string[];
   image_count: number;
@@ -50,20 +50,28 @@ export type ProductDraft = {
   decided_at: string | null;
 };
 
+export type ProductEditProposal = {
+  id: number; sku: string; product_name: string; target_kind: 'product' | 'variant';
+  status: 'pending' | 'executing' | 'approved' | 'rejected' | 'conflict';
+  changes: { field: 'name' | 'description' | 'price_vnd' | 'stock'; before: string | number | null; after: string | number }[];
+  shared_content: boolean; created_at: string; decided_at: string | null; idempotent: boolean;
+};
+
 export type ChatData = {
   run_id: number;
   conversation_id: string | null;
   answer: string;
   intent: ChatIntent;
   mode: 'ai' | 'fallback';
-  provider: 'ollama' | 'opencode' | 'deterministic_parser';
+  provider: 'ollama' | 'opencode' | 'antigravity' | 'gemini' | 'groq' | 'deterministic_parser';
   model: string | null;
   fallback_reason: ChatFallbackReason | null;
   tool: string | null;
   facts: Record<string, unknown>;
   proposal: PriceProposal | null;
   product_draft: ProductDraft | null;
-  integration_mode: 'local_store';
+  product_edit_proposal?: ProductEditProposal | null;
+  integration_mode: 'local_store' | 'shopee_browser';
   suggestions: string[];
 };
 

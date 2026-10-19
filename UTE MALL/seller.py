@@ -1,4 +1,4 @@
-"""UTE MALL seller centre and connected buyer workflows."""
+"""Shopee seller centre and connected buyer workflows."""
 from datetime import datetime, timedelta
 from functools import wraps
 import csv

@@ -11,6 +11,8 @@ import { DashboardScreen, ManagementRoute } from '../features/dashboard/Dashboar
 import { ManagementSheet } from '../features/dashboard/ManagementSheet';
 import { AssistantChat, AssistantHandle } from '../features/assistant/AssistantChat';
 import { useTheme } from '../theme/ThemeProvider';
+import { inExtension, extensionCall } from '../integrations/extension';
+import { ExtensionBar } from '../integrations/ExtensionBar';
 
 const PANEL_ROUTES: Partial<Record<MainTab, ManagementRoute>> = { products: { kind: 'products' }, orders: { kind: 'orders' }, shop: { kind: 'settings' } };
 
@@ -32,7 +34,7 @@ export function AppShell({ darkMode, onDarkModeChange }: { darkMode: boolean; on
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<MainTab>(() => initialTab() === 'assistant' ? 'assistant' : 'home');
   const [route, setRoute] = useState<ManagementRoute | null>(null);
-  const { data, days, loading, error, onDays, refresh, ensureFresh } = useManagement(tab === 'home');
+  const { data, days, loading, refreshing, error, onDays, refresh, pullRefresh, ensureFresh } = useManagement(tab === 'home');
   const [toast, setToast] = useState(''), [reduceMotion, setReduceMotion] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [webViewportHeight, setWebViewportHeight] = useState<number | undefined>();
@@ -69,12 +71,13 @@ export function AppShell({ darkMode, onDarkModeChange }: { darkMode: boolean; on
     if (next === 'home') ensureFresh();
   };
   const ask = (message: string) => { setRoute(null); setTab('assistant'); chat.current?.ask(message); };
-  const openStore = (path = '/seller') => { void Linking.openURL(STORE_URL + path).catch(() => showToast('Chưa mở được UTE MALL. Kiểm tra kết nối với máy chạy shop.')); };
+  const openStore = (path = '/seller') => { void (inExtension() ? extensionCall('open_store', {path}) : Linking.openURL(STORE_URL + path)).catch(() => showToast('Chưa mở được Shopee. Kiểm tra kết nối với máy chạy shop.')); };
   // Keep the avoiding view at screen origin. The safe area belongs INSIDE it;
   // otherwise frame.y already includes the top inset and an offset counts it twice.
   return <View style={ui.outer}><View style={[ui.app, webViewportHeight !== undefined && { maxHeight: webViewportHeight }]}><StatusBar style={darkMode ? 'light' : 'dark'} /><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0} style={{ flex: 1 }}><View style={{ flex: 1, paddingTop: insets.top }}>
     <TopBar tab={tab} hasTasks={Boolean(data && Object.values(data.tasks).some(value => value > 0))} onProfile={() => { Keyboard.dismiss(); setRoute({ kind: 'settings' }); }} onTasks={() => { Keyboard.dismiss(); setRoute({ kind: 'tasks' }); }} onHistory={() => { Keyboard.dismiss(); chat.current?.openHistory(); }} onNewChat={() => { Keyboard.dismiss(); chat.current?.newConversation(); }} />
-    <View style={ui.host}><Scene active={tab === 'home'} reduceMotion={reduceMotion}><DashboardScreen data={data} loading={loading} error={error} days={days} onDays={onDays} onRefresh={() => void refresh()} onOpen={setRoute} onAsk={ask} onStore={openStore} /></Scene><Scene active={tab === 'assistant'} reduceMotion={reduceMotion}><AssistantChat ref={chat} keyboardVisible={keyboardVisible} reduceMotion={reduceMotion} onShopChanged={() => void refresh()} onToast={showToast} /></Scene>{(['products', 'orders', 'shop'] as const).map(key => <Scene key={key} active={tab === key} reduceMotion={reduceMotion}><ManagementSheet embedded active={tab === key} route={PANEL_ROUTES[key]!} onClose={() => {}} onOpen={setRoute} data={data} onAsk={ask} onStore={openStore} connectionError={error} refreshing={loading} darkMode={darkMode} onDarkMode={onDarkModeChange} onRefresh={() => void refresh()} /></Scene>)}</View>
+    {inExtension() ? <ExtensionBar /> : null}
+    <View style={ui.host}><Scene active={tab === 'home'} reduceMotion={reduceMotion}><DashboardScreen data={data} loading={loading} refreshing={refreshing} onPullRefresh={() => void pullRefresh()} error={error} days={days} onDays={onDays} onRefresh={() => void refresh()} onOpen={setRoute} onAsk={ask} onStore={openStore} /></Scene><Scene active={tab === 'assistant'} reduceMotion={reduceMotion}><AssistantChat ref={chat} keyboardVisible={keyboardVisible} reduceMotion={reduceMotion} onShopChanged={() => void refresh()} onToast={showToast} /></Scene>{(['products', 'orders', 'shop'] as const).map(key => <Scene key={key} active={tab === key} reduceMotion={reduceMotion}><ManagementSheet embedded active={tab === key} route={PANEL_ROUTES[key]!} onClose={() => {}} onOpen={setRoute} data={data} onAsk={ask} onStore={openStore} connectionError={error} refreshing={loading} darkMode={darkMode} onDarkMode={onDarkModeChange} onRefresh={() => void refresh()} /></Scene>)}</View>
   </View></KeyboardAvoidingView>
     {!keyboardVisible ? <BottomNav tab={tab} onTab={switchTab} reduceMotion={reduceMotion} /> : null}
     <ManagementSheet route={route} onClose={() => setRoute(null)} onOpen={setRoute} data={data} onAsk={ask} onStore={openStore} connectionError={error} refreshing={loading} darkMode={darkMode} onDarkMode={onDarkModeChange} onRefresh={() => void refresh()} />

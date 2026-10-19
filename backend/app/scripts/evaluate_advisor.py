@@ -1,4 +1,4 @@
-"""Evaluate real Muse advice using synthetic shop data only.
+"""Evaluate the configured AI provider using synthetic shop data only.
 
 Run from backend: .venv/bin/python -m app.scripts.evaluate_advisor
 """
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.ai.factory import managed_opencode
+from app.ai.factory import create_provider
 from app.core.config import Settings
 from app.db.base import Base
 from app.db.session import build_engine
@@ -58,7 +58,7 @@ async def main():
             'Nếu giảm giá 10% thì lời còn bao nhiêu?',
             'Dựa trên khách mục tiêu và định hướng của mình, đề xuất 2 việc ưu tiên tuần tới và cách đo hiệu quả nhé.',
         ]
-        async with managed_opencode(settings) as ai:
+        async with create_provider(settings) as ai:
             with Session(engine) as session:
                 conversation_id = None
                 for i, message in enumerate(messages):

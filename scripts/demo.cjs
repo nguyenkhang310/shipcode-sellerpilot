@@ -36,7 +36,7 @@ function stop(signal = 'SIGTERM') {
   if (stopping) return;
   stopping = true;
   if (!children.size) return;
-  console.log('\nĐang dừng SellerPilot, UTE MALL và Expo…');
+  console.log('\nĐang dừng SellerPilot, Shopee Demo và Expo…');
   for (const child of children) {
     if (!child.pid) continue;
     if (windows) spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {stdio: 'ignore'});
@@ -95,7 +95,7 @@ async function main() {
   for (const file of [python('backend'), python('UTE MALL'), expo]) {
     if (!existsSync(file)) throw new Error(`Thiếu ${path.relative(root, file)}. Cài môi trường theo README trước.`);
   }
-  if (!existsSync(path.join(root, 'UTE MALL/.env'))) throw new Error('Chưa cấu hình UTE MALL. Chạy bootstrap_demo.py theo README trước.');
+  if (!existsSync(path.join(root, 'UTE MALL/.env'))) throw new Error('Chưa cấu hình Shopee Demo. Chạy bootstrap_demo.py theo README trước.');
   // An external STORE_DATABASE_PATH is supported; the store/API startup validates it.
   for (const port of [5011, 8000, 8081]) await portAvailable(port);
   if (process.argv.includes('--check')) { console.log('Môi trường và cổng 5011/8000/8081 sẵn sàng.'); return; }
@@ -110,7 +110,7 @@ async function main() {
     child.on('error', reject);
     child.on('exit', code => { children.delete(child); code === 0 ? resolve() : reject(new Error('Migration chưa thành công.')); });
   });
-  launch('UTE MALL', python('UTE MALL'), ['app.py'], path.join(root, 'UTE MALL'), {...env, PORT: '5011', FLASK_DEBUG: '0'});
+  launch('Shopee Demo', python('UTE MALL'), ['app.py'], path.join(root, 'UTE MALL'), {...env, PORT: '5011', FLASK_DEBUG: '0'});
   launch('SellerPilot API', python('backend'), ['-m', 'uvicorn', 'app.main:app', '--workers', '1', '--host', '0.0.0.0', '--port', '8000'], backend, env);
   await Promise.all([ready('http://127.0.0.1:5011/'), ready('http://127.0.0.1:8000/api/v1/health', 120_000)]);
   const address = lanAddress();
@@ -120,7 +120,7 @@ async function main() {
   frontendEnv.EXPO_PUBLIC_STORE_URL ||= `http://${address}:5011`;
   launch('Expo', process.execPath, [expo, 'start', '--clear', '--port', '8081'], path.join(root, 'frontend'), frontendEnv, true);
   await ready('http://127.0.0.1:8081/status');
-  console.log(`\nSẵn sàng · UTE MALL http://localhost:5011 · API http://localhost:8000/docs`);
+  console.log(`\nSẵn sàng · Shopee Demo http://localhost:5011 · API http://localhost:8000/docs`);
   console.log(`iPhone cùng Wi-Fi: exp://${address}:8081`);
   console.log('Quét QR Expo ở trên. Ctrl+C một lần để dừng cả ba dịch vụ.\n');
 }

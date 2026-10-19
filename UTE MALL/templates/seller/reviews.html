@@ -3,19 +3,19 @@
 <div class="seller-page-heading"><div><h1>Đánh giá Shop</h1><p>Lắng nghe người mua và phản hồi đánh giá ngay trên trang sản phẩm.</p></div><a class="btn" href="{{ url_for('shop_page',slug=seller_shop.slug) }}" target="_blank" rel="noopener">Xem gian hàng<span class="material-symbols-outlined">open_in_new</span></a></div>
 <section class="panel">
   <div class="review-overview">
-    <div class="rating-summary"><strong>{{ '%.1f'|format(seller_shop.rating) }}</strong><span> / 5</span><div class="stars">★★★★★</div><small>{{ review_total }} đánh giá từ người mua</small></div>
+    <div class="rating-summary"><strong>{{ '%.1f'|format(seller_shop.rating) }}</strong><span> / 5</span><div class="stars">★★★★★</div><small>{{ review_total }} đánh giá</small></div>
     <nav class="rating-filters" aria-label="Lọc số sao"><a href="{{ url_for('seller.reviews',unanswered=request.args.get('unanswered','')) }}" class="{% if not rating %}active{% endif %}">Tất cả ({{ review_total }})</a>{% for star in [5,4,3,2,1] %}<a href="{{ url_for('seller.reviews',rating=star,unanswered=request.args.get('unanswered','')) }}" class="{% if rating==star %}active{% endif %}">{{ star }} sao ({{ rating_counts.get(star,0) }})</a>{% endfor %}</nav>
   </div>
   <nav class="tabs" aria-label="Trạng thái phản hồi"><a href="{{ url_for('seller.reviews',rating=rating) }}" class="{% if request.args.get('unanswered')!='1' %}active{% endif %}">Tất cả đánh giá</a><a href="{{ url_for('seller.reviews',rating=rating,unanswered=1) }}" class="{% if request.args.get('unanswered')=='1' %}active{% endif %}">Chưa phản hồi<span class="tab-count">{{ unanswered }}</span></a></nav>
   <h2 class="result-heading">{{ pagination.total }} đánh giá phù hợp</h2>
   {% for review in pagination.items %}
   <article class="review-item" data-rating="{{ review.rating }}">
-    <div class="review-topline"><div class="review-buyer"><span class="avatar small">{{ review.user.username[:1]|upper }}</span><strong>{{ review.user.username }}</strong></div><time class="muted">{{ review.created_at|vn_time }}</time></div>
+    <div class="review-topline"><div class="review-buyer"><span class="avatar small">{{ review.user.username[:1]|upper }}</span><strong>{{ review|reviewer_name }}</strong></div><time class="muted">{{ review.created_at|vn_time }}</time></div>
     <div class="stars" aria-label="{{ review.rating }} trên 5 sao">{{ '★'*review.rating }}{{ '☆'*(5-review.rating) }}</div>
     <a class="review-product" href="{{ url_for('product_detail' if review.product.status=='active' else 'seller.product_edit',product_id=review.product_id) }}"><img src="{{ review.product.image_url }}" alt="" loading="lazy"><span>{{ review.product.name }}</span></a>
     <p class="review-comment">{{ review.comment or 'Người mua không để lại nhận xét.' }}</p>
     {% if review.seller_reply %}<div class="reply-box"><strong>Phản hồi của Shop</strong>{{ review.seller_reply }}<small class="cell-secondary">{{ review.replied_at|vn_time }}</small></div>{% endif %}
-    <form class="reply-form" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="review_id" value="{{ review.id }}"><textarea name="reply" aria-label="Phản hồi đánh giá của {{ review.user.username }}" maxlength="2000" placeholder="Viết phản hồi cho người mua…" required>{{ review.seller_reply or '' }}</textarea><button class="btn primary">{{ 'Cập nhật' if review.seller_reply else 'Phản hồi' }}</button></form>
+    <form class="reply-form" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="review_id" value="{{ review.id }}"><textarea name="reply" aria-label="Phản hồi đánh giá của {{ review|reviewer_name }}" maxlength="2000" placeholder="Viết phản hồi cho người mua…" required>{{ review.seller_reply or '' }}</textarea><button class="btn primary">{{ 'Cập nhật' if review.seller_reply else 'Phản hồi' }}</button></form>
   </article>
   {% else %}<div class="empty"><span class="material-symbols-outlined">reviews</span>Không có đánh giá phù hợp với bộ lọc.</div>{% endfor %}
   {% include 'seller/_pagination.html' %}

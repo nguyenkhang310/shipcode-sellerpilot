@@ -17,7 +17,7 @@ lỗi không dự kiến `{detail: "Internal server error", code: "internal_erro
     "provider": "opencode",
     "ai_availability": "available",
     "ollama": "unavailable",
-    "model": "muse-spark-1.3-contributor-free",
+    "model": "glm-5.3-flash-free",
     "model_available": true,
     "demo_mode": true,
     "integration_mode": "local_store"
@@ -31,7 +31,37 @@ nghiệp vụ vẫn chạy bằng parser dự phòng và health ở trạng thá
 Trường `ollama` được giữ để tương thích client cũ; khi `provider=opencode` nó là
 `unavailable`. Client mới dùng `provider` và `ai_availability`.
 
+OpenCode: sau lỗi gateway `free_tier_restricted`, `model_available=false` và
+`status=degraded` cho đến một lượt sinh thật thành công trong tiến trình đó.
+Runtime vẫn có thể `ai_availability=available`. Các yêu cầu AI bị chặn gọi lại
+gateway trong 60 giây; hết thời gian chỉ thử khi có yêu cầu tiếp theo, không tự
+gọi nền. Metadata model active/giá 0 không chứng minh quyền sinh nội dung.
+
+`provider` còn có thể là `antigravity`; khi đó `model` là model CLI đã chọn,
+ví dụ `gemini-3.8-flash-medium`. `ollama=unavailable` được giữ đúng ý nghĩa.
+Antigravity dùng phiên đăng nhập CLI chính thức, không trích token/API gateway.
+Ảnh được xem qua workspace tạm riêng và phải đủ sự kiện đọc từng ảnh trước khi
+nhận JSON hợp lệ. Chi tiết quyền/credit và giới hạn tại
+[ANTIGRAVITY_SETUP](ANTIGRAVITY_SETUP.md).
+
+Gemini: health ghi `provider=gemini`, model đã cấu hình và trạng thái truy cập
+metadata. `ollama=unavailable`. Health chưa chứng minh lượt sinh thật sẽ thành công.
+Chat ghi provider/model thực sự tạo câu trả lời; nếu dự phòng thành công sẽ là
+`provider=groq`. Truy vấn số liệu trực tiếp có thể dùng `deterministic_parser`.
+`answer` luôn là chuỗi nội dung để hiển thị, không phải chuỗi JSON bọc `answer`.
+Cấu hình key, nhóm quota và giới hạn ảnh: [GEMINI_API_SETUP](GEMINI_API_SETUP.md).
+
 ## Seller tools đã triển khai
+
+Chat có thêm `intent=update_product` và trường tùy chọn `product_edit_proposal`:
+đề xuất sửa tiêu đề/mô tả/giá/tồn của sản phẩm đã đăng, tách khỏi `product_draft`.
+API `POST /product-edits`, `POST /product-edits/{id}/confirm`, `.../reject` hỗ trợ
+xem trước, đối chiếu dữ liệu cũ, receipt cập nhật nguyên khối và audit chống trùng.
+Xem [PRODUCT_EDITS](PRODUCT_EDITS.md) để biết giới hạn phân loại và ví dụ request.
+
+Tư vấn kế hoạch có `facts.business_analysis` (hiệu suất theo kỳ từ dòng đơn hàng)
+và `facts.business_advisory` (brief chỉ đọc). Chưa có dữ liệu Analytics/attribution
+TikTok tự động. Xem [BUSINESS_ADVISOR](BUSINESS_ADVISOR.md).
 
 `POST /chat` nhận câu lệnh tiếng Việt của chủ shop. Response gồm `run_id`, câu trả
 lời, intent, mode, tool đã gọi, facts lấy từ UTE MALL và proposal nếu là thao tác ghi:
@@ -60,7 +90,7 @@ Fallback hiểu ngày trong câu hỏi nghiệp vụ qua `hôm nay`, `hôm qua`,
 SKU số dài; giá dạng số thường, phân cách nghìn, `k`, `triệu` và `tỷ`. Câu ngoài
 phạm vi trả hướng dẫn, không tự tạo facts.
 
-`provider` là `opencode`, `ollama` hoặc `deterministic_parser`. `fallback_reason`
+`provider` là `gemini`, `groq`, `antigravity`, `opencode`, `ollama` hoặc `deterministic_parser`. `fallback_reason`
 có thể là lỗi kết nối/timeout/JSON, provider từ chối, model Free không còn sẵn sàng,
 hoặc model yêu cầu gọi công cụ. Backend không tự chuyển sang model trả phí.
 
@@ -88,7 +118,7 @@ tác trái với trạng thái cuối trả 409.
 
 ## Chưa triển khai
 
-Muse Spark Free qua OpenCode và Qwen local đã được triển khai cho chat seller.
+GLM 5.3 Flash Free qua OpenCode và Qwen local đã được triển khai cho chat seller.
 Catalog CRUD đầy đủ, inbox khách hàng, import và tích hợp sàn chưa được triển khai.
 Chat hiện dùng deterministic fallback và chỉ được gọi seller tools đã kiểm thử.
 

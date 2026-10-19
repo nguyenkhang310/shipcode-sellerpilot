@@ -10,13 +10,13 @@ type Snapshot = { data: ManagementData; received: number; date: string };
 
 /** Cache only this mounted shop session; writes and manual sync invalidate every period. */
 export function useManagement(live = true) {
-  const [state, setState] = useState<{ days: number; data: ManagementData | null; loading: boolean; error: string }>({ days: 1, data: null, loading: true, error: '' });
+  const [state, setState] = useState<{ days: number; data: ManagementData | null; loading: boolean; refreshing: boolean; error: string }>({ days: 1, data: null, loading: true, refreshing: false, error: '' });
   const selected = useRef(1);
   const cache = useRef(new Map<number, Snapshot>());
   const request = useRef<AbortController | null>(null);
   const generation = useRef(0);
 
-  const load = useCallback(async (days: number, force = false, background = false) => {
+  const load = useCallback(async (days: number, force = false, background = false, pull = false) => {
     selected.current = days;
     const version = ++generation.current;
     request.current?.abort();
@@ -24,14 +24,16 @@ export function useManagement(live = true) {
     if (force && !background) cache.current.clear();
     const saved = cache.current.get(days);
     if (!force && saved && Date.now() - saved.received < FRESH_FOR_MS && saved.date === shopDate()) {
-      setState({ days, data: saved.data, loading: false, error: '' });
+      setState({ days, data: saved.data, loading: false, refreshing: false, error: '' });
       return;
     }
     const controller = new AbortController();
     request.current = controller;
     // Retain shop-wide counters and card geometry. The screen hides all
     // period-specific values until the selected response arrives.
-    if (!background) setState(previous => ({ days, data: previous.data, loading: true, error: '' }));
+    // RefreshControl must only run for an actual pull gesture. Starting it for
+    // a range change adjusts the native iOS scroll inset and moves the page.
+    if (!background) setState(previous => ({ days, data: previous.data, loading: true, refreshing: pull, error: '' }));
     try {
       const response = await getManagement(days, controller.signal);
       if (controller.signal.aborted || generation.current !== version) return;
@@ -42,10 +44,10 @@ export function useManagement(live = true) {
       if (saved && !unchanged) cache.current.clear();
       cache.current.set(days, { data: response.data, received: Date.now(), date: shopDate() });
       setState(previous => background && unchanged && !previous.error && !previous.loading
-        ? previous : { days, data: response.data, loading: false, error: '' });
+        ? previous : { days, data: response.data, loading: false, refreshing: false, error: '' });
     } catch (error) {
       if (controller.signal.aborted || generation.current !== version) return;
-      setState(previous => ({ ...previous, loading: false, error: error instanceof ApiError ? error.message : error instanceof Error && error.message.startsWith('Kỳ số liệu') ? error.message : 'Vui lòng kiểm tra Wi-Fi và backend trên máy của bạn.' }));
+      setState(previous => ({ ...previous, loading: false, refreshing: false, error: error instanceof ApiError ? error.message : error instanceof Error && error.message.startsWith('Kỳ số liệu') ? error.message : 'Vui lòng kiểm tra Wi-Fi và backend trên máy của bạn.' }));
     } finally {
       if (request.current === controller) request.current = null;
     }
@@ -73,9 +75,10 @@ export function useManagement(live = true) {
     if (days !== selected.current) void load(days);
   }, [load]);
   const refresh = useCallback(() => load(selected.current, true), [load]);
+  const pullRefresh = useCallback(() => load(selected.current, true, false, true), [load]);
   const ensureFresh = useCallback(() => {
     if (!request.current) void load(selected.current);
   }, [load]);
 
-  return { ...state, onDays, refresh, ensureFresh };
+  return { ...state, onDays, refresh, pullRefresh, ensureFresh };
 }

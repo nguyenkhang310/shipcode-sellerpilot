@@ -36,7 +36,7 @@ def get_shop(request: Request) -> UTEMallRepository:
 def shop_error(error: Exception) -> HTTPException:
     if isinstance(error, ShopItemNotFoundError):
         return HTTPException(status_code=404, detail={"code": "sku_not_found", "message": "Không tìm thấy SKU"})
-    return HTTPException(status_code=503, detail={"code": "shop_database_unavailable", "message": "Không đọc được database UTE MALL"})
+    return HTTPException(status_code=503, detail={"code": "shop_database_unavailable", "message": "Không đọc được database Shopee"})
 
 
 @router.get("/shop/summary", response_model=ShopSummaryResponse)

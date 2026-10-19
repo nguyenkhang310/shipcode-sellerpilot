@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { ApiResponse } from './types';
 
 import { resolveApiUrls } from './urls';
+import { inExtension, extensionRequest } from '../integrations/extension';
 
 const urls = resolveApiUrls({
   configuredApi: process.env.EXPO_PUBLIC_API_URL,
@@ -46,6 +47,13 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     cancel();
   }, timeoutMs);
   try {
+    if (inExtension()) {
+      try { return await extensionRequest(path, requestOptions, controller.signal) as ApiResponse<T>; }
+      catch (error) {
+        if (error instanceof Error && 'status' in error) throw new ApiError(Number(error.status), error.message);
+        throw error;
+      }
+    }
     const headers = new Headers(options.headers);
     headers.set('Accept', 'application/json');
     const response = await fetch(`${API_URL}${path}`, { ...requestOptions, headers, signal: controller.signal });

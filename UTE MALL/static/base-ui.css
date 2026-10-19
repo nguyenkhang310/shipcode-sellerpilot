@@ -132,7 +132,7 @@
         }
 
         body {
-            font-family: 'Inter', sans-serif;
+            font-family: Roboto, "Helvetica Neue", Arial, sans-serif;
             background: var(--bg);
             color: var(--text);
             line-height: 1.6;

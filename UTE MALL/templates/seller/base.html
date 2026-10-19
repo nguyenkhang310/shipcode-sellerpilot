@@ -3,19 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title }} · UTE MALL Kênh Người Bán</title>
-  <link rel="icon" href="{{ url_for('static',filename='ute-mall.svg') }}" type="image/svg+xml">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <meta name="robots" content="noindex,nofollow">
+  <title>{{ title }} · Shopee Kênh Người Bán</title>
+  <link rel="icon" href="{{ url_for('static',filename='shopee-favicon.png') }}" type="image/png">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static',filename='seller.css',v='20261015-centre-4') }}">
-  <script defer src="{{ url_for('static',filename='seller.js',v='20261015-centre-4') }}"></script>
+  <link rel="stylesheet" href="{{ url_for('static',filename='seller.css',v='20261019-shopee-1') }}">
+  <script defer src="{{ url_for('static',filename='seller.js',v='20261019-shopee-1') }}"></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Đến nội dung chính</a>
 <header class="seller-header">
   <div class="header-start">
     <button class="icon-button menu-toggle" type="button" aria-label="Mở menu quản lý" aria-controls="seller-navigation" aria-expanded="false"><span class="material-symbols-outlined">menu</span></button>
-    <a class="seller-brand" href="{{ url_for('seller.dashboard') }}"><span class="material-symbols-outlined">shopping_bag</span><b>UTE MALL</b></a>
+    <a class="seller-brand" href="{{ url_for('seller.dashboard') }}"><img src="{{ url_for('static',filename='shopee-logo.svg') }}" alt="Shopee" width="112" height="36"></a>
     <span class="header-sep"></span><span class="header-title">Kênh Người Bán</span>
   </div>
   <form class="header-search" action="{{ url_for('seller.products') }}" role="search">
@@ -29,7 +30,7 @@
     </details>
     <details class="header-popover account-menu">
       <summary><span class="avatar small">UT</span><span class="account-name">{{ seller_shop.name }}</span><span class="material-symbols-outlined">expand_more</span></summary>
-      <div class="popover-panel"><strong>{{ seller_shop.name }}</strong><a href="{{ url_for('seller.settings') }}">Hồ sơ & thiết lập Shop</a><a href="{{ url_for('profile') }}">Tài khoản của tôi</a><a href="{{ url_for('index') }}">Đi đến UTE MALL</a><a href="{{ url_for('logout') }}">Đăng xuất</a></div>
+      <div class="popover-panel"><strong>{{ seller_shop.name }}</strong><a href="{{ url_for('seller.settings') }}">Hồ sơ & thiết lập Shop</a><a href="{{ url_for('profile') }}">Tài khoản của tôi</a><a href="{{ url_for('index') }}">Đi đến Shopee</a><a href="{{ url_for('logout') }}">Đăng xuất</a></div>
     </details>
   </div>
 </header>
@@ -55,7 +56,7 @@
   <nav class="seller-breadcrumb" aria-label="Đường dẫn"><a href="{{ url_for('seller.dashboard') }}">Kênh Người Bán</a><span class="material-symbols-outlined">chevron_right</span><span>{{ title }}</span></nav>
   {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div role="status" class="notice {{ category }}"><span class="material-symbols-outlined">{{ 'check_circle' if category=='success' else 'info' }}</span><span>{{ message }}</span><button class="icon-button" type="button" data-dismiss aria-label="Đóng thông báo"><span class="material-symbols-outlined">close</span></button></div>{% endfor %}{% endwith %}
   {% block content %}{% endblock %}
-  <footer class="seller-footer"><span>UTE MALL · Kênh Người Bán</span><a href="{{ url_for('policy') }}">Chính sách & hỗ trợ</a></footer>
+  <footer class="seller-footer"><span>Shopee · Kênh Người Bán</span><a href="{{ url_for('policy') }}">Chính sách & hỗ trợ</a></footer>
 </main>
 <div class="toast" role="status" aria-live="polite" hidden></div>
 {% block scripts %}{% endblock %}

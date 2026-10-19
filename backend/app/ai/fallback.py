@@ -3,6 +3,7 @@ import unicodedata
 from datetime import date, timedelta
 
 from app.ai.contracts import ParsedCommand
+from app.ai.money import money_mentions, affirmed_quote
 
 
 CHANGE_PRICE_PHRASES = (
@@ -27,10 +28,6 @@ SUMMARY_PHRASES = (
 EXPLICIT_SKU_RE = re.compile(r"\bsku\s*[:#-]?\s*([a-z0-9][a-z0-9._-]{1,99})\b", re.IGNORECASE)
 SHORT_SKU_RE = re.compile(r"\b([a-z]{1,12}[-_]?\d{2,})\b", re.IGNORECASE)
 LONG_NUMERIC_SKU_RE = re.compile(r"\b(\d{8,30})\b")
-PRICE_RE = re.compile(
-    r"(?<![\w])(-?\d+(?:[.,]\d+)*)(?:\s*)(tỷ|ty|b|triệu|trieu|tr|k|nghìn|nghin|ngàn|ngan|đ|₫|vnd)?\b",
-    re.IGNORECASE,
-)
 
 
 def normalize_text(message: str) -> str:
@@ -55,6 +52,8 @@ def reporting_days(message: str) -> int | None:
 def parse_fallback(message: str, *, today: date) -> ParsedCommand:
     text = normalize_text(message)
     sku = extract_sku(text)
+    if re.search(r'\b(?:không|khong|đừng|dung|chưa|chua)(?:\s+(?:cần|can|muốn|muon))?\s+(?:đổi|doi|sửa|sua|cập nhật|cap nhat)\s+giá', text):
+        return ParsedCommand(intent='unknown')
 
     # A pricing question is read-only, even when it mentions reducing a price.
     if ('%' in text and any(phrase in text for phrase in CHANGE_PRICE_PHRASES)) or any(phrase in text for phrase in (
@@ -62,6 +61,7 @@ def parse_fallback(message: str, *, today: date) -> ParsedCommand:
         'tiền lời', 'tien loi', 'lời bao nhiêu', 'loi bao nhieu', 'lãi', 'lai ',
         'hòa vốn', 'hoa von', 'biên lời', 'bien loi', 'biên lợi', 'bien loi',
         'phí sàn', 'phi san', 'chi phí', 'chi phi', 'định giá', 'dinh gia',
+        'chưa biết giá', 'chua biet gia', 'không biết giá', 'khong biet gia',
         'chiến lược', 'chien luoc', 'tăng doanh thu', 'tang doanh thu',
         'giữ khách', 'giu khach', 'khách mục tiêu', 'khach muc tieu',
     )) or re.search(r'\b(?:lời|lãi|loi|lai)\b', text) or re.search(r'(?:có nên|co nen|nên|nen).{0,45}(?:giá|gia|bán|ban|giảm|giam|tăng|tang)', text):
@@ -74,7 +74,7 @@ def parse_fallback(message: str, *, today: date) -> ParsedCommand:
             new_price_vnd=extract_price(text, sku=sku),
         )
 
-    if any(phrase in text for phrase in ("nên làm gì", "nen lam gi", "tư vấn", "tu van", "viết mô tả", "viet mo ta", "viết bài", "lên kế hoạch", "lập kế hoạch", "lap ke hoach", "kế hoạch hành động", "cải thiện", "ưu tiên", "uu tien", "phân tích", "phan tich")):
+    if any(phrase in text for phrase in ("nên làm gì", "nen lam gi", "tư vấn", "tu van", "viết mô tả", "viet mo ta", "viết bài", "lên kế hoạch", "lập kế hoạch", "lap ke hoach", "kế hoạch hành động", "lên plan", "len plan", "lập plan", "lap plan", "tiktok", "tik tok", "quay video", "lam video", "làm video", "kịch bản", "kich ban", "cải thiện", "ưu tiên", "uu tien", "phân tích", "phan tich")):
         return ParsedCommand(intent="sales_advice", sku=sku, days=reporting_days(message))
 
     search = re.search(r"(?:tìm kiếm|tim kiem|tìm|tim)(?:\s+sản phẩm|\s+san pham)?\s+(.+)", text)
@@ -111,39 +111,18 @@ def extract_sku(text: str) -> str | None:
 
 
 def extract_price(text: str, *, sku: str | None) -> int | None:
-    values: list[int] = []
     if sku:
         text = re.sub(re.escape(sku), "", text, flags=re.IGNORECASE)
-    sku_digits = re.sub(r"\D", "", sku or "")
-    for match in PRICE_RE.finditer(text):
-        raw_value, raw_unit = match.groups()
-        digits_only = re.sub(r"\D", "", raw_value)
-        if sku_digits and digits_only == sku_digits:
-            continue
-        value = parse_money(raw_value, raw_unit)
-        if value is not None:
-            values.append(value)
-    return values[-1] if values else None
-
-
-def parse_money(raw_value: str, raw_unit: str | None) -> int | None:
-    unit = (raw_unit or "").lower()
-    sign = -1 if raw_value.startswith("-") else 1
-    unsigned = raw_value.lstrip("-")
-    try:
-        if unit in {"tỷ", "ty", "b"}:
-            number = float(unsigned.replace(",", "."))
-            return sign * int(round(number * 1_000_000_000))
-        if unit in {"triệu", "trieu", "tr"}:
-            number = float(unsigned.replace(",", "."))
-            return sign * int(round(number * 1_000_000))
-        if unit in {"k", "nghìn", "nghin", "ngàn", "ngan"}:
-            number = float(unsigned.replace(",", "."))
-            return sign * int(round(number * 1_000))
-        normalized = unsigned.replace(".", "").replace(",", "")
-        return sign * int(normalized)
-    except ValueError:
-        return None
+    mentions = [item for item in money_mentions(text) if affirmed_quote(item.text, text)]
+    explicit = [item for item in mentions if item.explicit]
+    candidates = explicit or mentions
+    if len(candidates) == 1:
+        return candidates[0].value
+    # "từ 1 triệu xuống 5 xị" has an explicit destination. Otherwise multiple
+    # prices are ambiguous; never silently choose stock or the last random number.
+    destinations = [item for item in candidates if re.search(
+        r'(?:thành|thanh|xuống|xuong|lên|len|còn|con)\s*$', text[max(0, item.start - 20):item.start])]
+    return destinations[0].value if len(destinations) == 1 else None
 
 
 def extract_day(text: str, *, today: date) -> date:

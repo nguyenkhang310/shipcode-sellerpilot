@@ -2,12 +2,14 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { useQaServer } = require('./qa-server.cjs');
 const output = path.resolve(__dirname, '../../docs/evaluations/chat-motion');
 fs.mkdirSync(output, { recursive: true });
 let browser, page;
 (async () => {
   browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless: true });
   page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await useQaServer(page);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   const checks = [], errors = [];
   page.on('pageerror', error => errors.push(error.message));

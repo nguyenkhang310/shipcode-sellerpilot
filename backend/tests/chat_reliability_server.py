@@ -18,7 +18,7 @@ import app.main
 
 class QAProvider(OfflineProvider):
     provider = 'opencode'
-    model = 'muse-spark-1.3-contributor-free'
+    model = 'glm-5.3-flash-free'
     natural_responses = True
     prefer_model_intent = True
     async def check_health(self):

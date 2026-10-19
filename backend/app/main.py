@@ -14,6 +14,7 @@ from app.core.logging import configure_logging
 from app.db.session import build_engine
 from app.integrations.ute_mall import UTEMallRepository
 from app.services.chat_requests import ChatRequestManager
+from app.services.browser_connector import BrowserRequests
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +37,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app.state.ai_provider = provider
                 manager = ChatRequestManager(app.state.session_factory, lambda: app.state.ai_provider, settings)
                 app.state.chat_requests = manager
+                app.state.browser_requests = BrowserRequests()
                 manager.recover()
                 try:
                     yield
                 finally:
+                    await app.state.browser_requests.close()
                     await manager.close()
         finally:
             engine.dispose()

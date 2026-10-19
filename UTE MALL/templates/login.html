@@ -1,45 +1,46 @@
 {% extends 'base.html' %}
-{% block title %}{{ 'Đăng ký' if register_mode else 'Đăng nhập' }} · UTE MALL{% endblock %}
-{% block extra_styles %}
-<style>
-.auth-area{background:linear-gradient(135deg,#ee4d2d,#ff6b45);padding:58px 20px;min-height:600px}
-.auth-inner{max-width:1060px;margin:auto;display:grid;grid-template-columns:1fr 430px;gap:72px;align-items:center}
-.auth-brand{color:white;text-align:center}.auth-brand img{width:112px;height:112px;margin-bottom:16px}.auth-brand h1{font-size:44px;letter-spacing:-1.5px}.auth-brand p{font-size:20px;margin-top:12px;line-height:1.7}
-.auth-card{background:white;border-radius:9px;padding:34px;box-shadow:0 12px 35px #87251138}.auth-card h2{font-size:24px;font-weight:600;margin-bottom:26px}.auth-card .public-input{margin-bottom:16px}.auth-submit{width:100%;min-height:48px;background:#ee4d2d;border:0;border-radius:5px;color:#fff;padding:13px;font:inherit;font-size:15px;font-weight:600;cursor:pointer}.auth-submit:hover{background:#d94327;box-shadow:0 4px 12px #ee4d2d3d}
-.auth-help{display:flex;justify-content:space-between;align-items:center;font-size:13px;margin:14px 0 23px}.auth-help label{display:flex;align-items:center;gap:7px}.auth-help input{width:17px;height:17px}.auth-help a{color:#2870ba;text-decoration:none}.auth-switch{text-align:center;color:#777;font-size:14px;margin-top:26px}.auth-switch a{color:#ee4d2d;text-decoration:none;font-weight:500}.auth-terms{font-size:12px;color:#888;text-align:center;margin-top:20px;line-height:1.6}.auth-terms a{color:#ee4d2d}
-@media(max-width:750px){.auth-area{padding:28px 12px;min-height:calc(100vh - 102px)}.auth-inner{display:block;max-width:440px}.auth-brand{display:none}.auth-card{padding:26px 22px}.auth-card h2{font-size:22px}}
-</style>
+{% set auth_title = 'Đăng ký' if register_mode else 'Đăng nhập' %}
+{% block title %}{{ auth_title }} | Shopee{% endblock %}
+{% block fonts %}
+<link rel="preload" href="{{ url_for('static',filename='fonts/roboto-latin.woff2') }}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="{{ url_for('static',filename='fonts/roboto-vietnamese.woff2') }}" as="font" type="font/woff2" crossorigin>
 {% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block extra_styles %}<link rel="stylesheet" href="{{ url_for('static',filename='auth.css',v='20261019-3') }}">{% endblock %}
+{% block header %}
+<header class="auth-header"><div class="auth-container auth-header-inner">
+  <div class="auth-heading"><a href="{{ url_for('index') }}" aria-label="Shopee - Trang chủ"><img src="{{ url_for('static',filename='shopee-logo.svg') }}" alt="Shopee" width="136" height="44"></a><h1>{{ auth_title }}</h1></div>
+  <a class="auth-help-link" href="{{ url_for('contact') }}">Bạn cần giúp đỡ?</a>
+</div></header>
+{% endblock %}
+{% block notices %}{% endblock %}
+{% block floating_chat %}{% endblock %}
 {% block content %}
-<section class="auth-area">
-  <div class="auth-inner">
-    <div class="auth-brand">
-      <img src="{{ url_for('static',filename='ute-mall.svg') }}" alt="UTE MALL">
-      <h1>UTE MALL</h1>
-      <p>Mua sắm mỗi ngày.<br>Kết nối những điều bạn yêu thích.</p>
-    </div>
-    <div class="auth-card">
-      <h2>{{ 'Đăng ký' if register_mode else ('Đăng nhập Kênh Người Bán' if request.args.get('next','').startswith('/seller') else 'Đăng nhập') }}</h2>
-      <form method="post" action="{{ url_for('register') if register_mode else url_for('login',next=request.args.get('next')) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        {% if register_mode %}
-        <input class="public-input" aria-label="Tên đăng nhập" name="name" placeholder="Tên đăng nhập" minlength="3" maxlength="100" value="{{ request.form.get('name','') }}" autocomplete="username" required>
-        <input class="public-input" aria-label="Email" name="email" placeholder="Email" type="email" value="{{ request.form.get('email','') }}" autocomplete="email" required>
-        {% else %}
-        <input class="public-input" aria-label="Email hoặc tên đăng nhập" name="login_id" placeholder="Email / Tên đăng nhập" value="{{ request.form.get('login_id','') }}" autocomplete="username" required>
-        {% endif %}
-        <input class="public-input" aria-label="Mật khẩu" name="password" placeholder="Mật khẩu{{ ' (ít nhất 8 ký tự)' if register_mode else '' }}" type="password" autocomplete="{{ 'new-password' if register_mode else 'current-password' }}" {{ 'minlength=8 maxlength=128' if register_mode else '' }} required>
-        {% if register_mode %}
-        <input class="public-input" aria-label="Xác nhận mật khẩu" name="confirm_password" placeholder="Xác nhận mật khẩu" type="password" autocomplete="new-password" minlength="8" required>
-        {% endif %}
-        <button class="auth-submit">{{ 'ĐĂNG KÝ' if register_mode else 'ĐĂNG NHẬP' }}</button>
-        {% if not register_mode %}
-        <div class="auth-help"><label><input type="checkbox" name="remember"> Ghi nhớ đăng nhập</label><a href="{{ url_for('forgot_password') }}">Quên mật khẩu?</a></div>
-        {% endif %}
-      </form>
-      <p class="auth-switch">{% if register_mode %}Đã có tài khoản? <a href="{{ url_for('login',next=request.args.get('next')) }}">Đăng nhập</a>{% else %}Bạn mới biết đến UTE MALL? <a href="{{ url_for('register') }}">Đăng ký</a>{% endif %}</p>
-      <p class="auth-terms">Bằng việc tiếp tục, bạn đồng ý với <a href="{{ url_for('policy') }}">Điều khoản sử dụng</a> và <a href="{{ url_for('policy') }}#privacy">Chính sách bảo mật</a>.</p>
-    </div>
-  </div>
-</section>
+<main class="auth-stage"><div class="auth-container auth-stage-inner">
+  <section class="auth-brand" aria-label="Shopee"><img src="{{ url_for('static',filename='shopee-logo-stacked-white.svg') }}" alt="Shopee" width="230" height="327"><p>Nền tảng thương mại điện tử<br>yêu thích ở Đông Nam Á &amp; Đài Loan</p></section>
+  <section class="auth-card" aria-labelledby="auth-card-title">
+    <div class="auth-card-heading"><h2 id="auth-card-title">{{ auth_title }}</h2>{% if not register_mode %}<button type="button" class="auth-qr-switch" data-auth-method="QR" aria-label="Đăng nhập với mã QR"><span>Đăng nhập<br>với mã QR</span><svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true"><path fill="currentColor" d="M2 2h16v16H2zm4 4v8h8V6zm20-4h16v16H26zm4 4v8h8V6zM2 26h16v16H2zm4 4v8h8v-8zm20-4h5v5h-5zm9-5h7v6h-7zm-14 0h5v5h-5zm14 10h7v11H31v-5h6v-2h-2zm-14 4h5v7h-5z"/></svg></button>{% endif %}</div>
+    {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div role="alert" class="auth-alert {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+    <form id="auth-form" method="post" action="{{ url_for('register') if register_mode else url_for('login',next=request.args.get('next')) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% if register_mode %}
+      <label class="sr-only" for="auth-name">Tên đăng nhập</label><input class="auth-input" id="auth-name" aria-label="Tên đăng nhập" name="name" placeholder="Tên đăng nhập" minlength="3" maxlength="100" value="{{ request.form.get('name','') }}" autocomplete="username" required>
+      <label class="sr-only" for="auth-email">Email</label><input class="auth-input" id="auth-email" aria-label="Email" name="email" placeholder="Email" type="email" value="{{ request.form.get('email','') }}" autocomplete="email" required>
+      {% else %}
+      <label class="sr-only" for="auth-login">Email hoặc tên đăng nhập</label><input class="auth-input" id="auth-login" aria-label="Email hoặc tên đăng nhập" name="login_id" placeholder="Email/Số điện thoại/Tên đăng nhập" value="{{ request.form.get('login_id','') }}" autocomplete="username" required>
+      {% endif %}
+      <div class="auth-password-row"><label class="sr-only" for="auth-password">Mật khẩu</label><input id="auth-password" class="auth-input" aria-label="Mật khẩu" name="password" placeholder="Mật khẩu" type="password" autocomplete="{{ 'new-password' if register_mode else 'current-password' }}" {% if register_mode %}minlength="8" maxlength="128"{% endif %} required><button type="button" id="password-toggle" class="auth-eye" aria-label="Hiện mật khẩu" aria-pressed="false"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 9c2 4 5 6 9 6s7-2 9-6M5 13l-2 3m6-1-1 4m7-4 1 4m3-6 2 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>{% if not register_mode %}<a href="{{ url_for('forgot_password') }}">Quên mật<br>khẩu?</a>{% endif %}</div>
+      {% if register_mode %}<label class="sr-only" for="auth-confirm">Xác nhận mật khẩu</label><input id="auth-confirm" class="auth-input" aria-label="Xác nhận mật khẩu" name="confirm_password" placeholder="Xác nhận mật khẩu" type="password" autocomplete="new-password" minlength="8" required>{% endif %}
+      <button type="submit" class="auth-submit" id="auth-submit">{{ 'ĐĂNG KÝ' if register_mode else 'ĐĂNG NHẬP' }}</button>
+      {% if not register_mode %}<label class="auth-remember"><input type="checkbox" name="remember" checked> Duy trì đăng nhập <span title="Giữ phiên đăng nhập trên thiết bị này" aria-label="Giữ phiên đăng nhập trên thiết bị này">ⓘ</span></label>{% endif %}
+    </form>
+    <div class="auth-divider"><span>HOẶC</span></div>
+    <div class="auth-socials"><button type="button" data-auth-method="Facebook"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="12" fill="#1877F2"/><path d="M13.7 24v-9.1h3l.5-3.6h-3.5V9c0-1 .3-1.7 1.8-1.7h1.9V4.1c-.3 0-1.5-.1-2.8-.1-2.8 0-4.7 1.7-4.7 4.8v2.5H7v3.6h2.9V24z" fill="#fff"/></svg>Facebook</button><button type="button" data-auth-method="Google"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.7-2.4 3.5v2.9H20c2.3-2.1 3.5-5.1 3.5-8.6z"/><path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.9-2.9L16 18c-1.1.7-2.4 1.1-4 1.1-3.1 0-5.8-2.1-6.8-4.9H1.2v3.1C3.2 21.3 7.3 24 12 24z"/><path fill="#FBBC05" d="M5.2 14.2c-.3-.7-.4-1.4-.4-2.2s.1-1.5.4-2.2V6.7h-4C.4 8.3 0 10.1 0 12s.4 3.7 1.2 5.3z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.5 1.8l3.4-3.4C17.9 1.2 15.2 0 12 0 7.3 0 3.2 2.7 1.2 6.7l4 3.1c1-2.8 3.7-5 6.8-5z"/></svg>Google</button></div>
+    <p class="auth-terms">Bằng việc {{ 'đăng ký' if register_mode else 'đăng nhập' }}, bạn đồng ý với <a href="{{ url_for('policy') }}">Điều khoản dịch vụ</a> &amp; <a href="{{ url_for('policy') }}#privacy">Chính sách bảo mật</a> của Shopee</p>
+    <p class="auth-switch">{% if register_mode %}Bạn đã có tài khoản? <a href="{{ url_for('login',next=request.args.get('next')) }}">Đăng nhập</a>{% else %}Bạn mới biết đến Shopee? <a href="{{ url_for('register',next=request.args.get('next')) }}">Đăng ký</a>{% endif %}</p>
+  </section>
+</div></main>
+<dialog id="auth-method-dialog" class="auth-method-dialog" aria-labelledby="auth-method-title"><h2 id="auth-method-title">Phương thức đăng nhập</h2><p id="auth-method-message"></p><button type="button" class="auth-submit" id="auth-method-close">Đăng nhập bằng tài khoản</button></dialog>
 {% endblock %}
+{% block footer %}{% include '_auth_footer.html' %}{% endblock %}
+{% block extra_scripts %}<script src="{{ url_for('static',filename='auth.js',v='20261019-1') }}" defer></script>{% endblock %}

@@ -38,7 +38,9 @@ async def health(request: Request, response: Response, session: Session = Depend
         ai_availability=provider.availability,
         # Legacy field; it must not label OpenCode as an Ollama connection.
         ollama=provider.availability if settings.ai_provider == "ollama" else "unavailable",
-        model=settings.opencode_model if settings.ai_provider == "opencode" else settings.ollama_model,
+        model=(settings.gemini_model if settings.ai_provider == 'gemini' else
+               settings.antigravity_model if settings.ai_provider == "antigravity" else
+               settings.opencode_model if settings.ai_provider == "opencode" else settings.ollama_model),
         model_available=provider.model_available,
         demo_mode=settings.demo_mode,
         integration_mode="local_store" if shop_database == "ok" else "not_connected",

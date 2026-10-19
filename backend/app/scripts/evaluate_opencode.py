@@ -1,7 +1,7 @@
-"""Trial Muse Spark through the installed OpenCode CLI using synthetic data only.
+"""Trial GLM through the installed OpenCode CLI using synthetic data only.
 
 This does not change the application's AI provider or execute seller tools.
-Run from backend: .venv/bin/python -m app.scripts.evaluate_muse_opencode
+Run from backend: .venv/bin/python -m app.scripts.evaluate_opencode
 """
 
 import argparse
@@ -17,8 +17,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from app.ai.contracts import ModelCommand
+from app.ai.opencode import FREE_MODEL
 
-MODEL = "opencode/muse-spark-1.3-contributor-free"
+MODEL = "opencode/" + FREE_MODEL
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CLASSIFIER_PROMPT = (
     Path(__file__).resolve().parents[1] / "ai/prompts/classify.md"
@@ -121,7 +122,7 @@ CLASSIFY_CASES = [
 def run_turn(binary, workdir, env, prompt, *, agent, timeout, session=None):
     command = [
         binary, "run", "--pure", "--format", "json", "--model", MODEL,
-        "--agent", agent, "--title", "SellerPilot Muse Spark synthetic evaluation",
+        "--agent", agent, "--title", "SellerPilot GLM synthetic evaluation",
     ]
     if session:
         command += ["--session", session]
@@ -177,6 +178,7 @@ def run_turn(binary, workdir, env, prompt, *, agent, timeout, session=None):
     result["request_succeeded"] = bool(
         process.returncode == 0 and not timed_out and result["answer"].strip()
         and not result["errors"] and not result["tool_calls"]
+        and bool(result["usage"]) and all(item["cost"] == 0 and not isinstance(item["cost"], bool) for item in result["usage"])
     )
     if not result["request_succeeded"] and not result["errors"]:
         result["errors"].append({"message": "CLI failed, timed out, returned no text or attempted tool use; inspect OpenCode locally."})
@@ -185,7 +187,7 @@ def run_turn(binary, workdir, env, prompt, *, agent, timeout, session=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "docs/evaluations/muse-spark-opencode-latest.json")
+    parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "docs/evaluations/glm-opencode-latest.json")
     parser.add_argument("--timeout", type=int, default=90)
     args = parser.parse_args()
     binary = shutil.which("opencode")
@@ -195,16 +197,17 @@ def main():
         parser.error("--timeout phải lớn hơn 0.")
 
     config = {
+        "model": MODEL, "small_model": MODEL, "enabled_providers": ["opencode"],
         "permission": "ask", "share": "disabled", "autoupdate": False, "snapshot": False,
         "agent": {
             "sellerpilot-trial": {
                 "description": "Synthetic seller conversation evaluation",
-                "mode": "primary", "prompt": SHOP_PROMPT, "permission": "ask", "steps": 1,
+                "mode": "primary", "prompt": SHOP_PROMPT, "permission": "ask", "steps": 2,
             },
             "sellerpilot-classifier-trial": {
                 "description": "Synthetic seller intent classification evaluation",
                 "mode": "primary", "prompt": CLASSIFIER_PROMPT,
-                "permission": "ask", "steps": 1,
+                "permission": "ask", "steps": 2,
             },
         },
     }
@@ -230,7 +233,7 @@ def main():
         args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"{case['id']}: {'OK' if case['request_succeeded'] else 'FAILED'} ({case['elapsed_seconds']}s)", flush=True)
 
-    with tempfile.TemporaryDirectory(prefix="sellerpilot-muse-eval-") as workdir:
+    with tempfile.TemporaryDirectory(prefix="sellerpilot-glm-eval-") as workdir:
         for case in CHAT_CASES:
             conversation = case.get("conversation")
             result = run_turn(binary, workdir, env, case["prompt"], agent="sellerpilot-trial", timeout=args.timeout, session=sessions.get(conversation))

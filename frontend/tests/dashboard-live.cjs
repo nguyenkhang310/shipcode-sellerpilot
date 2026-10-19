@@ -1,6 +1,7 @@
 // Synthetic API + intercepted snapshots; no connected seller data is modified.
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
+const { snapshot, mockApi } = require('./management-fixture.cjs');
 let browser, page;
 (async () => {
   browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless: true });
@@ -8,13 +9,13 @@ let browser, page;
   const errors = [], requests = [];
   let added = 0, fail = false;
   page.on('pageerror', error => errors.push(error.message));
-  await page.route('**/management/dashboard?days=*', async route => {
-    requests.push(Number(new URL(route.request().url()).searchParams.get('days')));
-    if (fail) return route.fulfill({ status: 503, json: { detail: 'Tạm mất kết nối kiểm thử' } });
-    const response = await route.fetch(), body = await response.json();
-    body.data.order_count = 10 + added;
-    body.data.order_value_vnd = 10000000 + added * 1000000;
-    await route.fulfill({ response, json: body });
+  await mockApi(page, async (route, days, headers) => {
+    requests.push(days);
+    if (fail) return route.fulfill({ status: 503, headers, json: { detail: 'Tạm mất kết nối kiểm thử' } });
+    const data = snapshot(days);
+    data.order_count = 10 + added;
+    data.order_value_vnd = 10000000 + added * 1000000;
+    await route.fulfill({ status: 200, headers, json: { data } });
   });
   await page.goto(process.env.QA_APP_URL || 'http://127.0.0.1:5174', { waitUntil: 'networkidle' });
   const counter = page.getByTestId('dashboard-order-count'), summary = page.getByTestId('period-summary');

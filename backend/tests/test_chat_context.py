@@ -70,6 +70,12 @@ def test_conditional_advice_is_allowed_but_actual_unexecuted_write_stays_blocked
     assert reply_issue('Mình đã đăng sản phẩm lên shop.') == 'unexecuted_write_claim'
 
 
+def test_internal_step_limit_messages_do_not_reach_the_seller():
+    assert reply_issue('Đã đạt giới hạn số bước cho agent này.') == 'internal_agent_message'
+    assert reply_issue('Việc chưa hoàn thành do hết bước xử lý: ...') == 'internal_agent_message'
+    assert reply_issue('Mình đề xuất 3 bước để cải thiện doanh số.') is None
+
+
 def test_zero_orders_are_not_evidence_that_the_shop_is_new():
     assert reply_issue('Shop mới nên chưa có đơn là bình thường.', {'shop': {}, 'today': {'order_count': 0}}) == 'unsupported_shop_age'
     assert reply_issue('Shop mới nên cần ưu tiên nội dung.', {'shop': {}}, seller_context='Mình mới mở shop.') is None
@@ -121,3 +127,170 @@ def test_opencode_does_not_truncate_seller_history_again():
         async with httpx.AsyncClient(base_url='http://opencode.test', transport=httpx.MockTransport(transport)) as http:
             return await OpenCodeClient(http).respond('Tiếp tục nhé', history=[{'role': 'user', 'content': long_message}], facts={})
     asyncio.run(run())
+
+
+class PreparedAI(AdvisorAI):
+    def __init__(self, extraction=None, answer='Đề xuất: kiểm tra đơn chờ trước, sau đó thử cải thiện nội dung sản phẩm.'):
+        super().__init__([])
+        self.extraction = extraction or {'topic': 'strategy'}
+        self.prepared_answer = answer
+        self.preparations = []
+
+    async def prepare_advice(self, message, *, history, context, facts):
+        self.preparations.append({'message':message,'history':history,'context':context,'facts':facts})
+        return {'extraction':self.extraction, 'answer':self.prepared_answer}
+
+    async def analyze_advice(self, *args, **kwargs):
+        raise AssertionError('Do not run extraction again after a prepared turn')
+
+
+def test_strategy_preparation_answers_in_one_model_turn_with_actual_shop_facts(client):
+    provider = PreparedAI()
+    client.app.state.ai_provider = provider
+    result = chat(client, 'Tư vấn việc cần ưu tiên hôm nay')
+    assert len(provider.preparations) == 1 and not provider.answers
+    assert provider.preparations[0]['facts']['today']
+    assert result['answer'] == provider.prepared_answer and result['mode'] == 'ai'
+    assert '_prepared_answer' not in result['facts']
+
+
+def test_bad_prepared_reply_is_corrected_before_display(client):
+    provider = PreparedAI(answer='Mình đã đổi giá sản phẩm cho bạn.')
+    client.app.state.ai_provider = provider
+    result = chat(client, 'Tư vấn chiến lược bán hàng')
+    assert len(provider.preparations) == len(provider.answers) == 1
+    assert 'đã đổi giá' not in result['answer'] and result['mode'] == 'ai'
+    assert provider.answers[0]['facts']['reply_correction']['reason'] == 'unexecuted_write_claim'
+
+
+def test_prepared_pricing_still_runs_exact_backend_math_before_final_reply(client):
+    provider = PreparedAI({'topic':'pricing','economics':[
+        {'field':'unit_cost_vnd','value':500000,'evidence':'Giá vốn 5 xị'},
+        {'field':'selling_price_vnd','value':1000000,'evidence':'bán 1 củ'}]}, answer='Lời 999 triệu.')
+    client.app.state.ai_provider = provider
+    result = chat(client, 'Giá vốn 5 xị, bán 1 củ thì lời bao nhiêu?')
+    assert len(provider.preparations) == len(provider.answers) == 1
+    assert result['facts']['pricing_analysis']['at_selling_price']['profit_per_unit_vnd'] == 500000
+    assert '999 triệu' not in result['answer'] and '500.000đ' in result['answer']
+
+
+def test_prepared_preferences_are_checked_and_saved_before_final_reply(client):
+    provider = PreparedAI({'topic':'strategy','preferences':[
+        {'field':'target_audience','value':'sinh viên','evidence':'Mình bán cho sinh viên'}]})
+    client.app.state.ai_provider = provider
+    result = chat(client, 'Mình bán cho sinh viên, tư vấn hướng bán hàng nhé')
+    assert len(provider.preparations) == len(provider.answers) == 1
+    assert result['facts']['seller_preferences']['target_audience'] == 'sinh viên'
+    assert 'target_audience' in result['facts']['memory_updates_saved']
+
+
+def test_preparation_reply_is_never_reused_in_another_conversation(client):
+    provider = PreparedAI(answer='Đề xuất của lượt đầu.')
+    client.app.state.ai_provider = provider
+    first = chat(client, 'Tư vấn chiến lược bán hàng')
+    provider.prepared_answer = 'Đề xuất riêng cho lượt sau.'
+    second = chat(client, 'Tư vấn chiến lược bán hàng')
+    assert first['conversation_id'] != second['conversation_id']
+    assert first['answer'] == 'Đề xuất của lượt đầu.' and second['answer'] == provider.prepared_answer
+
+
+@pytest.mark.parametrize('message', ['Xin chào', 'Doanh thu hôm nay bao nhiêu?',
+    'Hôm nay shop có bao nhiêu đơn?', 'Xem tồn kho của shop', 'Shop có sản phẩm nào sắp hết?'])
+def test_exact_small_requests_do_not_pay_cli_generation_latency(client, message):
+    class FastAI(PreparedAI):
+        prefer_direct_facts = True
+        async def prepare_advice(self, *args, **kwargs):
+            raise AssertionError('Exact read request should use current database facts')
+        async def respond(self, *args, **kwargs):
+            raise AssertionError('No model wording needed for exact facts')
+    client.app.state.ai_provider = FastAI()
+    result = chat(client, message)
+    assert result['provider'] == 'deterministic_parser' and result['model'] is None
+    assert result['answer'] and result['fallback_reason'] is None
+    assert result['mode'] == 'ai'
+
+
+@pytest.mark.parametrize('message', ['Doanh thu hôm nay bao nhiêu và nên làm gì tiếp?',
+    'Phân tích tại sao doanh thu hôm nay thấp', 'Xem tồn kho của shop rồi gợi ý nên nhập gì',
+    'Giả sử doanh thu hôm nay là 5 triệu thì sao?', 'Doanh thu hôm nay, trả lời bằng tiếng Anh'])
+def test_extended_questions_keep_semantic_generation_instead_of_read_template(message):
+    from app.services.chat import is_exact_fact_question
+    command = parse_fallback(message, today=date(2026,10,18))
+    assert not is_exact_fact_question(message, command)
+
+
+@pytest.mark.parametrize('message', [
+    'Hôm nay shop có bao nhiêu đơn và giá trị đơn hàng bao nhiêu?',
+    'Hôm nay, shop có bao nhiêu đơn và doanh thu bao nhiêu?',
+    'Shop mình có bao nhiêu đơn hôm nay và giá trị đơn hàng bao nhiêu?',
+])
+def test_compound_report_question_is_a_complete_fast_read(message):
+    from app.services.chat import is_exact_fact_question
+    command=parse_fallback(message,today=date(2026,10,19))
+    assert is_exact_fact_question(message,command)
+
+
+def test_home_quick_read_questions_do_not_invoke_api_and_read_current_numbers(client,shop_db_path):
+    import sqlite3
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    from time import perf_counter
+    class NoInference(PreparedAI):
+        prefer_direct_facts=True
+        async def respond(self,*args,**kwargs):
+            raise AssertionError('Quick read must not call model')
+        async def prepare_advice(self,*args,**kwargs):
+            raise AssertionError('Quick read must not extract advice')
+    client.app.state.ai_provider=NoInference()
+    created=datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')).replace(hour=0,minute=0,second=0,microsecond=0).astimezone(timezone.utc).replace(tzinfo=None).isoformat(sep=' ')
+    with sqlite3.connect(shop_db_path) as db:
+        db.execute('DELETE FROM order_item')
+        db.execute('DELETE FROM "order"')
+        for order_id,total,status in [(1,123000,'pending'),(2,321000,'delivered'),(3,900000,'cancelled')]:
+            db.execute('INSERT INTO "order" VALUES (?,?,?,?)',(order_id,total,status,created))
+    started=perf_counter()
+    result=chat(client,'Hôm nay shop có bao nhiêu đơn và giá trị đơn hàng bao nhiêu?')
+    print(f'\nCompound report API on temp DB: {(perf_counter()-started)*1000:.1f} ms; inference calls: 0')
+    assert result['provider']=='deterministic_parser' and result['model'] is None
+    assert result['facts']['order_count']==2 and result['facts']['order_value_vnd']==444000
+    assert '444.000đ' in result['answer'] and not result['answer'].startswith('{')
+    for text in ('Những sản phẩm nào sắp hết hàng?','Tìm sản phẩm bàn phím'):
+        assert chat(client,text)['provider']=='deterministic_parser'
+
+
+def test_shop_report_after_selecting_sku_does_not_inherit_product_scope(client):
+    class FastAI(PreparedAI):
+        prefer_direct_facts=True
+        async def respond(self,*args,**kwargs):
+            raise AssertionError('Read should not call model')
+    client.app.state.ai_provider=FastAI()
+    selected=chat(client,'SKU A001 còn bao nhiêu?')
+    report=chat(client,'Hôm nay shop có bao nhiêu đơn và giá trị đơn hàng bao nhiêu?',selected['conversation_id'])
+    assert report['intent']=='shop_summary' and report['tool']=='get_shop_summary'
+    assert report['provider']=='deterministic_parser' and 'sku' not in report['facts']
+
+
+def test_serialized_prepared_answer_is_decoded_before_guard_and_persistence(client):
+    from app.models.agent_run import AgentRun
+    provider=PreparedAI(answer=json.dumps({'answer':'Ưu tiên kiểm tra đơn đang chờ.\n\nSau đó rà tồn kho.'},ensure_ascii=False))
+    client.app.state.ai_provider=provider
+    result=chat(client,'Tư vấn chiến lược bán hàng')
+    assert result['answer']=='Ưu tiên kiểm tra đơn đang chờ.\n\nSau đó rà tồn kho.'
+    with client.app.state.session_factory() as session:
+        assert session.get(AgentRun,result['run_id']).answer==result['answer']
+
+
+def test_legacy_json_answer_is_clean_in_history_and_context_without_rewriting_audit_row(client):
+    from app.models.agent_run import AgentRun
+    from app.services.conversations import history_messages
+    result=chat(client,'SKU A001 còn bao nhiêu?')
+    wrapped=json.dumps({'answer':'Còn 3 chiếc.\n\nBạn cần kiểm tra thêm không?'},ensure_ascii=False)
+    with client.app.state.session_factory() as session:
+        row=session.get(AgentRun,result['run_id'])
+        row.answer=wrapped
+        session.commit()
+        assert history_messages([row])[-1]['content']=='Còn 3 chiếc.\n\nBạn cần kiểm tra thêm không?'
+    history=client.get('/api/v1/conversations/'+result['conversation_id']).json()['data']
+    assert history['turns'][0]['response']['answer']=='Còn 3 chiếc.\n\nBạn cần kiểm tra thêm không?'
+    with client.app.state.session_factory() as session:
+        assert session.get(AgentRun,result['run_id']).answer==wrapped

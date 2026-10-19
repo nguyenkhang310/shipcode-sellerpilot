@@ -1,14 +1,16 @@
-# Kiểm chứng soạn nội dung sản phẩm qua Muse
+# Kiểm chứng soạn nội dung sản phẩm
 
-Luồng hiện tại: chọn 1–6 ảnh → bấm Gửi → Muse nhận ảnh và soạn tên/mô tả →
+Luồng hiện tại: chọn 1–6 ảnh → bấm Gửi → GLM nhận ảnh và soạn tên/mô tả →
 hỏi giá, tồn kho hoặc thông tin còn thiếu → duyệt bản nháp → xác nhận đăng.
 Chọn ảnh vào ô soạn không tự gửi. Gửi ảnh không kèm chữ vẫn yêu cầu AI soạn bản nháp.
+
+Cấu hình GLM và kiểm tra thực tế hiện tại: [GLM_SETUP.md](GLM_SETUP.md).
 
 Các lỗi đã sửa:
 
 - Câu “đăng sản phẩm này lên cho tôi được không” không trở thành tên sản phẩm.
 - Chữ “cho” trong câu lệnh không bị phân loại thành ngành thú cưng.
-- Ảnh được gửi qua file part dạng data URL cho Muse trong OpenCode; không giao công cụ đọc file.
+- Ảnh được gửi qua file part dạng data URL cho GLM trong OpenCode; không giao công cụ đọc file.
 - Agent soạn sản phẩm có prompt JSON riêng, không dùng prompt chat vốn yêu cầu trả văn bản.
 - Tự viết nội dung khi đã biết sản phẩm, lưu yêu cầu soạn qua các lượt hỏi giá/tồn kho.
 - Có thể yêu cầu viết lại khi bản nháp đã sẵn sàng.
@@ -16,7 +18,7 @@ Các lỗi đã sửa:
   không dùng câu mẫu rồi đánh dấu nội dung đã hoàn tất.
 - Chặn đăng bản nháp cũ lấy câu lệnh làm tên; chat tiếp sẽ bỏ nội dung sai và soạn lại.
 
-Đã gọi Muse thật qua OpenCode, model `muse-spark-1.3-contributor-free`:
+Kết quả lịch sử trước khi chuyển GLM ngày 18/10/2026: đã gọi Muse qua OpenCode, model `muse-spark-1.3-contributor-free`:
 
 | Ca thử | Kết quả |
 |---|---|

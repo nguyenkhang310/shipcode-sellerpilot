@@ -9,6 +9,7 @@ const code=ts.transpileModule(fs.readFileSync(filename,'utf8'),{compilerOptions:
 const loaded={exports:{}};
 vm.runInNewContext('(function(require,module,exports){'+code+'\n})',{})(()=>({productDraftImageUrl:url=>'http://api'+url}),loaded,loaded.exports);
 const {restoreMessages,latestProductCards}=loaded.exports;
+const {assistantText,assistantMessage}=loaded.exports;
 const draft={id:1,status:'ready',preview_urls:['/image-a','/image-b']};
 const turn=(id,tool,message,answer,product=draft)=>({message,response:{run_id:id,tool,answer,product_draft:product}});
 
@@ -52,4 +53,26 @@ test('each product keeps its own latest card when multiple products share a conv
  assert.equal(cards.size,2);
  assert(cards.has('2:a')&&cards.has('3:a'));
  assert(!cards.has('1:a'));
+});
+
+test('serialized answer is decoded for fresh messages and persisted history, without changing seller text',()=>{
+ const answer='Hôm nay chưa có đơn mới.\n\nGiá trị đơn là 0đ.';
+ const wrapped=JSON.stringify({answer});
+ const input=turn(20,'get_shop_summary',wrapped,wrapped,null);
+ const fresh=assistantMessage(input.response);
+ assert.equal(fresh.text,answer);
+ assert.equal(fresh.response.answer,answer);
+ assert.equal(input.response.answer,wrapped);
+ const messages=restoreMessages([input]);
+ assert.equal(messages[0].text,wrapped);
+ assert.equal(messages[1].text,answer);
+});
+
+test('nested and fenced answer objects are decoded but code samples and literal escapes are preserved',()=>{
+ assert.equal(assistantText(JSON.stringify({answer:JSON.stringify({answer:'Nội dung.'})})),'Nội dung.');
+ assert.equal(assistantText('```json\n{"answer":"Dòng một.\\nDòng hai."}\n```'),'Dòng một.\nDòng hai.');
+ for (const text of ['Văn bản có \\n giữ nguyên.','{"answer":"Ví dụ", "stock":8}',
+   'Ví dụ: {"answer":"Nội dung"}', '```ts\nconst answer = "Ví dụ";\n```']) {
+   assert.equal(assistantText(text),text);
+ }
 });

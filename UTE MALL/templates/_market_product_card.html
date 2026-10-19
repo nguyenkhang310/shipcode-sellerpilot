@@ -5,7 +5,7 @@
             {% if product.old_price and product.old_price > product.price %}
             <span class="mall-discount">-{{ (((product.old_price-product.price)/product.old_price)*100)|round|int }}%<br>GIẢM</span>
             {% endif %}
-            <img src="{{ product.image_url or url_for('static', filename='ute-mall.svg') }}" alt="{{ product.name }}" loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='ute-mall.svg') }}'">
+            <img src="{{ product.image_url or url_for('static', filename='shopee-icon.svg') }}" alt="{{ product.name }}" loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='shopee-icon.svg') }}'">
         </div>
         <div class="mall-product-body">
             <div class="mall-product-name">{% if product.seller_shop and product.seller_shop.is_verified %}<span class="mall-shop-label">Mall</span>{% endif %}{{ product.name }}</div>

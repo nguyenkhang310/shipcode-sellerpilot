@@ -29,3 +29,15 @@ class AdviceExtraction(BaseModel):
     new_scenario: bool = False
     economics: list[EconomicsUpdate] = Field(default_factory=list, max_length=12)
     preferences: list[PreferenceUpdate] = Field(default_factory=list, max_length=5)
+
+
+class AdvicePreparation(BaseModel):
+    """One model turn for understanding and a provisional read-only reply.
+
+    Pricing and memory updates still require backend validation before a final
+    reply. The provisional answer is never a substitute for those checks.
+    """
+
+    model_config = ConfigDict(extra='forbid')
+    extraction: AdviceExtraction
+    answer: str | None = Field(default=None, min_length=1, max_length=12000)

@@ -17,9 +17,9 @@ from app.ai.fallback import (
     normalize_text,
     parse_fallback,
     reporting_days,
-    PRICE_RE,
-    parse_money,
 )
+from app.ai.money import money_mentions, plain
+from app.ai.text import assistant_text
 from app.integrations.ute_mall import ShopItemNotFoundError, UTEMallRepository
 from app.integrations import management
 from app.services.conversations import recent_runs, resolve_message, history_messages
@@ -31,12 +31,17 @@ from app.services.seller_tools import (
     create_price_proposal,
     proposal_to_dict,
 )
+from app.services.seller_voice import read_reply
+from app.services.business_advisor import (attach_business_brief, planning_fallback,
+                                          business_reply_issue, business_correction)
 
 logger = logging.getLogger(__name__)
 
 
 def reply_issue(answer: str, facts: dict | None = None, *, seller_context: str = '') -> str | None:
-    for match in re.finditer(r"\bđã\s+(?:cập nhật|đổi giá|thay đổi giá|đăng bán|đăng sản phẩm|gửi tin|xác nhận đơn|hủy đơn)", answer, re.IGNORECASE):
+    if re.search(r'đạt giới hạn số bước|hết bước xử lý|maximum steps reached', answer, re.I):
+        return 'internal_agent_message'
+    for match in re.finditer(r"\bđã\s+(?:cập nhật|đổi giá|thay đổi giá|đăng bán|đăng sản phẩm|đăng video|lên lịch|chạy quảng cáo|gửi tin|xác nhận đơn|hủy đơn)", answer, re.IGNORECASE):
         prefix = answer[:match.start()].rstrip()
         # "Nếu bạn đã đăng sản phẩm..." is a condition, not an executed write.
         if not re.search(r'\b(?:nếu|khi|sau khi)(?:\s+(?:bạn|mình|shop|chủ shop))?\s*$', prefix, re.IGNORECASE):
@@ -55,11 +60,10 @@ def reply_issue(answer: str, facts: dict | None = None, *, seller_context: str =
         allowed_profit = {item['profit_per_unit_vnd'] for key in ('at_selling_price', 'after_discount', 'target_price')
                           if (item := pricing.get(key)) and 'profit_per_unit_vnd' in item}
         text = normalize_text(answer.replace('*', '').replace('`', ''))
-        for match in PRICE_RE.finditer(text):
-            amount, unit = match.groups()
-            prefix = text[max(0, match.start() - 70):match.start()]
-            states_profit = re.search(r'(?:tiền lời|lợi nhuận|lời|lãi)(?:\s+(?:ước tính|còn|khoảng|là|mỗi máy|mỗi sản phẩm|mỗi đơn))*[\s:≈~=>-]*$', prefix)
-            if unit and states_profit and parse_money(amount, unit) not in allowed_profit:
+        for mention in money_mentions(text):
+            prefix = text[max(0, mention.start - 70):mention.start]
+            states_profit = re.search(r'(?:tiền lời|lợi nhuận|lời|lãi)(?:\s+(?:gộp|ròng|ước tính|còn|khoảng|là|mỗi máy|mỗi sản phẩm|mỗi đơn|mỗi cái))*[\s:≈~=>-]*$', prefix)
+            if mention.explicit and states_profit and mention.value not in allowed_profit:
                 return 'unsupported_pricing_amount'
     return None
 
@@ -69,7 +73,9 @@ def fallback_explanation(reason: str | None) -> str:
         'invalid_response': 'Câu trả lời của AI chưa vượt qua kiểm tra nên mình chưa hiển thị. Bạn thử lại nhé; số liệu shop vẫn đọc được bình thường.',
         'provider_timeout': 'AI phản hồi quá lâu ở lượt này. Bạn thử lại nhé; các câu hỏi trực tiếp về doanh số và tồn kho vẫn đọc được dữ liệu shop.',
         'provider_rejected': 'Dịch vụ AI đang từ chối yêu cầu hoặc giới hạn lượt gọi. Bạn thử lại sau một chút nhé; dữ liệu shop vẫn truy cập được.',
-        'free_model_unavailable': 'Model Muse Spark miễn phí hiện chưa sẵn sàng trên OpenCode. Mình vẫn có thể đọc doanh số, SKU và tồn kho của shop.',
+        'free_model_unavailable': 'Model GLM miễn phí hiện chưa sẵn sàng trên OpenCode. Mình vẫn có thể đọc doanh số, SKU và tồn kho của shop.',
+        'free_tier_restricted': 'OpenCode đang chặn model miễn phí trên đường gọi của SellerPilot và yêu cầu dùng trong OpenCode. Mình chưa có câu trả lời AI ở lượt này; doanh số và tồn kho của shop vẫn xem được.',
+        'provider_rate_limited': 'AI đang đạt giới hạn lượt gọi. Bạn thử lại sau nhé; mình vẫn có thể đọc doanh số, SKU và tồn kho của shop.',
         'model_unavailable': 'Model AI hiện chưa sẵn sàng. Mình vẫn có thể đọc doanh số, SKU và tồn kho của shop.',
         'tool_not_allowed': 'Phản hồi AI có thao tác chưa được phép nên mình đã dừng lượt này. Chưa có thay đổi nào được thực hiện. Bạn thử diễn đạt lại yêu cầu nhé.',
     }
@@ -91,6 +97,7 @@ async def handle_chat(
     natural_responses = bool(getattr(ai_provider, "natural_responses", False))
     model_name: str | None = None
     fallback_reason: str | None = None
+    prepared_answer = None
     runs = recent_runs(session, shop, conversation_id, limit=24)
     reset_at = read_memory(session, shop, 'system').get('reset_at')
     if reset_at:
@@ -101,6 +108,11 @@ async def handle_chat(
         runs = runs[last_reset + 1:]
     conversation_id = str(conversation_id or uuid4())
     resolved = resolve_message(message, runs)
+    # A complete shop-wide read must not inherit a SKU merely because its
+    # wording contains "giá trị" after a previous product discussion.
+    current_command = parse_fallback(message, today=today)
+    if is_exact_fact_question(message, current_command):
+        resolved = message
     history = history_messages(runs)
     simple = simple_reply(message, runs)
     classifier_input = resolved
@@ -139,6 +151,9 @@ async def handle_chat(
 
     if simple:
         command = ParsedCommand(intent="unknown")
+    direct_reply = bool(getattr(ai_provider, 'prefer_direct_facts', False)) and (
+        bool(simple) or is_exact_fact_question(message, command)
+    )
     if command.intent in ('sales_advice', 'unknown') and not command.days:
         days = reporting_days(message)
         if not days:
@@ -154,6 +169,10 @@ async def handle_chat(
     preferences = read_memory(session, shop, 'shop')
     if preferences:
         result['facts']['seller_preferences'] = preferences
+    if getattr(ai_provider, 'prefer_direct_facts', False):
+        rendered = read_reply(result, today=today, preferences=preferences)
+        if rendered is not None:
+            result['answer'] = rendered
     if forgetting:
         forget_memory(session, shop)
         command = ParsedCommand(intent='unknown')
@@ -165,9 +184,22 @@ async def handle_chat(
             result['facts'].update(shop_context(shop, command.days or 7))
         connection_question = len(message) < 140 and re.search(r'kết nối|ket noi|offline|mất mạng|mat mang', message, re.I)
         if not connection_question:
+            attach_business_brief(shop, result['facts'], message=message, history=history,
+                                  preferences=preferences)
             advisor = await enrich_advice(session, shop, ai_provider, message=message,
-                resolved=resolved, conversation_id=conversation_id, runs=runs, history=history)
+                resolved=resolved, conversation_id=conversation_id, runs=runs, history=history,
+                facts=result['facts'])
+            prepared_answer = advisor.pop('_prepared_answer', None)
             result['facts'].update({key: value for key, value in advisor.items() if value is not None})
+            prior_focus = result['facts'].get('business_advisory', {}).get('focus_product')
+            brief = attach_business_brief(shop, result['facts'], message=message, history=history,
+                                          preferences=advisor['seller_preferences'])
+            if brief:
+                if prior_focus != brief.get('focus_product'):
+                    prepared_answer = None
+                result['answer'] = planning_fallback(result['facts'])
+                if command.intent == 'unknown':
+                    command = command.model_copy(update={'intent': 'sales_advice'})
             if advisor['pricing_analysis']:
                 command = ParsedCommand(intent='sales_advice')
                 result.update(answer=pricing_reply(advisor['pricing_analysis']), tool='calculate_pricing',
@@ -181,15 +213,23 @@ async def handle_chat(
         word in normalize_text(message) for word in ("xác nhận", "đồng ý", "confirm")
     ))
     if can_generate and not forgetting:
-        if simple and (not natural_responses or confirmation_reply or mode != "ai"):
+        if direct_reply:
+            if simple:
+                result['answer'] = simple
+            mode, provider_name, model_name, fallback_reason = 'ai', 'deterministic_parser', None, None
+        elif simple and (not natural_responses or confirmation_reply or mode != "ai"):
             result["answer"] = simple
         elif hasattr(ai_provider, "respond") and mode == "ai":
             try:
                 response_facts = result['facts']
                 for attempt in range(2):
-                    generated = await ai_provider.respond(message, history=history, facts=response_facts)
+                    generated = (prepared_answer if attempt == 0 and prepared_answer is not None else
+                                 await ai_provider.respond(message, history=history, facts=response_facts))
+                    generated = assistant_text(generated)
                     seller_context = '\n'.join([row['content'] for row in history if row['role'] == 'user'] + [message])
                     issue = reply_issue(generated, result['facts'], seller_context=seller_context)
+                    issue = issue or business_reply_issue(generated, result['facts'], message=message,
+                                                          seller_context=seller_context)
                     if not issue:
                         break
                     logger.warning('AI reply needs correction: reason=%s attempt=%s', issue, attempt + 1)
@@ -197,11 +237,13 @@ async def handle_chat(
                         raise AIProviderError('invalid_response', stage=issue)
                     response_facts = {**result['facts'], 'reply_correction': {
                         'reason': issue,
-                        'requirements': 'Viết lại dựa trên đúng số liệu. Chỉ đề xuất, không nói đã thực hiện thay đổi. Không suy đoán shop mới mở từ số đơn bằng 0. Mọi số tiền tính lời/giảm giá phải lấy đúng từ pricing_analysis. Đơn đang giao không phải đơn cần gửi lại.',
+                        'requirements': 'Viết lại dựa trên đúng số liệu. Chỉ đề xuất, không nói đã thực hiện thay đổi. Không suy đoán shop mới mở từ số đơn bằng 0. Mọi số tiền tính lời/giảm giá phải lấy đúng từ pricing_analysis. Đơn đang giao không phải đơn cần gửi lại. ' + business_correction(issue),
                     }}
                 generated = re.sub(r"\s*\((?:pending_orders|packing_orders|shipping_orders)\)", "", generated)
                 generated = re.sub(r"\bstock\s*[=:]?\s*(\d+)", r"còn \1", generated, flags=re.IGNORECASE)
                 result["answer"] = generated
+                provider_name = getattr(ai_provider, 'response_provider', provider_name)
+                model_name = getattr(ai_provider, 'response_model', model_name)
             except AIProviderError as error:
                 logger.warning('Chat used grounded fallback: reason=%s stage=%s', error.reason, error.stage or 'unknown')
                 mode, provider_name, fallback_reason = "fallback", "deterministic_parser", error.reason
@@ -492,12 +534,57 @@ def execute_command(
 def simple_reply(message, runs):
     text = normalize_text(message).strip("!.? ")
     if text in {"chào", "chào bạn", "xin chào", "hello", "hi", "alo"}:
-        return "Chào bạn, mình là SellerPilot của ShipCode. Mình ở đây để cùng bạn quản lý shop — từ xem tình hình bán hàng đến kiểm tra sản phẩm và chuẩn bị thay đổi giá. Hôm nay bạn muốn bắt đầu từ đâu?"
+        return "Chào bạn, mình là SellerPilot của ShipCode. Hôm nay bạn muốn mình giúp gì cho shop?"
     if text in {"cảm ơn", "cảm ơn bạn", "thanks", "ok", "oke", "được rồi"}:
         return "Rất sẵn lòng. Khi cần xem số liệu hoặc xử lý việc tiếp theo cho shop, cứ nhắn mình nhé."
     if runs and any(run.proposal_id for run in runs[-3:]) and re.search(r'^(?:(?:mình|tôi)\s+)?(?:xác nhận|đồng ý|confirm)\b', text):
         return "Để tránh thay đổi nhầm, bạn hãy bấm **Xác nhận đổi giá** trên đúng thẻ đề xuất. Tin nhắn này chưa thay đổi dữ liệu."
     return None
+
+
+def is_exact_fact_question(message, command):
+    """Only complete, unambiguous read requests may bypass model wording.
+
+    Extra analysis, instructions and follow-up text fail the full match and
+    continue through the natural assistant. This never handles write actions.
+    """
+    text = plain(normalize_text(message)).strip(' ?!.')
+    if command.intent == 'inventory_query':
+        patterns = [
+            r'(?:xem |kiem tra )?(?:ton kho|hang ton kho)(?: cua shop| shop)?',
+            r'(?:shop (?:minh |toi )?co )?(?:nhung |cac )?san pham nao sap het(?: hang)?',
+        ]
+        if command.sku:
+            patterns.append(r'(?:sku )?[a-z0-9._-]+ con bao nhieu(?: hang| san pham| chiec| cai)?')
+    elif command.intent == 'shop_summary':
+        # Parse complete read clauses, including the app's own starter prompt.
+        # At most one distinct reporting period is allowed. Requests to explain,
+        # compare, calculate hypothetical revenue or change data fail fullmatch.
+        periods = re.findall(r'\b(?:hom nay|hom qua|(?:7|30) ngay(?: qua| gan day)?|tuan (?:nay|qua)|thang (?:nay|qua))\b', text)
+        if len(set(periods)) > 1:
+            return False
+        body = re.sub(r'\b(?:hom nay|hom qua|(?:7|30) ngay(?: qua| gan day)?|tuan (?:nay|qua)|thang (?:nay|qua))\b', ' ', text)
+        body = ' '.join(body.replace(',', ' ').split())
+        subject = r'(?:shop(?: cua (?:toi|minh)| (?:toi|minh))? )?'
+        count = r'(?:(?:co|ban duoc|nhan duoc) )?bao nhieu don(?: hang)?'
+        value = r'(?:tong )?(?:doanh thu|doanh so|gia tri don(?: hang)?)(?: cua shop)?(?: (?:la |duoc )?bao nhieu)?'
+        clause = rf'(?:{count}|{value})'
+        if re.fullmatch(rf'{subject}{clause}(?: va {clause})?', body):
+            return True
+        patterns = [
+            r'(?:doanh thu|doanh so|gia tri don)(?: cua shop)? (?:hom nay|hom qua|7 ngay qua|30 ngay qua)(?: (?:la |duoc )?bao nhieu)?',
+            r'(?:hom nay|hom qua) (?:shop (?:toi |minh )?)?(?:co |ban duoc )?bao nhieu don(?: hang)?',
+        ]
+    elif command.intent == 'product_search':
+        # Short catalog lookups, including the home-screen quick action. A
+        # second request or instruction continues through model interpretation.
+        if re.search(r'\b(?:va|roi|nen|khong|ko|viet|phan tich|tu van|goi y|mo ta|giai thich|gia su|neu|bang)\b', text):
+            return False
+        return bool(command.query and len(command.query.split()) <= 5
+                    and re.fullmatch(r'tim(?: kiem)?(?: san pham)? [a-z0-9][a-z0-9 ._-]{0,79}', text))
+    else:
+        return False
+    return any(re.fullmatch(pattern, text) for pattern in patterns)
 
 
 def is_casual_message(message):
@@ -517,6 +604,14 @@ def suggestions_for(command, result):
             return ['Mình cần cung cấp những chi phí nào để tính giá?', 'Biên lợi nhuận khác lời trên giá vốn thế nào?']
         return ['Nếu giảm giá 10% thì lời còn bao nhiêu?', 'Gợi ý cách tăng lợi nhuận mà không tăng giá']
     if command.intent == 'sales_advice':
+        brief = result['facts'].get('business_advisory')
+        if brief:
+            focus = brief.get('focus_product')
+            sku = focus.get('sku') if focus else None
+            return ([f"Viết kịch bản TikTok chi tiết cho SKU {sku}" if sku else "Chọn sản phẩm nào để quay video trước?",
+                     "Cụ thể hơn", "Lập kế hoạch 7 ngày với một người thực hiện"]
+                    if brief['mode'] != 'video_script' else
+                    ["Viết thêm 2 câu mở đầu khác để thử", "Hướng dẫn đo hiệu quả từng video", "Lập kế hoạch nội dung 7 ngày"])
         return ['Lập kế hoạch hành động 7 ngày cho shop', 'Đề xuất nào phù hợp với ngân sách nhỏ?', 'Giải thích rõ hơn phần quan trọng nhất']
     sku = result["facts"].get("sku")
     if command.intent == "inventory_query" and sku and result["facts"].get("found") is not False:

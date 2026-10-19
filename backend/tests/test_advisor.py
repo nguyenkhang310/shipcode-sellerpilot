@@ -72,7 +72,7 @@ def test_preferences_must_be_explicit_not_hypothetical_or_prompt_injection():
 
 class AdvisorAI:
     provider = 'opencode'
-    model = 'muse-spark-1.3-contributor-free'
+    model = 'glm-5.3-flash-free'
     natural_responses = True
     prefer_model_intent = True
 
@@ -157,7 +157,8 @@ def test_model_cannot_store_invented_cost_or_memory_for_another_shop(client):
         {'topic': 'strategy'},
     ])
     result = chat(client, 'Giá vốn 100k, nên bán bao nhiêu?')
-    assert result['facts']['pricing_analysis']['status'] == 'missing_cost'
+    assert result['facts']['pricing_analysis']['inputs']['unit_cost_vnd'] == 100000
+    assert result['facts']['pricing_analysis']['inputs']['unit_cost_vnd'] != 999000
     chat(client, 'Mình bán cho sinh viên, tư vấn chiến lược giúp mình.')
     client.app.state.shop_repository.seller_shop_slug = 'another-shop'
     other = chat(client, 'Tư vấn chiến lược')
@@ -192,3 +193,21 @@ def test_reset_endpoint_only_clears_current_shop_memory(client):
     after = chat(client, 'Tư vấn chiến lược mới', first['conversation_id'])
     assert after['facts']['seller_preferences'] == {}
     assert client.app.state.ai_provider.answers[-1]['history'] == []
+
+
+def test_historical_cost_evidence_requires_the_original_cost_role():
+    from app.services.advisor import _historical_cost_quote
+    message = 'Giá vốn 3 xị, bán 5 xị, đóng gói 20k.'
+    assert _historical_cost_quote(EconomicsUpdate(field='unit_cost_vnd', value=300000, evidence='3 xị'), message)
+    assert not _historical_cost_quote(EconomicsUpdate(field='unit_cost_vnd', value=500000, evidence='5 xị'), message)
+    assert _historical_cost_quote(EconomicsUpdate(field='packaging_vnd', value=20000, evidence='đóng gói 20k'), message)
+
+
+def test_slang_cost_is_canonicalized_before_calculating_profit(client):
+    client.app.state.ai_provider = AdvisorAI([{'topic': 'pricing', 'economics': [
+        {'field': 'unit_cost_vnd', 'value': 50000, 'evidence': 'Giá vốn 5 xị'},
+        {'field': 'selling_price_vnd', 'value': 1000000, 'evidence': 'bán 1 củ'},
+    ]}])
+    result = chat(client, 'Giá vốn 5 xị, bán 1 củ thì lời bao nhiêu?')
+    assert result['facts']['pricing_analysis']['inputs']['unit_cost_vnd'] == 500000
+    assert result['facts']['pricing_analysis']['at_selling_price']['profit_per_unit_vnd'] == 500000

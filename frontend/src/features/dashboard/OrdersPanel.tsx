@@ -18,6 +18,7 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
   const [query, setQuery] = useState(''), [status, setStatus] = useState(initialStatus);
   const [items, setItems] = useState<StoreOrder[]>([]), [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(false), [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(''), [expanded, setExpanded] = useState<number | null>(null);
   const request = useRef<AbortController | null>(null), failedOffset = useRef(0);
   const list = useRef<FlatList<StoreOrder>>(null);
@@ -26,13 +27,14 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
   const cacheKey = useRef(''), loadedAt = useRef(0);
   const pending = useRef(false);
   const key = status + ':' + query.trim();
-  const load = useCallback(async (offset: number) => {
+  const load = useCallback(async (offset: number, pull = false) => {
     if (offset > 0 && pending.current) return;
     request.current?.abort();
     pending.current = true;
     const controller = new AbortController(); request.current = controller;
     failedOffset.current = offset; setError('');
     setLoading(offset === 0); setLoadingMore(offset > 0);
+    setRefreshing(pull);
     try {
       const { data } = await getOrders(status, query.trim(), offset, controller.signal);
       if (controller.signal.aborted) return;
@@ -41,12 +43,12 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
     } catch (e) {
       if (!controller.signal.aborted) setError(e instanceof ApiError ? e.message : 'Chưa tải được đơn hàng. Vui lòng thử lại.');
     } finally {
-      if (!controller.signal.aborted) { pending.current = false; setLoading(false); setLoadingMore(false); }
+      if (!controller.signal.aborted) { pending.current = false; setLoading(false); setLoadingMore(false); setRefreshing(false); }
     }
   }, [status, query, key]);
   useEffect(() => { setStatus(initialStatus); }, [initialStatus]);
   useEffect(() => {
-    if (!active) { request.current?.abort(); pending.current = false; setLoading(false); setLoadingMore(false); return; }
+    if (!active) { request.current?.abort(); pending.current = false; setLoading(false); setLoadingMore(false); setRefreshing(false); return; }
     if (cacheKey.current !== key) {
       setItems([]); setTotal(null); setExpanded(null); setError(''); setLoading(true);
       list.current?.scrollToOffset({ offset: 0, animated: false });
@@ -80,7 +82,7 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
         {Boolean(item.discount_amount) ? <View style={ui.detailLine}><Text style={ui.caption}>Giảm giá</Text><Text style={ui.productName}>−{money(item.discount_amount!)}</Text></View> : null}
         {item.payment_method ? <View style={ui.detailLine}><Text style={ui.caption}>Thanh toán</Text><Text style={ui.productName}>{item.payment_method === 'COD' ? 'Khi nhận hàng' : item.payment_method}</Text></View> : null}
         {item.payment_status ? <View style={ui.detailLine}><Text style={ui.caption}>Trạng thái thanh toán</Text><Text style={ui.productName}>{{ paid: 'Đã thanh toán', unpaid: 'Chưa thanh toán', initiated: 'Đang xử lý', failed: 'Thất bại', cancelled: 'Đã hủy' }[item.payment_status] || item.payment_status}</Text></View> : null}
-        <Pressable accessibilityRole="button" accessibilityLabel={'Xử lý đơn #' + item.id + ' trên UTE MALL'} onPress={() => onStore('/seller/orders/' + item.id)} style={[ui.secondaryButton, { marginTop: 10 }]}><Text style={ui.secondaryText}>Xử lý trên UTE MALL</Text><Ionicons name="open-outline" size={16} color={BRAND.navy} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={'Xử lý đơn #' + item.id + ' trên Shopee'} onPress={() => onStore('/seller/orders/' + item.id)} style={[ui.secondaryButton, { marginTop: 10 }]}><Text style={ui.secondaryText}>Xử lý trên Shopee</Text><Ionicons name="open-outline" size={16} color={BRAND.navy} /></Pressable>
       </View> : null}
     </View>;
   };
@@ -90,7 +92,7 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
       {[{ key: 'all', label: 'Tất cả' }, ...ORDER_STATES].map(state => <Pressable key={state.key} accessibilityRole="button" accessibilityLabel={state.label} accessibilityState={{ selected: status === state.key }} onLayout={e => { chipPositions.current[state.key] = e.nativeEvent.layout.x; }} onPress={() => chooseStatus(state.key)} style={[ui.orderChip, state.key === status && { backgroundColor: isDark ? '#DAE5F5' : '#0B1F3F', borderColor: 'transparent' }]}><Text style={[ui.orderChipText, state.key === status && { color: isDark ? '#0B1F3F' : '#FFF' }]}>{state.label}</Text></Pressable>)}
     </ScrollView></View>
     <FlatList ref={list} testID="orders-list" data={items} keyExtractor={item => String(item.id)} renderItem={renderOrder} extraData={expanded} style={{ flex: 1 }} contentContainerStyle={[ui.sheetScroll, { paddingBottom: embedded ? 112 + insets.bottom : 24 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" initialNumToRender={8} maxToRenderPerBatch={6} windowSize={7}
-      refreshControl={<RefreshControl refreshing={loading && items.length > 0} onRefresh={() => void load(0)} tintColor={BRAND.navy} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(0, true)} tintColor={BRAND.navy} />}
       ListHeaderComponent={<Text style={[ui.caption, { marginBottom: 12 }]}>{total === null ? 'Đang tải đơn hàng…' : count(total) + ' đơn hàng'}</Text>}
       ListEmptyComponent={!loading && !error ? <View style={ui.center}><Ionicons name="receipt-outline" size={36} color={IOS.tertiary} /><Text style={ui.loadingText}>Không tìm thấy đơn hàng</Text></View> : null}
       ListFooterComponent={<>{error ? <View style={ui.errorCard}><Text style={ui.error}>{error}</Text><Pressable accessibilityRole="button" onPress={() => void load(failedOffset.current)} style={ui.secondaryButton}><Text style={ui.secondaryText}>Thử lại</Text></Pressable></View> : null}{loading && !items.length || loadingMore ? <ActivityIndicator color={BRAND.navy} style={{ margin: 24 }} /> : !error && total !== null && items.length < total ? <Pressable accessibilityRole="button" onPress={() => void load(items.length)} style={ui.secondaryButton}><Text style={ui.secondaryText}>Xem thêm đơn hàng</Text></Pressable> : null}</>}

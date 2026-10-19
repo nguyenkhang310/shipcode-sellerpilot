@@ -2,17 +2,19 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
+const {qaFetch,useQaServer}=require('./qa-server.cjs');
 const output=path.resolve(__dirname,'../../docs/evaluations/chat-scroll');
 fs.mkdirSync(output,{recursive:true});
 let browser,page;
 (async()=>{
  browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE || undefined,headless:true});
  page=await browser.newPage({viewport:{width:390,height:844}});
+ await useQaServer(page);
  await page.emulateMedia({reducedMotion:'no-preference'});
  const errors=[],checks=[];page.on('pageerror',error=>errors.push(error.message));
  let turn=0;
  await page.route('**/api/v1/chat',async route=>{
-  const response=await route.fetch();const body=await response.json();
+  const response=await qaFetch(route);const body=await response.json();
   body.data.answer=`Câu trả lời dài ${++turn}\n\n`+Array.from({length:65},(_,i)=>`Mục ${i+1}: Ưu tiên kiểm tra số liệu và sản phẩm cần xử lý trong shop.`).join('\n\n');
   await route.fulfill({response,json:body});
  });

@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "demo": "node scripts/demo.cjs",
+    "ai:check": "node scripts/check-ai.cjs",
     "dev": "npm run dev --workspace frontend",
     "start": "npm run start --workspace frontend",
     "ios": "npm run ios --workspace frontend",
@@ -15,7 +16,12 @@
     "build": "npm run build --workspace frontend",
     "build:ios": "npm run build:ios --workspace frontend",
     "typecheck": "npm run typecheck --workspace frontend",
-    "test:api": "node --test frontend/tests/api-transport.cjs frontend/tests/chat-messages.cjs"
+    "test:api": "node --test frontend/tests/api-transport.cjs frontend/tests/chat-messages.cjs",
+    "extension:setup": "node scripts/extension.cjs setup",
+    "extension:build": "node scripts/extension.cjs build",
+    "test:extension": "node --test extensions/shopee-connector/tests/connector.cjs extensions/shopee-connector/tests/package.cjs",
+    "test:extension:dom": "node extensions/shopee-connector/tests/content-fixture.cjs",
+    "test:extension:ui": "node extensions/shopee-connector/tests/panel-fixture.cjs"
   },
   "engines": {
     "node": ">=22.13.0"

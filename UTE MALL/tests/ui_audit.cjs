@@ -11,6 +11,7 @@ async function inspect(page, path, viewport) {
   if (!response || response.status() >= 400) throw new Error(`${path}: HTTP ${response && response.status()}`);
   const result = await page.evaluate(() => {
     const visible = el => {
+      if (el.closest('.sr-only')) return false;
       const style = getComputedStyle(el);
       const box = el.getBoundingClientRect();
       return style.display !== 'none' && style.visibility !== 'hidden' && box.width > 0 && box.height > 0;

@@ -19,6 +19,35 @@ class SemanticProvider(CopyProvider):
         return json.dumps(self.result, ensure_ascii=False)
 
 
+def test_gateway_restriction_explains_missing_ai_without_losing_draft_or_publishing(tmp_path):
+    from app.ai.contracts import AIProviderError
+
+    class RestrictedProvider(OfflineProvider):
+        provider = 'opencode'
+        model = 'glm-5.3-flash-free'
+
+        async def compose_listing(self, **kwargs):
+            raise AIProviderError('free_tier_restricted', stage='model_gateway')
+
+    client, shop_path, upload_dir = make_client(tmp_path)
+    with client:
+        client.app.state.ai_provider = RestrictedProvider()
+        _, reply = upload_and_reply(client)
+        result = reply('Đăng sản phẩm trong ảnh, bán 5 xị, còn 20 cái. Tự viết tên và mô tả.')
+        draft = result['product_draft']
+        assert result['mode'] == 'fallback'
+        assert result['fallback_reason'] == 'free_tier_restricted'
+        assert 'OpenCode đang chặn' in result['answer']
+        assert 'Ảnh và thông tin bản nháp vẫn được giữ' in result['answer']
+        assert 'chưa có sản phẩm nào được đăng' in result['answer']
+        assert draft['price_vnd'] == 500000 and draft['stock'] == 20
+        assert draft['status'] == 'collecting' and draft['published_product_id'] is None
+        assert len(list(upload_dir.iterdir())) == 1
+        assert client.get('/api/v1' + draft['preview_url']).status_code == 200
+        with sqlite3.connect(shop_path) as connection:
+            assert connection.execute('SELECT count(*) FROM product').fetchone()[0] == 2
+
+
 def test_natural_listing_collects_all_details_before_asking(tmp_path):
     message = 'Mình có bàn phím Nova K75 màu trắng, bán 990k, kho còn 20 cái, đăng giúp mình.'
     client, shop_path, _ = make_client(tmp_path)
@@ -88,10 +117,12 @@ def test_model_cannot_invent_or_misquote_commercial_facts(tmp_path, price_eviden
         })
         _, reply = upload_and_reply(client)
         result = reply('Đăng bàn phím Nova K75, bán 990k và 20 cái nhé')
-        assert result['product_draft']['price_vnd'] is None
+        # The explicit seller phrase "bán 990k" is independently readable;
+        # forged model values/evidence must not override it.
+        assert result['product_draft']['price_vnd'] == 990000
         assert result['product_draft']['stock'] is None
         assert result['product_draft']['status'] == 'collecting'
-        assert result['product_draft']['missing_fields'] == ['price_vnd', 'stock']
+        assert result['product_draft']['missing_fields'] == ['stock']
         assert 'tên' not in result['answer'].lower()
 
 
@@ -157,7 +188,7 @@ def test_failed_natural_edit_never_claims_the_draft_was_updated(tmp_path):
         client.app.state.ai_provider = OfflineProvider()
         _, reply = upload_and_reply(client)
         reply('Tên: Bàn phím Nova K75, giá: 990k, tồn: 20, mô tả: Bàn phím màu đen dùng cổng USB.')
-        result = reply('Để 850 nghìn thôi nhé')
+        result = reply('Để giá mềm hơn một chút nhé')
         assert result['product_draft']['price_vnd'] == 990000
         assert result['fallback_reason'] == 'provider_unavailable'
         assert 'chưa xử lý được' in result['answer']
@@ -174,3 +205,119 @@ def test_fractional_stock_is_not_silently_rounded(tmp_path):
         result = reply('20.5')
         assert result['product_draft']['stock'] is None
         assert 'số lượng' in result['answer']
+
+
+def test_slang_price_is_normalized_even_when_model_is_wrong_by_a_factor_of_ten(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    with client:
+        client.app.state.ai_provider = SemanticProvider({
+            'name': 'Bàn phím Demo K87', 'name_evidence': 'bàn phím Demo K87',
+            'description': 'Bàn phím màu đen dùng cho góc làm việc.', 'category_id': 4,
+            'price_vnd': 50000, 'price_evidence': '5 xị', 'stock': 20, 'stock_evidence': '20 cái',
+        })
+        _, reply = upload_and_reply(client)
+        result = reply('Đăng bàn phím Demo K87, bán 5 xị, kho còn 20 cái nhé.')
+        assert result['product_draft']['price_vnd'] == 500000
+        assert result['product_draft']['stock'] == 20
+        assert result['product_draft']['status'] == 'ready'
+
+
+def test_price_range_blocks_publishing_and_next_reply_resolves_the_pending_question(tmp_path):
+    client, store, _ = make_client(tmp_path)
+    with client:
+        client.app.state.ai_provider = CopyProvider()
+        _, reply = upload_and_reply(client)
+        ready = reply('Tên: Bàn phím Nova K75, giá: 990k, tồn kho: 20, mô tả: Bàn phím màu đen dùng cổng USB.')['product_draft']
+        assert ready['status'] == 'ready'
+        client.app.state.ai_provider = SemanticProvider({'price_vnd': 600000, 'price_evidence': '600k'})
+        ambiguous = reply('Giá bán để 500–600k nhé')['product_draft']
+        assert ambiguous['status'] == 'collecting'
+        assert ambiguous['price_vnd'] == 990000
+        assert ambiguous['missing_fields'] == ['price_vnd']
+        assert client.post(f"/api/v1/product-drafts/{ready['id']}/publish").status_code == 409
+        resolved = reply('5 xị')['product_draft']
+        assert resolved['status'] == 'ready' and resolved['price_vnd'] == 500000
+        assert resolved['name'] == ready['name'] and resolved['description'] == ready['description']
+        with sqlite3.connect(store) as db:
+            assert db.execute('SELECT count(*) FROM product').fetchone()[0] == 2
+
+
+def test_natural_followup_only_asks_the_missing_stock(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    with client:
+        client.app.state.ai_provider = SemanticProvider({
+            'name': 'Bàn phím Demo K87', 'description': 'Bàn phím màu đen dùng cho góc làm việc.',
+            'category_id': 4, 'price_vnd': 500000, 'price_evidence': '5 xị',
+            'next_question': 'Mẫu này bạn còn sẵn mấy cái để mình lên bản nháp?', 'next_question_fields': ['stock'],
+        })
+        _, reply = upload_and_reply(client)
+        result = reply('Đăng bàn phím Demo K87 bán 5 xị nhé')
+        assert result['product_draft']['missing_fields'] == ['stock']
+        assert 'còn sẵn mấy cái' in result['answer']
+        assert 'giá bán' not in result['answer']
+
+
+def test_model_question_cannot_reask_price_that_was_already_provided(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    with client:
+        client.app.state.ai_provider = SemanticProvider({
+            'name': 'Bàn phím Demo K87', 'description': 'Bàn phím màu đen dùng cho góc làm việc.',
+            'category_id': 4, 'price_vnd': 500000, 'price_evidence': '5 xị',
+            'next_question': 'Bạn bán giá bao nhiêu và còn mấy cái?', 'next_question_fields': ['price_vnd', 'stock'],
+        })
+        _, reply = upload_and_reply(client)
+        result = reply('Đăng bàn phím Demo K87, giá 5 xị')
+        assert result['product_draft']['price_vnd'] == 500000
+        assert 'tồn kho' in result['answer'] and 'giá bao nhiêu' not in result['answer']
+
+
+def test_pricing_advice_knows_draft_and_can_reuse_cost_from_its_seller_caption(tmp_path):
+    from test_advisor import AdvisorAI
+    client, _, _ = make_client(tmp_path)
+    with client:
+        client.app.state.ai_provider = CopyProvider()
+        _, reply = upload_and_reply(client)
+        ready = reply('Tên: Bàn phím Nova K75, giá: 5 xị, tồn: 20, mô tả: Bàn phím màu đen. Giá vốn 3 xị.')['product_draft']
+        assert ready['status'] == 'ready'
+        advisor = AdvisorAI([{'topic': 'pricing', 'economics': [
+            {'field': 'unit_cost_vnd', 'value': 300000, 'evidence': 'Giá vốn 3 xị'},
+        ]}])
+        client.app.state.ai_provider = advisor
+        advice = reply('Mình chưa biết giá nên bán bao nhiêu, tư vấn giúp mình')
+        assert advice['product_draft'] is None
+        assert advice['facts']['draft_context']['name'] == ready['name']
+        assert advice['facts']['pricing_analysis']['inputs']['unit_cost_vnd'] == 300000
+        assert advice['facts']['pricing_analysis']['at_selling_price']['price_vnd'] == 500000
+        assert advisor.contexts[0]['draft_seller_messages']
+
+
+def test_slang_currency_reply_is_not_a_product_name(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    with client:
+        client.app.state.ai_provider = OfflineProvider()
+        _, reply = upload_and_reply(client)
+        draft = reply('năm xị')['product_draft']
+        assert draft['name'] is None and draft['price_vnd'] == 500000
+        assert draft['status'] == 'collecting'
+
+
+def test_generated_listing_cannot_invent_condition_seals_authenticity_or_warranty():
+    from app.ai.listing_contracts import ListingCopy, listing_validation_context
+    from pydantic import ValidationError
+    for claim in ['Sản phẩm mới', 'Hàng nguyên tem', 'Hàng chính hãng', 'Bảo hành 12 tháng']:
+        with pytest.raises(ValidationError):
+            ListingCopy.model_validate({'name': 'Bàn phím Demo K87', 'description': claim},
+                context=listing_validation_context({'current_message': 'Bàn phím màu đen, bán 5 xị.'},
+                    [{'role': 'assistant', 'content': claim}]))
+    result = ListingCopy.model_validate({'description': 'Bảo hành 12 tháng'},
+        context=listing_validation_context({'current_message': 'Bàn phím, bảo hành 12 tháng.'}, []))
+    assert result.description == 'Bảo hành 12 tháng'
+
+
+def test_seller_supplied_negative_condition_is_preserved_without_becoming_a_positive_claim():
+    from app.ai.listing_contracts import ListingCopy, listing_validation_context
+    from pydantic import ValidationError
+    context = listing_validation_context({'current_message': 'Mô tả: Máy không mới, không bảo hành.'}, [])
+    assert ListingCopy.model_validate({'description':'Máy không mới, không bảo hành.'},context=context).description
+    with pytest.raises(ValidationError):
+        ListingCopy.model_validate({'description':'Máy mới, bảo hành 12 tháng.'},context=context)

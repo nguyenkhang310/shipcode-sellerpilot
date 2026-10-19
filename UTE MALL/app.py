@@ -43,6 +43,7 @@ app.config['SECRET_KEY'] = _env_secret
 app.config['STORE_DATABASE_PATH'] = os.environ.get('STORE_DATABASE_PATH') or os.path.join(app.instance_path, 'ecommerce.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + app.config['STORE_DATABASE_PATH']
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['DEMO_REVIEWS_ENABLED'] = os.environ.get('ENABLE_DEMO_REVIEWS', '1') == '1'
 app.config['PREFERRED_URL_SCHEME'] = os.environ.get('PREFERRED_URL_SCHEME', 'https' if os.environ.get('COOKIE_SECURE', '').strip().lower() in ['1', 'true', 'yes'] else 'http')
 
 # Session / cookie hardening (set COOKIE_SECURE=1 when behind HTTPS)
@@ -58,7 +59,7 @@ app.config['WTF_CSRF_HEADERS'] = ['X-CSRFToken', 'X-CSRF-Token']
 
 # Shared shop config
 app.config['SHOP_INFO'] = {
-    'name': os.environ.get('SHOP_NAME', 'UTE MALL').strip() or 'UTE MALL',
+    'name': os.environ.get('SHOP_NAME', 'Shopee').strip() or 'Shopee',
     'tagline': os.environ.get(
         'SHOP_TAGLINE',
         'Mua sắm đa ngành, kết nối hàng nghìn gian hàng.'
@@ -121,6 +122,12 @@ def mask_username(value):
     if len(text) <= 2:
         return text[0] + '*' if text else 'Người mua'
     return text[0] + ('*' * min(max(len(text) - 2, 4), 10)) + text[-1]
+
+
+@app.template_filter('reviewer_name')
+def reviewer_name(review):
+    name = review.user.username
+    return name.rsplit('.demo', 1)[0] if review.is_demo else name
 
 
 # Upload config
@@ -535,7 +542,8 @@ def _compute_totals_from_items(items, coupon_code: str | None = None):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    user = db.session.get(User, int(user_id))
+    return user if user and user.role != 'demo_reviewer' else None
 
 
 @app.context_processor
@@ -791,14 +799,16 @@ def product_detail(product_id):
         (variant for variant in product.variants if variant.is_active),
         key=lambda variant: (variant.stock <= 0, variant.color or '', variant.size or '', variant.id),
     )
-    reviews = Review.query.filter_by(product_id=product_id).all()
+    review_stats = db.session.query(Review.rating, func.count(Review.id)).filter_by(product_id=product_id).group_by(Review.rating).all()
+    review_counts = dict(review_stats)
     review_query=Review.query.filter_by(product_id=product_id)
     selected_star=request.args.get('stars',type=int)
     if selected_star in range(1,6): review_query=review_query.filter_by(rating=selected_star)
-    review_pagination=review_query.order_by(Review.created_at.desc()).paginate(page=max(1,request.args.get('review_page',1,type=int)),per_page=10,error_out=False)
-    if reviews:
-        display_rating = sum(review.rating for review in reviews) / len(reviews)
-        display_review_count = len(reviews)
+    # Keep submitted buyer feedback visible ahead of generated demo comments.
+    review_pagination=review_query.order_by(Review.is_demo.asc(), Review.created_at.desc(), Review.id.desc()).paginate(page=max(1,request.args.get('review_page',1,type=int)),per_page=10,error_out=False)
+    display_review_count = sum(review_counts.values())
+    if display_review_count:
+        display_rating = sum(star * total for star, total in review_stats) / display_review_count
     else:
         display_rating = float(product.rating or 0)
         display_review_count = int(product.rating_count or 0)
@@ -820,7 +830,8 @@ def product_detail(product_id):
         variants=variants,
         reviews=review_pagination.items,
         review_pagination=review_pagination,
-        review_counts={star:sum(r.rating==star for r in reviews) for star in range(1,6)},
+        review_counts={star:review_counts.get(star, 0) for star in range(1,6)},
+        selected_star=selected_star if selected_star in range(1,6) else None,
         display_rating=display_rating,
         display_review_count=display_review_count,
         is_in_wishlist=is_in_wishlist,
@@ -1629,7 +1640,7 @@ def login():
             (func.lower(User.email) == login_id.lower())
         ).first()
 
-        if user and check_password_hash(user.password_hash, password):
+        if user and user.role != 'demo_reviewer' and check_password_hash(user.password_hash, password):
             remember_me = bool(request.form.get('remember'))
             login_user(user, remember=remember_me)
             _merge_session_cart_into_user_cart(user)
@@ -1662,7 +1673,7 @@ def register():
         user=User(username=name,email=email,password_hash=generate_password_hash(password,method='pbkdf2:sha256'),role='user')
         db.session.add(user); db.session.commit(); login_user(user)
         _merge_session_cart_into_user_cart(user)
-        flash('Chào mừng bạn đến với UTE MALL!','success')
+        flash('Chào mừng bạn đến với Shopee!','success')
         return redirect(url_for('shop_page',slug='utech-official'))
     return render_template('login.html',register_mode=True)
 
@@ -1691,7 +1702,7 @@ def forgot_password():
                 # Local delivery adapter: never expose a reset token to the requester.
                 outbox=app.config.get('MAIL_OUTBOX_DIR') or os.path.join(app.instance_path,'mailbox')
                 os.makedirs(outbox,exist_ok=True)
-                message={'to':user.email,'subject':'Đặt lại mật khẩu UTE MALL','reset_url':url_for('reset_password',token=token,_external=True),'expires_in_minutes':30}
+                message={'to':user.email,'subject':'Đặt lại mật khẩu Shopee','reset_url':url_for('reset_password',token=token,_external=True),'expires_in_minutes':30}
                 with open(os.path.join(outbox,uuid.uuid4().hex+'.json'),'w',encoding='utf-8') as file:
                     json.dump(message,file,ensure_ascii=False,indent=2)
             flash('Đã tiếp nhận yêu cầu. Bản demo lưu thư khôi phục vào hộp thư thử nghiệm cục bộ.','success')
@@ -2271,6 +2282,17 @@ with app.app_context():
     ensure_order_schema()
     ensure_user_schema()
 initialize_marketplace(app)
+
+
+@app.before_request
+def prepare_demo_catalog_reviews():
+    # SellerPilot can publish directly to the shared DB while the store stays
+    # running. Backfill only unmarked products before catalog/review rendering.
+    if request.method == 'GET' and request.endpoint in {
+        'index', 'products', 'product_detail', 'shop_page', 'seller.products', 'seller.reviews',
+    }:
+        from demo_reviews import ensure_demo_reviews
+        ensure_demo_reviews()
 
 @app.errorhandler(404)
 def not_found(error):

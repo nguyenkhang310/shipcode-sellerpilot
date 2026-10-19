@@ -23,7 +23,7 @@ UTE MALL / SQLite
   └─ UTech Official: 270 SKU + 1.500 order synthetic
                   │ shop_id scope
                   ▼
-FastAPI seller tools + kho ảnh local → OpenCode/Muse Spark Free (hoặc Ollama/Qwen) → Expo chat
+FastAPI seller tools + kho ảnh local → OpenCode/GLM 5.3 Flash Free (hoặc Ollama/Qwen) → Expo chat
 ```
 
 Model chỉ phân loại/diễn đạt từ facts được cấp. Backend đọc SQL, tính số liệu và thực

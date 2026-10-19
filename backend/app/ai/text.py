@@ -1,0 +1,31 @@
+"""Decode a complete answer envelope without rewriting ordinary seller text."""
+import json
+import re
+
+
+def assistant_text(value: str) -> str:
+    """Some CLI outputs nest serialized ChatAnswer inside its answer field.
+
+    Decode only complete, answer-only objects (including JSON fences/string
+    encoding). Never strip arbitrary object fields or replace literal escapes
+    in plain prose, code examples or seller instructions.
+    """
+    text = value
+    for _ in range(4):
+        candidate = text.strip()
+        fenced = re.fullmatch(r'```(?:json)?\s*([\s\S]*?)\s*```', candidate, re.I)
+        if fenced:
+            candidate = fenced.group(1).strip()
+        if not candidate.startswith(('{', '"')):
+            break
+        try:
+            envelope = json.loads(candidate)
+            if isinstance(envelope, str):
+                envelope = json.loads(envelope)
+        except (ValueError, TypeError):
+            break
+        if (not isinstance(envelope, dict) or set(envelope) != {'answer'}
+                or not isinstance(envelope['answer'], str) or not envelope['answer'].strip()):
+            break
+        text = envelope['answer']
+    return text

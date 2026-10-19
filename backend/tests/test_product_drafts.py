@@ -405,7 +405,7 @@ def test_offline_copy_does_not_silently_create_template_and_claim_ready(tmp_path
 def test_vision_can_identify_item_from_uploaded_image(tmp_path):
     class VisionProvider(CopyProvider):
         provider = 'opencode'
-        model = 'muse-spark-1.3-contributor-free'
+        model = 'glm-5.3-flash-free'
 
         async def compose_listing(self, *, facts, history, images):
             assert len(images) == 1
@@ -511,7 +511,7 @@ def test_cost_clarification_during_draft_is_not_used_as_selling_price(tmp_path):
     class CostAdvisor(OfflineProvider):
         natural_responses = True
         provider = 'opencode'
-        model = 'muse-spark-1.3-contributor-free'
+        model = 'glm-5.3-flash-free'
 
         async def analyze_advice(self, message, *, history, context):
             updates = [] if message != '100k' else [{'field': 'unit_cost_vnd', 'value': 100000, 'evidence': '100k'}]

@@ -1,8 +1,15 @@
 # ShipCode SellerPilot
 
-Trợ lý AI dành cho **chủ shop**, kết hợp ứng dụng quản lý trên iOS và sàn thương mại điện tử UTE MALL. Chủ shop có thể xem số liệu, trao đổi về kinh doanh, tính giá bán và soạn sản phẩm từ ảnh; các thay đổi quan trọng có bước xác nhận.
+Trợ lý AI dành cho **chủ shop**, kết hợp ứng dụng quản lý trên iOS và website mô phỏng Shopee. Chủ shop có thể xem số liệu, trao đổi về kinh doanh, tính giá bán và soạn sản phẩm từ ảnh; các thay đổi quan trọng có bước xác nhận.
 
-SellerPilot kết nối với gian hàng **UTech Official** trong UTE MALL. Đây là hệ thống demo local, chưa tích hợp Shopee, TikTok Shop, thanh toán hoặc vận chuyển thực tế.
+SellerPilot kết nối với gian hàng **UTech Official** trong bản Shopee Demo. Đây là hệ thống local của nhóm, không phải website Shopee chính thức và chưa kết nối API Shopee/TikTok Shop, thanh toán hoặc vận chuyển thực tế. Thư mục source vẫn là `UTE MALL/` để giữ ổn định đường dẫn database và các lệnh chạy đã có.
+
+Đã bổ sung [luồng Chrome Extension](extensions/shopee-connector/README.md) dùng
+chung các thành phần chat/ảnh, có bố cục desktop riêng, chọn mục tiêu bằng nhãn tài
+khoản trên trang Shopee đã đăng nhập và hỗ trợ điền form. Không gửi nguyên văn
+trang hay lấy số liệu local thay cho dữ liệu Shopee. Nhãn được chọn chưa phải
+Shop ID xác thực qua API; bộ đọc số liệu/bảng còn giới hạn theo bố cục trang,
+chưa đạt đủ nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
 
 ## Sản phẩm
 
@@ -10,8 +17,8 @@ SellerPilot kết nối với gian hàng **UTech Official** trong UTE MALL. Đâ
 | --- | --- | --- |
 | SellerPilot | Expo, React Native, TypeScript | Quản lý, sản phẩm, chat AI, đơn hàng và thông tin shop |
 | SellerPilot API | FastAPI, SQLAlchemy, Alembic, SQLite | Đọc dữ liệu shop, kiểm tra tham số, quản lý tác vụ và xác nhận thay đổi |
-| UTE MALL | Flask, Flask-SQLAlchemy, Jinja | Marketplace nhiều ngành hàng, người mua và Kênh Người Bán |
-| AI | OpenCode hoặc Ollama | Hiểu yêu cầu, phân tích dữ liệu và soạn nội dung |
+| Shopee Demo (`UTE MALL/`) | Flask, Flask-SQLAlchemy, Jinja | Marketplace nhiều ngành hàng, người mua và Kênh Người Bán |
+| AI | Gemini API; Groq dự phòng tùy chọn; CLI/Ollama tùy chọn | Hiểu yêu cầu, phân tích dữ liệu và soạn nội dung |
 
 ### Những gì đã hoạt động
 
@@ -19,12 +26,15 @@ SellerPilot kết nối với gian hàng **UTech Official** trong UTE MALL. Đâ
 - Danh mục có ảnh, tìm theo tên/SKU, hàng sắp hết và chi tiết đơn hàng.
 - Chat có lịch sử, vuốt trái để ghim/bỏ ghim hoặc xóa hội thoại, bộ nhớ theo shop/SKU và tư vấn dựa trên dữ liệu backend cung cấp.
 - Tính hòa vốn, lợi nhuận, biên lời, giá mục tiêu và tác động của giảm giá từ chi phí chủ shop cung cấp.
+- Kế hoạch kinh doanh theo số liệu trong kỳ, lịch hành động, kịch bản video có cảnh/thoại/caption và hướng dẫn đo hiệu quả. [Cách dùng và giới hạn](docs/BUSINESS_ADVISOR.md).
 - Đổi giá bằng đề xuất → xác nhận → cập nhật shop → nhật ký.
+- Sửa tiêu đề/mô tả/giá/tồn nhiều trường qua chat, xem trước giá trị cũ/mới và xác nhận. [Hướng dẫn sửa sản phẩm](docs/PRODUCT_EDITS.md).
 - Chọn tối đa 6 ảnh, AI soạn tên/mô tả, hỏi lại thông tin thiếu, duyệt bản nháp rồi đăng lên gian hàng.
 - Gửi ảnh kèm đoạn mô tả tự nhiên trong một lượt: AI nhận tên, giá, tồn và ngành hàng cùng lúc; giữ caption đã viết, phân biệt giá vốn/giá bán, nhận chỉnh sửa nhiều trường và chỉ hỏi phần còn thiếu. Tin nhắn hỗ trợ tối đa 4.000 ký tự.
 - Mã yêu cầu chống xử lý trùng; Dừng hủy tác vụ trên backend; khôi phục kết quả sau mất kết nối.
 - Ngữ cảnh giữ đủ tin nhắn dài trong ngân sách prompt; câu hỏi nối tiếp giữ kỳ thống kê đang bàn. Kế hoạch cho tương lai được tách khỏi số liệu đã ghi nhận.
 - Website mua–bán dùng chung danh mục, giỏ hàng, đơn hàng, voucher, đánh giá và hộp thư.
+- Logo Shopee vector, favicon local và nhận diện đồng bộ trên các trang mua/bán. Mỗi sản phẩm đang bán có 16–32 đánh giá mô phỏng bổ sung theo ngành hàng, phân trang/lọc sao và phản hồi shop. Không tạo đơn hàng hay thay đổi doanh thu/tồn kho khi tạo các bình luận này.
 
 Các kỳ tổng quan đã xem được giữ trong bộ nhớ tối đa 60 giây để chuyển lại nhanh. Sau thời hạn hoặc khi đổi ngày theo giờ Việt Nam, app lấy dữ liệu mới. Kéo làm mới, nút Đồng bộ và thay đổi shop qua AI sẽ xóa cache các kỳ; số liệu của kỳ cũ không được hiển thị dưới kỳ vừa chọn khi đang tải.
 
@@ -38,9 +48,9 @@ Ví dụ, chọn ảnh rồi nhắn: `Mình bán bàn phím Nova K75 màu trắn
 - **Python 3.11**; nên dùng bản từ python.org hoặc Homebrew thay Python hệ thống macOS.
 - Git.
 - iPhone cài Expo Go tương thích Expo SDK 57; hoặc Xcode + iOS Simulator trên macOS. Android và web cũng dùng được để phát triển.
-- OpenCode nếu dùng Muse; hoặc Ollama nếu dùng Qwen. Không cần cài cả hai.
+- Gemini API key cho cấu hình mặc định; CLI/OpenCode/Ollama chỉ cần khi chọn provider tương ứng.
 
-Cài công cụ từ nguồn chính thức: [Node.js](https://nodejs.org/), [Python](https://www.python.org/downloads/), [Expo Go](https://expo.dev/go), [OpenCode](https://opencode.ai/docs/), [Ollama](https://ollama.com/download).
+Cài công cụ từ nguồn chính thức: [Node.js](https://nodejs.org/), [Python](https://www.python.org/downloads/), [Expo Go](https://expo.dev/go), [Antigravity CLI](https://www.antigravity.google/docs/cli/install/), [OpenCode](https://opencode.ai/docs/), [Ollama](https://ollama.com/download).
 
 > Backend API và UTE MALL dùng **hai virtualenv riêng**. Không dùng lẫn vì phiên bản dependency khác nhau. Mỗi lệnh bên dưới ghi rõ thư mục chạy.
 
@@ -118,19 +128,71 @@ Nếu đã có `.env`, giữ cấu hình hiện tại và đối chiếu `.env.e
 
 ### Chọn AI provider
 
-**OpenCode / Muse** — `.env` ở thư mục gốc:
+**Gemini API — cấu hình mặc định**, gọi trực tiếp để bỏ bước khởi động CLI:
+
+```dotenv
+AI_PROVIDER=gemini
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.5-flash-lite
+```
+
+Dán key vào `.env` gốc repo, không phải `.env.example`. Tạo key tại
+[Google AI Studio](https://aistudio.google.com/apikey), rồi chạy `npm run ai:check`.
+File [.env.example](.env.example) đã chia các mục cho nhóm: key Gemini chính,
+hai key bổ sung không bắt buộc, Groq dự phòng và khóa ghép nối extension tự sinh.
+Chỉ cần một key Gemini để bắt đầu; nếu bật Groq, điền `GROQ_API_KEY` và đặt
+`GROQ_FALLBACK_ENABLED=true` trong `.env`. Giữ trống các key không dùng.
+Không đưa key vào frontend hoặc Git. Free Tier có giới hạn theo project; nhiều key
+cùng project không tăng quota. Hỗ trợ tối đa ba key và Groq dự phòng tùy chọn;
+xem [cài đặt Gemini và Groq cho nhóm](docs/GEMINI_API_SETUP.md).
+
+**Antigravity CLI — lựa chọn bổ sung**, dùng tài khoản đã đăng nhập trên máy backend:
+
+```dotenv
+AI_PROVIDER=antigravity
+ANTIGRAVITY_BINARY=agy
+ANTIGRAVITY_MODEL=gemini-3.8-flash-low
+ANTIGRAVITY_GENERATION_TIMEOUT_SECONDS=120
+```
+
+Cài và đăng nhập CLI `agy` theo [hướng dẫn Antigravity](docs/ANTIGRAVITY_SETUP.md).
+Không cần HDD, Ollama hoặc API key cho chế độ tài khoản đã đăng nhập. Provider dùng
+headless CLI chính thức; nhận ảnh bằng công cụ xem ảnh trong workspace tạm riêng,
+kiểm tra từng ảnh đã được đọc rồi mới nhận nội dung. Giữ `Use G1 Credits=off`,
+quyền `request-review`, tắt truy cập ngoài workspace; không bật auto-approve.
+Chạy `npm run ai:check` trước buổi demo. CLI có thêm thời gian khởi động và vẫn
+phụ thuộc quota tài khoản; model có trong danh sách chưa chứng minh lượt sinh sẽ thành công.
+Flash Low là mặc định cho demo. Câu đọc số liệu rõ ràng lấy trực tiếp từ database;
+tư vấn thông thường gộp đọc hiểu và trả lời để giảm số lượt model. Xem
+[kết quả đo tốc độ và giới hạn CLI](docs/ANTIGRAVITY_SETUP.md#tối-ưu-độ-trễ-cho-bản-demo).
+
+**OpenCode / GLM** — `.env` ở thư mục gốc:
 
 ```dotenv
 AI_PROVIDER=opencode
-OPENCODE_MODEL=muse-spark-1.3-contributor-free
+OPENCODE_MODEL=glm-5.3-flash-free
 OPENCODE_GENERATION_TIMEOUT_SECONDS=90
 ```
 
-Kiểm tra `opencode --version` chạy được trên terminal trước khi mở API. Backend tự tạo một OpenCode server riêng trên localhost, dùng session riêng cho mỗi lượt gọi và dọn session khi xong hoặc hủy. Không cần mở giao diện chat OpenCode song song. Muse được gọi qua provider của OpenCode và cần Internet; không chạy offline như Qwen.
+Kiểm tra `opencode --version` chạy được trên terminal trước khi mở API. Backend tự tạo một OpenCode server riêng trên localhost, dùng session riêng cho mỗi lượt gọi và dọn session khi xong hoặc hủy. Không cần mở giao diện chat OpenCode song song. GLM được gọi qua provider của OpenCode và cần Internet; không chạy offline như Qwen.
+
+Backend hiện dùng **API OpenCode 1.x**, đã kiểm chứng CLI **1.18.30**. Thành viên chưa cài có thể dùng `npm install -g opencode-ai@1.18.30`; không cài `@opencode/cli` v2 thay cho runtime này vì API server khác nhau. Nếu dùng nhiều bản, đặt `OPENCODE_BINARY` tới binary 1.x. Máy đã có bản 1.18.30 không cần cài lại.
+
+Sau khi cài môi trường Python và cập nhật `.env`, chạy tại thư mục gốc:
+
+```sh
+npm run ai:check
+```
+
+Lệnh này gọi **GLM thật** bằng dữ liệu/ảnh tự vẽ để kiểm tra bốn agent: hiểu lệnh, hội thoại, trích chi phí và soạn sản phẩm từ ảnh. Không đọc shop hoặc lịch sử thật, không đăng sản phẩm, không sửa giá. Cần Internet; khi xong sẽ tự dọn server OpenCode thử nghiệm. Chi tiết chuyển cấu hình cũ, lỗi 403/429 và giới hạn tại [hướng dẫn GLM cho nhóm](docs/GLM_SETUP.md).
 
 Code chỉ chấp nhận model Free đã cấu hình và kiểm tra metadata chi phí; không tự chuyển sang model tính phí. Model hoặc hạn mức miễn phí có thể không còn sẵn trên bản OpenCode của thành viên. Khi đó chat báo chế độ dự phòng; các truy vấn trực tiếp được hỗ trợ vẫn đọc dữ liệu shop. Đây không phải cam kết dịch vụ miễn phí lâu dài.
 
 Lời gọi OpenCode có tối đa một lần thử lại cho lỗi dịch vụ tạm thời hoặc câu trả lời bị thiếu, trong cùng giới hạn thời gian của lượt gọi. Câu tư vấn tuyên bố thực hiện thay đổi khi chưa có kết quả backend sẽ được yêu cầu viết lại một lần; nếu vẫn sai thì dùng phản hồi dự phòng. Thông báo phân biệt phản hồi không hợp lệ, quá thời gian, giới hạn dịch vụ và mất kết nối. Log chẩn đoán chỉ ghi loại lỗi/bước xử lý, không ghi prompt hoặc nội dung shop.
+
+Đầu ra JSON của agent phân loại, trích chi phí và soạn sản phẩm được kiểm tra schema. Nếu sai định dạng, backend yêu cầu sửa một lần trong cùng deadline; không tự đoán dữ kiện để vá JSON. Mọi giá bán, tồn kho và chi phí vẫn được đối chiếu với lời người bán và bộ tính Decimal.
+
+Tiền Việt được quy đổi thống nhất: `5 xị = 500.000đ`, `hai củ rưỡi = 2.500.000đ`, `1tr2 = 1.200.000đ`. Giá mơ hồ sẽ được hỏi lại và nhớ trường đang chờ cho lượt tiếp theo. Khi tư vấn giá của bản nháp, có thể dùng lại giá vốn mà chính người bán đã cung cấp cho món đó. Xem [hội thoại tiếng Việt](docs/VIETNAMESE_CHAT.md).
 
 **Ollama / Qwen** — lựa chọn local:
 
@@ -144,7 +206,7 @@ OLLAMA_HOST=http://127.0.0.1:11434
 OLLAMA_MODEL=qwen3:4b-instruct
 ```
 
-Ollama phải đang chạy. Model Qwen hiện cấu hình là model văn bản: không thay thế khả năng nhận ảnh của Muse. Lần đầu đọc model từ HDD có thể chậm.
+Ollama phải đang chạy. Model Qwen hiện cấu hình là model văn bản: không thay thế khả năng nhận ảnh của GLM. Lần đầu đọc model từ HDD có thể chậm.
 
 ## 4. Chạy toàn bộ bằng một terminal
 

@@ -6,11 +6,15 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.ai.fallback import parse_fallback
+from app.ai.money import money_mentions
 from app.integrations.ute_mall import ShopDatabaseError, UTEMallRepository
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.advisor import is_forget_request
+from app.services.business_advisor import planning_request
 from app.services.chat import handle_chat
-from app.services.conversations import recent_runs
+from app.services.conversations import recent_runs, history_messages
+from app.services.product_edit_chat import is_product_edit_request, pending_edit, handle_product_edit
+from app.ai.fallback import extract_sku
 from app.services.product_drafts import (
     ProductDraftConflictError, _wants_ai_description,
     advance_product_draft, get_active_draft,
@@ -21,6 +25,14 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
     try:
         conversation_id = str(payload.conversation_id) if payload.conversation_id else None
         active_draft = get_active_draft(session, shop, conversation_id)
+        previous=recent_runs(session,shop,conversation_id,limit=2)
+        continue_edit=bool(pending_edit(previous) and not planning_request(payload.message)
+            and (extract_sku(payload.message.lower()) or re.match(r'\s*(?:tiêu đề|tên sản phẩm|mô tả|giá|tồn)\s*[:=]',payload.message,re.I)
+                 or parse_fallback(payload.message,today=datetime.now(shop.timezone).date()).intent=='unknown'))
+        if (is_product_edit_request(payload.message) or continue_edit) and (
+                active_draft is None or extract_sku(payload.message.lower()) or 'đã đăng' in payload.message.lower()):
+            return ChatResponse(data=await handle_product_edit(session,shop,provider,message=payload.message,
+                conversation_id=conversation_id))
         direct = parse_fallback(payload.message, today=datetime.now(shop.timezone).date())
         asking_shop = direct.intent in {'shop_summary', 'inventory_query', 'product_search'} or (
             direct.intent == 'change_price' and direct.sku is not None) or (
@@ -30,17 +42,24 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
         # Inventory keywords occur in listings too ("kho còn 20 cái"). Do not
         # divert the seller's listing paragraph into a shop inventory query.
         listing_turn = bool(re.search(r'\bđăng\b|\b(?:tạo|thêm)\s+(?:sản phẩm|mặt hàng)|\b(?:tiêu đề|nội dung|caption)\s*[:=]', payload.message, re.I))
-        commercial_detail = bool(re.search(r'\d[\d.,]*\s*(?:k\b|tr\b|triệu\b|nghìn\b|đ\b|₫)|\b(?:giá|tồn kho|kho còn|còn lại)\s*[:=]?\s*\d', payload.message, re.I))
+        commercial_detail = any(item.explicit for item in money_mentions(payload.message)) or bool(re.search(r'\b(?:giá|tồn kho|kho còn|còn lại)\s*[:=]?\s*\d', payload.message, re.I))
         question = bool(re.search(r'\?|bao nhiêu|thế nào|nên bán|nên để|tư vấn|kiểm tra|xem\s+(?:kho|tồn|doanh)', payload.message, re.I))
         editing_draft = editing_draft or listing_turn or (commercial_detail and not question and not (direct.intent == 'change_price' and direct.sku))
         if active_draft is not None and not labeled_edit and not listing_turn and not _wants_ai_description(payload.message):
             last = recent_runs(session, shop, conversation_id, limit=1)
-            if last and last[-1].tool_name == 'calculate_pricing' and direct.intent == 'unknown':
+            explicit_selling_price = bool(re.search(r'giá\s+bán|chốt\s+giá|đặt\s+giá', payload.message, re.I))
+            if last and last[-1].tool_name == 'calculate_pricing' and direct.intent == 'unknown' and not explicit_selling_price:
                 # A bare "100k" after an advisor asks for cost is a cost answer,
                 # not the draft's selling price. Labelled draft edits still resume it.
                 asking_shop = True
                 editing_draft = False
         asking_shop = asking_shop and not editing_draft
+        if active_draft is not None and not labeled_edit:
+            # A video caption or a plan to post content is advice, not a change
+            # to the active product's listing caption/price/title.
+            history = history_messages(recent_runs(session, shop, conversation_id, limit=4))
+            if planning_request(payload.message, history):
+                asking_shop = True
         if active_draft is not None and not asking_shop and not is_forget_request(payload.message):
             return ChatResponse(data=await advance_product_draft(
                 session, shop, provider, active_draft,
@@ -59,7 +78,7 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
             status_code=503,
             detail={
                 "code": "shop_database_unavailable",
-                "message": "Không đọc được database UTE MALL",
+                "message": "Không đọc được database Shopee",
             },
         ) from error
     except ProductDraftConflictError as error:

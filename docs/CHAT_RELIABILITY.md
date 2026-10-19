@@ -78,6 +78,6 @@ npm run build:ios
 ```
 
 Kiểm thử UI dùng shop hoàn toàn giả lập và AI giả lập có độ trễ, không đọc shop
-đang liên kết hoặc gọi Muse. Xem [hướng dẫn frontend](../frontend/tests/README.md).
+đang liên kết hoặc gọi GLM. Xem [hướng dẫn frontend](../frontend/tests/README.md).
 Kết quả browser lưu ở `docs/evaluations/chat-reliability/`.
 Test web không thay thế kiểm tra bàn phím và vòng đời ứng dụng trên iPhone thật.

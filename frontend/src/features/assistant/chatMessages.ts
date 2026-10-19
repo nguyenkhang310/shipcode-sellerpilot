@@ -3,6 +3,33 @@ import { productDraftImageUrl } from '../../api/sellerPilot';
 
 export type Message = { id: string; role: 'user' | 'assistant'; text: string; imageUris?: string[]; response?: ChatData };
 
+/** Decode only a complete answer envelope, including replies saved by older backends. */
+export function assistantText(value: string): string {
+  let text = value;
+  for (let depth = 0; depth < 4; depth += 1) {
+    let candidate = text.trim();
+    const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(candidate);
+    if (fenced?.[1] !== undefined) candidate = fenced[1].trim();
+    if (!candidate.startsWith('{') && !candidate.startsWith('"')) break;
+    let envelope: unknown;
+    try {
+      envelope = JSON.parse(candidate);
+      if (typeof envelope === 'string') envelope = JSON.parse(envelope);
+    } catch { break; }
+    if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)
+        || Object.keys(envelope).length !== 1 || !('answer' in envelope)
+        || typeof envelope.answer !== 'string' || !envelope.answer.trim()) break;
+    text = envelope.answer;
+  }
+  return text;
+}
+
+export function assistantMessage(data: ChatData): Message {
+  const text = assistantText(data.answer);
+  return { id: data.run_id + ':a', role: 'assistant', text,
+    response: text === data.answer ? data : { ...data, answer: text } };
+}
+
 export function latestProductCards(messages: Message[]): Set<string> {
   const cards = new Set<string>(), seen = new Set<number>();
   for (const message of [...messages].reverse()) {
@@ -27,7 +54,7 @@ export function restoreMessages(turns: ConversationDetail['turns']): Message[] {
     if (draft) shown.add(draft.id);
     return [
       { id: turn.response.run_id + ':u', role: 'user', text: turn.message, imageUris },
-      { id: turn.response.run_id + ':a', role: 'assistant', text: turn.response.answer, response: turn.response },
+      assistantMessage(turn.response),
     ];
   });
 }

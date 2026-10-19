@@ -12,6 +12,8 @@ FallbackReason = Literal[
     "model_unavailable",
     "invalid_response",
     "provider_rejected",
+    "provider_rate_limited",
+    "free_tier_restricted",
     "free_model_unavailable",
     "tool_not_allowed",
 ]
@@ -71,7 +73,7 @@ class ProviderHealth(BaseModel):
 
 class ClassificationResult(BaseModel):
     command: ParsedCommand
-    provider: Literal["ollama", "opencode"] = "ollama"
+    provider: Literal["ollama", "opencode", "antigravity", "gemini", "groq"] = "ollama"
     model: str
 
 

@@ -19,9 +19,19 @@ from app.ai.advisor_contracts import AdviceExtraction
 PROMPT_PATH = Path(__file__).with_name("prompts") / "classify.md"
 CLASSIFIER_SYSTEM_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
 RESPONSE_SYSTEM_PROMPT = PROMPT_PATH.with_name("respond.md").read_text(encoding="utf-8")
+RESPONSE_SYSTEM_PROMPT += '\n\n' + PROMPT_PATH.with_name('voice.md').read_text(encoding='utf-8')
+BUSINESS_SYSTEM_PROMPT = PROMPT_PATH.with_name('business.md').read_text(encoding='utf-8')
 LISTING_SYSTEM_PROMPT = PROMPT_PATH.with_name("listing.md").read_text(encoding="utf-8")
 ADVISOR_SYSTEM_PROMPT = PROMPT_PATH.with_name("advisor.md").read_text(encoding="utf-8")
 SKU_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{1,99}")
+
+
+def response_prompt(facts):
+    if facts.get('integration_mode') == 'shopee_browser':
+        return (PROMPT_PATH.with_name('browser.md').read_text(encoding='utf-8')
+                + '\n\n' + PROMPT_PATH.with_name('voice.md').read_text(encoding='utf-8')
+                + '\n\n' + BUSINESS_SYSTEM_PROMPT)
+    return RESPONSE_SYSTEM_PROMPT + ('\n\n' + BUSINESS_SYSTEM_PROMPT if facts.get('business_advisory') else '')
 
 
 class OllamaClient:
@@ -128,7 +138,7 @@ class OllamaClient:
 
     async def respond(self, message: str, *, history: list[dict], facts: dict) -> str:
         """Grounded conversation; this path has no tool or write capabilities."""
-        messages = [{"role": "system", "content": RESPONSE_SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": response_prompt(facts)}]
         messages.extend({"role": row["role"], "content": row["content"][:600]} for row in history[-4:])
         priority = ('pricing_analysis', 'seller_preferences', 'memory_updates_saved', 'selected_product')
         compact = {key: facts[key] for key in priority if key in facts}

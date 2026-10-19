@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Giỏ hàng - UTE MALL{% endblock %}
+{% block title %}Giỏ hàng - Shopee{% endblock %}
 
 {% block extra_styles %}
 <style>
@@ -253,7 +253,7 @@
             <div class="cart-item-info">
                 <div class="cart-item-name">{{ item.product.name }}</div>
                 <div class="cart-item-meta">
-                    {% if item.product.seller_shop %}<a href="{{ url_for('shop_page',slug=item.product.seller_shop.slug) }}">{{ item.product.seller_shop.name }}</a> · {% endif %}{{ item.product.category.name if item.product.category else 'UTE MALL' }}
+                    {% if item.product.seller_shop %}<a href="{{ url_for('shop_page',slug=item.product.seller_shop.slug) }}">{{ item.product.seller_shop.name }}</a> · {% endif %}{{ item.product.category.name if item.product.category else 'Shopee' }}
                     {% if item.variant %} · {{ item.variant.title }} · SKU {{ item.variant.sku }}{% elif item.product.sku %} · SKU {{ item.product.sku }}{% endif %}
                 </div>
                 <div class="cart-item-price">{{ "{:,.0f}".format(item.variant.price if item.variant else item.product.price)|replace(',', '.') }}đ</div>

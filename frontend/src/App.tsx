@@ -4,6 +4,8 @@ import { useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppShell } from './app/AppShell';
 import { ThemeProvider } from './theme/ThemeProvider';
+import { isShopeeExtension } from './integrations/extension';
+import { ExtensionShell } from './integrations/ExtensionShell';
 
 export default function App() {
   const systemScheme = useColorScheme();
@@ -23,8 +25,8 @@ export default function App() {
   };
 
   return (
-    <SafeAreaProvider><ThemeProvider darkMode={darkMode}>
-      <AppShell darkMode={darkMode} onDarkModeChange={changeDarkMode} />
+    <SafeAreaProvider><ThemeProvider darkMode={darkMode} desktop={isShopeeExtension()}>
+      {isShopeeExtension() ? <ExtensionShell /> : <AppShell darkMode={darkMode} onDarkModeChange={changeDarkMode} />}
     </ThemeProvider></SafeAreaProvider>
   );
 }

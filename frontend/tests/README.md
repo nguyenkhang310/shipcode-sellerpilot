@@ -55,3 +55,29 @@ Nếu Playwright không nằm trong dependency cục bộ, đặt `PLAYWRIGHT_MO
 Ảnh và JSON kết quả nằm trong `docs/evaluations/`, được gitignore. Khi xong, dừng hai server QA và chạy lại `npm run build` để bỏ địa chỉ API thử khỏi bundle web.
 
 Các test browser không thay thế kiểm tra safe area, bàn phím, Dynamic Type và vòng đời app trên iPhone thật.
+
+## Kiểm tra lỗi nhảy trang khi đổi kỳ
+
+`dashboard-periods.cjs` và `dashboard-live.cjs` tự chặn API bằng dữ liệu trong
+`management-fixture.cjs`, không cần server 8123 và không dùng database shop.
+Chỉ cần bundle web đang được phục vụ ở 5174. `dashboard-periods` đo vị trí cuộn,
+chiều cao trang, thẻ doanh thu và trạng thái đơn trong lúc tải chậm, lúc lỗi và
+khi hồi phục; kiểm tra thêm cache, phản hồi sai kỳ, dữ liệu rỗng và giao diện tối.
+Ảnh và kết quả của bài này mặc định nằm ở `docs/evaluations/dashboard-periods/`
+(đổi bằng `QA_OUTPUT`).
+
+`dashboard-state.cjs` kiểm tra hook React với API giả: chỉ cử chỉ kéo mới bật
+`refreshing`, chuyển kỳ hủy lượt cũ, phản hồi muộn không ghi đè và polling không
+thay snapshot khi số liệu giữ nguyên. Có thể cài bộ chạy riêng ngoài repo:
+
+```sh
+npm install --prefix /tmp/sellerpilot-qa --no-save react@19.2.3 react-test-renderer@19.2.3
+QA_NODE_MODULES=/tmp/sellerpilot-qa/node_modules node --test frontend/tests/dashboard-state.cjs
+```
+
+React phát cảnh báo `react-test-renderer is deprecated`; bộ chạy này chỉ phục vụ
+QA, không phải dependency của app. Hook test không mô phỏng hiệu ứng cuộn native.
+
+`app-audit`, `chat-scroll` và `chat-motion` chuyển các yêu cầu API/ảnh qua
+`qa-server.cjs` tới server giả lập 8123, kể cả khi bundle đang chứa địa chỉ API
+phát triển. Vì vậy ba bài này không cần xuất lại bundle với địa chỉ 8123.

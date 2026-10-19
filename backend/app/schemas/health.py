@@ -7,7 +7,7 @@ class HealthData(BaseModel):
     status: Literal["ok", "degraded"]
     database: Literal["ok", "unavailable"]
     shop_database: Literal["ok", "unavailable"]
-    provider: Literal["ollama", "opencode"]
+    provider: Literal["ollama", "opencode", "antigravity", "gemini"]
     ai_availability: Literal["available", "unavailable"]
     ollama: Literal["available", "unavailable"]
     model: str

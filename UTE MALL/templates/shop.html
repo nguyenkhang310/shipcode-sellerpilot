@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
-{% block title %}{{ seller.name }} | UTE MALL{% endblock %}
-{% block meta_description %}Gian hàng {{ seller.name }} trên UTE MALL. {{ seller.description }}{% endblock %}
+{% block title %}{{ seller.name }} | Shopee{% endblock %}
+{% block meta_description %}Gian hàng {{ seller.name }} trên Shopee. {{ seller.description }}{% endblock %}
 {% block content %}
 <main class="mall-page">
     <div class="market-shell">
@@ -8,7 +8,7 @@
             <div class="shop-hero-inner">
                 <div class="shop-identity">
                     <div class="shop-avatar">{% if seller.logo_url %}<img src="{{ seller.logo_url }}" alt="{{ seller.name }}">{% else %}<span class="material-symbols-outlined">devices</span>{% endif %}</div>
-                    <div class="shop-title"><h1>{{ seller.name }}</h1><p>{{ seller.description or 'Gian hàng chính hãng trên UTE MALL' }}</p>{% if seller.is_verified %}<span class="shop-verified"><span class="material-symbols-outlined" style="font-size:14px">verified</span> UTE MALL CHÍNH HÃNG</span>{% endif %}</div>
+                    <div class="shop-title"><h1>{{ seller.name }}</h1><p>{{ seller.description or 'Gian hàng chính hãng trên Shopee' }}</p>{% if seller.is_verified %}<span class="shop-verified"><span class="material-symbols-outlined" style="font-size:14px">verified</span> Shopee CHÍNH HÃNG</span>{% endif %}</div>
                 </div>
                 <div class="shop-actions"><form method="post" action="{{ url_for('seller.follow',slug=seller.slug) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="{{ 'unfollow' if following else 'follow' }}"><button>{{ '✓ Đang theo dõi' if following else '+ Theo dõi' }}</button></form><a href="{{ url_for('seller.messages',shop=seller.slug) }}">Chat ngay</a>{% if owned_shop and owned_shop.id==seller.id %}<a href="{{ url_for('seller.dashboard') }}">Quản lý Shop</a>{% endif %}</div>
                 <div class="shop-stats">

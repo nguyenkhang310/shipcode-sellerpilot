@@ -1,7 +1,10 @@
 import { apiRequest, API_URL } from './client';
-import { ChatData, PriceProposal, ProductDraft, ManagementData, StorePage, StoreProduct, StoreOrder, ConversationSummary, ConversationDetail } from './types';
-
+import { ChatData, PriceProposal, ProductDraft, ProductEditProposal, ManagementData, StorePage, StoreProduct, StoreOrder, ConversationSummary, ConversationDetail } from './types';
 import { createMessageId, recoverChatRequest } from './chatRequests';
+
+export function decideProductEdit(id: number, decision: 'confirm' | 'reject') {
+  return apiRequest<ProductEditProposal>(`/product-edits/${id}/${decision}`, { method: 'POST' });
+}
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
@@ -74,4 +77,4 @@ export function decideProductDraft(
   });
 }
 
-export const productDraftImageUrl = (path: string) => path.startsWith('http') ? path : API_URL + path;
+export const productDraftImageUrl = (path: string) => path.startsWith('http') || path.startsWith('data:image/') ? path : API_URL + path;

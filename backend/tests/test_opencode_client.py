@@ -119,11 +119,129 @@ def test_opencode_config_disables_sharing_and_paid_fallback():
     assert config["snapshot"] is False
     assert set(config["agent"]) == {"sellerpilot-classifier", "sellerpilot-chat", "sellerpilot-listing", "sellerpilot-advisor"}
     assert 'JSON' in config['agent']['sellerpilot-listing']['prompt']
+    assert all(agent['steps'] > 1 and agent['permission'] == 'ask' for agent in config['agent'].values())
 
 
 def test_only_verified_free_model_can_be_constructed():
     with pytest.raises(ValueError):
         OpenCodeClient(None, "muse-spark-1.3")
+
+
+@pytest.mark.parametrize('model', ['glm-5.3-flash', 'muse-spark-1.3-contributor-free', 'opencode/glm-5.3-flash-free'])
+def test_glm_configuration_rejects_paid_legacy_and_prefixed_ids(model):
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, opencode_model=model)
+    with pytest.raises(ValueError):
+        OpenCodeClient(None, model)
+
+
+@pytest.mark.parametrize('field,value', [
+    ('input', False), ('output', None), ('read', None), ('write', 0.01), ('input', '0'),
+])
+def test_free_check_requires_explicit_numeric_zero_for_every_price(field, value):
+    payload = free_provider_payload()
+    cost = payload['all'][0]['models'][FREE_MODEL]['cost']
+    target = cost['cache'] if field in ('read', 'write') else cost
+    if value is None:
+        target.pop(field)
+    else:
+        target[field] = value
+
+    async def run():
+        async with httpx.AsyncClient(base_url='http://opencode.test',
+                transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload))) as http:
+            with pytest.raises(AIProviderError, match='free_model_unavailable'):
+                await OpenCodeClient(http)._free_model()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('status,message,reason', [
+    (403, "OpenCode's free tier can only be used from within OpenCode.", 'free_tier_restricted'),
+    (429, 'rate limit', 'provider_rate_limited'),
+    (401, 'unauthorized', 'provider_rejected'),
+    (403, 'forbidden', 'provider_rejected'),
+])
+@pytest.mark.parametrize('envelope', [True, False])
+def test_provider_access_errors_are_specific_and_never_retried(status, message, reason, envelope):
+    sessions = []
+    def respond(request):
+        if request.url.path == '/provider':
+            return httpx.Response(200, json=free_provider_payload())
+        if request.url.path == '/session':
+            sessions.append('ses_access')
+            return httpx.Response(200, json={'id': 'ses_access'})
+        if request.url.path.endswith('/message'):
+            if not envelope:
+                return httpx.Response(status, json={'message': message})
+            payload = completed_payload('')
+            payload['info']['error'] = {'data': {'statusCode': status, 'message': message}}
+            return httpx.Response(200, json=payload)
+        return httpx.Response(200, json=True)
+    async def run():
+        async with httpx.AsyncClient(base_url='http://opencode.test', transport=httpx.MockTransport(respond)) as http:
+            with pytest.raises(AIProviderError) as caught:
+                await OpenCodeClient(http).respond('Synthetic', history=[], facts={})
+            assert caught.value.reason == reason
+    asyncio.run(run())
+    assert len(sessions) == 1
+
+
+@pytest.mark.parametrize('envelope', [True, False])
+def test_free_access_denial_degrades_health_and_throttles_until_real_recovery(monkeypatch, envelope):
+    from app.ai import opencode
+
+    clock = [1000.0]
+    monkeypatch.setattr(opencode, 'monotonic', lambda: clock[0])
+    requests = []
+    denied = [True]
+
+    def respond(request):
+        requests.append(request)
+        if request.url.path == '/global/health':
+            return httpx.Response(200, json={'healthy': True})
+        if request.url.path == '/provider':
+            return httpx.Response(200, json=free_provider_payload())
+        if request.url.path == '/session':
+            return httpx.Response(200, json={'id': 'ses_access'})
+        if request.url.path.endswith('/message'):
+            if denied[0]:
+                message = "OpenCode's free tier can only be used from within OpenCode."
+                if not envelope:
+                    return httpx.Response(403, json={'message': message})
+                payload = completed_payload('')
+                payload['info']['error'] = {'data': {'statusCode': 403, 'message': message}}
+                return httpx.Response(200, json=payload)
+            return httpx.Response(200, json=completed_payload('Đã kết nối.'))
+        return httpx.Response(200, json=True)
+
+    async def run():
+        async with httpx.AsyncClient(base_url='http://opencode.test', transport=httpx.MockTransport(respond)) as http:
+            provider = OpenCodeClient(http)
+            assert (await provider.check_health()).model_available is True
+            with pytest.raises(AIProviderError, match='free_tier_restricted'):
+                await provider.respond('Synthetic', history=[], facts={})
+            health = await provider.check_health()
+            assert health.availability == 'available' and health.model_available is False
+            count = len(requests)
+            for call in (
+                lambda: provider.respond('Synthetic', history=[], facts={}),
+                lambda: provider.compose_listing(facts={}, history=[], images=[]),
+            ):
+                with pytest.raises(AIProviderError) as caught:
+                    await call()
+                assert caught.value.reason == 'free_tier_restricted'
+                assert caught.value.stage == 'access_cooldown'
+            assert len(requests) == count
+            clock[0] += opencode.ACCESS_RECHECK_SECONDS + 1
+            # Time passing and metadata do not themselves restore inference.
+            assert (await provider.check_health()).model_available is False
+            denied[0] = False
+            assert await provider.respond('Synthetic', history=[], facts={}) == 'Đã kết nối.'
+            assert (await provider.check_health()).model_available is True
+
+    asyncio.run(run())
+    assert sum(request.url.path == '/session' for request in requests) == 2
+    assert sum(request.method == 'DELETE' for request in requests) == 2
 
 
 def test_missing_opencode_binary_keeps_backend_provider_available_for_fallback():
@@ -286,4 +404,91 @@ def test_retry_is_bounded_by_one_total_deadline_and_cancellation_cleans_session(
                 await OpenCodeClient(http, timeout=.1).respond('Chào', history=[], facts={})
             assert caught.value.reason == 'provider_timeout'
         assert attempts == cleaned == ['ses_timeout']
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('agent', ['classifier', 'advisor', 'listing'])
+def test_structured_json_gets_one_schema_correction_and_sessions_are_cleaned(agent):
+    sessions, bodies, cleaned = [], [], []
+    valid = {'classifier': {'intent': 'inventory_query', 'sku': 'A001', 'new_price_vnd': None,
+        'inventory_scope': 'single_sku', 'day': None, 'low_stock_threshold': None},
+        'advisor': {'topic': 'pricing', 'economics': [], 'preferences': []},
+        'listing': {'name': 'Bàn phím giả lập', 'stock': 8}}
+    def respond(request):
+        if request.url.path == '/provider':
+            return httpx.Response(200, json=free_provider_payload())
+        if request.url.path == '/session':
+            sessions.append('ses_schema_' + str(len(sessions)))
+            return httpx.Response(200, json={'id': sessions[-1]})
+        if request.url.path.endswith('/message'):
+            bodies.append(json.loads(request.content))
+            answer = '{invalid JSON' if len(sessions) == 1 else '```json\n' + json.dumps(valid[agent]) + '\n```'
+            return httpx.Response(200, json=completed_payload(answer))
+        if request.method == 'DELETE':
+            cleaned.append(request.url.path.rsplit('/', 1)[-1])
+        return httpx.Response(200, json=True)
+    async def run():
+        async with httpx.AsyncClient(base_url='http://opencode.test', transport=httpx.MockTransport(respond)) as http:
+            ai = OpenCodeClient(http)
+            if agent == 'classifier':
+                result = await ai.classify('SKU A001 còn bao nhiêu?', today=date(2026, 10, 18))
+                assert result.command.sku == 'A001'
+            elif agent == 'advisor':
+                assert json.loads(await ai.analyze_advice('Synthetic', history=[], context={}))['topic'] == 'pricing'
+            else:
+                assert json.loads(await ai.compose_listing(facts={}, history=[], images=[]))['stock'] == 8
+    asyncio.run(run())
+    assert len(sessions) == 2 and cleaned == sessions
+    assert 'FORMAT_CORRECTION' in bodies[1]['parts'][0]['text']
+    assert '{invalid JSON' not in bodies[1]['parts'][0]['text']
+
+
+def test_repeated_schema_failure_is_bounded_and_rejects_unverified_json():
+    sessions = []
+    def respond(request):
+        if request.url.path == '/provider':
+            return httpx.Response(200, json=free_provider_payload())
+        if request.url.path == '/session':
+            sessions.append('ses_bad_schema_' + str(len(sessions)))
+            return httpx.Response(200, json={'id': sessions[-1]})
+        if request.url.path.endswith('/message'):
+            return httpx.Response(200, json=completed_payload('{"topic":"pricing","economics":{"unit_cost_vnd":100}}'))
+        return httpx.Response(200, json=True)
+    async def run():
+        async with httpx.AsyncClient(base_url='http://opencode.test', transport=httpx.MockTransport(respond)) as http:
+            with pytest.raises(AIProviderError) as caught:
+                await OpenCodeClient(http).analyze_advice('Synthetic', history=[], context={})
+            assert caught.value.reason == 'invalid_response' and caught.value.stage == 'structured_output'
+    asyncio.run(run())
+    assert len(sessions) == 2
+
+
+def test_invalid_sku_contract_is_provider_error_instead_of_server_error():
+    command = {'intent': 'inventory_query', 'sku': 'invalid sku', 'new_price_vnd': None,
+               'inventory_scope': 'single_sku', 'day': None, 'low_stock_threshold': None}
+    async def run():
+        provider = OpenCodeClient(None)
+        async def ask(*args, **kwargs):
+            return json.dumps(command)
+        provider._ask = ask
+        with pytest.raises(AIProviderError) as caught:
+            await provider.classify('Synthetic', today=date(2026, 10, 18))
+        assert caught.value.stage == 'command_parameters'
+    asyncio.run(run())
+
+
+def test_schema_correction_shares_one_total_deadline():
+    async def run():
+        ai = OpenCodeClient(None, timeout=.05)
+        attempts = []
+        async def ask(*args, **kwargs):
+            attempts.append(True)
+            if len(attempts) == 1:
+                return 'not JSON'
+            await asyncio.Event().wait()
+        ai._ask = ask
+        with pytest.raises(AIProviderError) as caught:
+            await ai.analyze_advice('Synthetic', history=[], context={})
+        assert caught.value.reason == 'provider_timeout' and caught.value.stage == 'structured_deadline'
+        assert len(attempts) == 2
     asyncio.run(run())

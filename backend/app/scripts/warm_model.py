@@ -13,8 +13,17 @@ from app.core.config import Settings
 
 async def warm_model() -> int:
     settings = Settings()
+    if settings.ai_provider == 'gemini':
+        print(f'API sẽ dùng Gemini trực tiếp: {settings.gemini_model}; không chạy CLI/Ollama.', flush=True)
+        if not any(key.get_secret_value().strip() for key in
+                   (settings.gemini_api_key, settings.gemini_api_key_2, settings.gemini_api_key_3)):
+            print('Chưa có GEMINI_API_KEY trong root .env. Xem docs/GEMINI_API_SETUP.md.', flush=True)
+        return 0
+    if settings.ai_provider == "antigravity":
+        print(f"API sẽ dùng Antigravity CLI với {settings.antigravity_model}; không cần HDD/Ollama.", flush=True)
+        return 0
     if settings.ai_provider == "opencode":
-        print("API sẽ khởi động OpenCode với Muse Spark Free; không cần nạp Qwen.", flush=True)
+        print(f"API sẽ khởi động OpenCode với {settings.opencode_model}; không cần nạp Qwen.", flush=True)
         return 0
     print(
         f"Đang nạp nóng {settings.ollama_model}; lần đầu từ HDD có thể mất gần 2 phút...",

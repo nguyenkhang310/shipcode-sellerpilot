@@ -1,6 +1,6 @@
 # Trợ lý kinh doanh cá nhân hóa
 
-SellerPilot tiếp tục dùng Muse Spark miễn phí qua OpenCode. Phần trả lời được mở rộng
+SellerPilot tiếp tục dùng GLM 5.3 Flash miễn phí qua OpenCode. Phần trả lời được mở rộng
 với ngữ cảnh shop, bộ nhớ có nguồn và bộ tính giá riêng trong backend.
 
 ## Hội thoại
@@ -44,8 +44,8 @@ Chi phí chưa cung cấp được liệt kê, không được coi là phí sàn
 ## Kiểm chứng
 
 - Toàn bộ test backend: `.venv/bin/pytest -o addopts='' -q` từ `backend/`.
-- Test Muse thật: `.venv/bin/python -m app.scripts.evaluate_advisor`.
-- Script Muse chỉ tạo shop giả lập trong thư mục tạm, không đọc/copy database shop thật.
+- Test GLM thật: `.venv/bin/python -m app.scripts.evaluate_advisor`.
+- Script GLM chỉ tạo shop giả lập trong thư mục tạm, không đọc/copy database shop thật.
 - Báo cáo: [ADVISOR_LIVE_EVALUATION.json](ADVISOR_LIVE_EVALUATION.json).
 - Đã xác minh: nhớ khách sinh viên/cách trả lời sang chat mới; vốn 100k + đóng gói 5k +
   phí 10%, bán 150k lời 30k, giảm 10% còn lời 16,5k; gợi ý chiến lược bám dữ liệu và mục tiêu.

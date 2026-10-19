@@ -39,7 +39,7 @@ def ensure_local_configuration(root: Path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Khởi tạo UTE MALL trên database trống; không ghi đè shop đang dùng.')
+    parser = argparse.ArgumentParser(description='Khởi tạo Shopee trên database trống; không ghi đè shop đang dùng.')
     parser.add_argument('--check', action='store_true', help='Chỉ kiểm tra database đã khởi tạo')
     args = parser.parse_args()
     load_dotenv(ROOT / '.env', override=False)
@@ -92,7 +92,7 @@ def main():
         db.session.expire_all()
     seed_operations()
     initialize_marketplace(app)
-    print('Đã tạo UTE MALL: 24 shop, catalog đa ngành và dữ liệu vận hành mô phỏng.')
+    print('Đã tạo Shopee: 24 shop, catalog đa ngành và dữ liệu vận hành mô phỏng.')
     print('Chủ shop: utech. Dùng mật khẩu vừa đặt. Không có mật khẩu mặc định trong source.')
 
 

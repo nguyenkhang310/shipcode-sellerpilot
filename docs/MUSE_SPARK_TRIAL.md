@@ -1,5 +1,7 @@
 # Thử Muse Spark trong OpenCode — 15/10/2026
 
+> Bản ghi lịch sử. Từ 18/10/2026, SellerPilot chuyển sang GLM Free; xem [cài đặt hiện tại](GLM_SETUP.md). Các số liệu bên dưới thuộc lần thử Muse, không phải GLM.
+
 Muse Spark đã trả lời thành công trên máy này qua OpenCode 1.18.30, model
 `opencode/muse-spark-1.3-contributor-free`.
 
@@ -78,12 +80,12 @@ Từ thư mục dự án:
 
 ```bash
 cd backend
-.venv/bin/python -m app.scripts.evaluate_muse_opencode
+.venv/bin/python -m app.scripts.evaluate_opencode
 ```
 
 Script tạo thư mục làm việc tạm, gọi CLI OpenCode chính thức, dùng dữ liệu demo,
 giới hạn 90 giây cho mỗi lượt và dừng khi gặp lỗi kết nối hoặc gọi công cụ.
-Kết quả chạy lại được ghi vào `docs/evaluations/muse-spark-opencode-latest.json`.
+Script hiện đã chuyển sang GLM; kết quả mới ghi vào `docs/evaluations/glm-opencode-latest.json`, không ghi đè bản thử Muse.
 `OK` trong terminal chỉ nghĩa là nhận phản hồi mà không có lỗi/công cụ; chất lượng
 hội thoại cần đọc lại. Các bài phân loại có kiểm tra JSON và trường kỳ vọng riêng.
 

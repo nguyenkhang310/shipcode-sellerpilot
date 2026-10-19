@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
-{% block title %}UTE MALL — Mua sắm online đa ngành{% endblock %}
-{% block meta_description %}UTE MALL là sàn thương mại điện tử demo đa ngành với gian hàng công nghệ được vận hành bởi SellerPilot AI.{% endblock %}
+{% block title %}Shopee — Mua sắm online đa ngành{% endblock %}
+{% block meta_description %}Shopee là sàn thương mại điện tử đa ngành với gian hàng công nghệ được vận hành bởi SellerPilot AI.{% endblock %}
 {% block content %}
 <main class="mall-home">
     <div class="market-shell">
@@ -28,8 +28,8 @@
             </div>
         </section>
 
-        <nav class="mall-shortcuts mall-panel" aria-label="Tiện ích UTE MALL">
-            {% set shortcuts = [('verified','UTE MALL Chính Hãng','products'),('bolt','Khung Giờ Săn Sale','products'),('local_shipping','Mã Freeship','seller.vouchers'),('redeem','Kho Voucher','seller.vouchers'),('devices','UTech Official','shop_page'),('favorite','Shop Yêu Thích','seller.following'),('storefront','Kênh Người Bán','seller.dashboard'),('receipt_long','Tra Cứu Đơn','order_lookup')] %}
+        <nav class="mall-shortcuts mall-panel" aria-label="Tiện ích Shopee">
+            {% set shortcuts = [('verified','Shopee Mall','products'),('bolt','Khung Giờ Săn Sale','products'),('local_shipping','Mã Freeship','seller.vouchers'),('redeem','Kho Voucher','seller.vouchers'),('devices','UTech Official','shop_page'),('favorite','Shop Yêu Thích','seller.following'),('storefront','Kênh Người Bán','seller.dashboard'),('receipt_long','Tra Cứu Đơn','order_lookup')] %}
             {% for icon,label,endpoint in shortcuts %}
             <a class="mall-shortcut" href="{% if endpoint == 'shop_page' %}{{ url_for(endpoint, slug='utech-official') }}{% elif endpoint == 'products' %}{{ url_for(endpoint,sale='true') }}{% else %}{{ url_for(endpoint) }}{% endif %}"><span class="mall-shortcut-icon"><span class="material-symbols-outlined">{{ icon }}</span></span>{{ label }}</a>
             {% endfor %}

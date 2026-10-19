@@ -36,7 +36,7 @@ class User(db.Model, UserMixin):
 
 
 class Shop(db.Model):
-    """A seller storefront inside the UTE MALL marketplace."""
+    """A seller storefront inside the local Shopee simulation."""
 
     id = db.Column(db.Integer, primary_key=True)
     slug = db.Column(db.String(120), unique=True, nullable=False, index=True)
@@ -236,6 +236,13 @@ class Review(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     seller_reply = db.Column(db.Text, nullable=True)
     replied_at = db.Column(db.DateTime, nullable=True)
+    is_demo = db.Column(db.Boolean, nullable=False, default=False, server_default='0', index=True)
+
+
+class DemoReviewSeed(db.Model):
+    """One seed receipt per product; deleted demo comments stay deleted."""
+    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), primary_key=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 class ShopMember(db.Model):

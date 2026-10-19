@@ -8,12 +8,15 @@ from pydantic import ValidationError
 from sqlalchemy import delete, select, func
 from sqlalchemy.dialects.sqlite import insert
 
-from app.ai.advisor_contracts import AdviceExtraction
+from app.ai.advisor_contracts import AdviceExtraction, AdvicePreparation
 from app.ai.contracts import AIProviderError
-from app.ai.fallback import PRICE_RE, extract_sku, normalize_text, parse_money
+from app.ai.fallback import extract_sku, normalize_text
+from app.ai.money import money_mentions, single_money, affirmed_quote
+from app.ai.money import plain
 from app.integrations import management
 from app.integrations.ute_mall import ShopItemNotFoundError
 from app.models.assistant_memory import AssistantMemory
+from app.models.product_draft import ProductDraft
 
 MONEY_FIELDS = {'unit_cost_vnd', 'packaging_vnd', 'shipping_subsidy_vnd', 'ads_per_order_vnd',
                 'other_cost_vnd', 'target_profit_vnd', 'selling_price_vnd'}
@@ -116,7 +119,7 @@ def _valid_evidence(evidence, message):
 
 
 def _grounded_number(update, message):
-    if not _valid_evidence(update.evidence, message):
+    if not _valid_evidence(update.evidence, message) or not affirmed_quote(update.evidence, message):
         return False
     value = update.value
     if update.field in {'fee_percent', 'target_margin_percent', 'target_markup_percent', 'discount_percent'}:
@@ -126,8 +129,39 @@ def _grounded_number(update, message):
     if update.field == 'units_per_order':
         return (value == value.to_integral_value() and 1 <= value <= 10_000
                 and str(int(value)) in re.findall(r'\b\d+\b', update.evidence))
-    values = [parse_money(raw, unit) for raw, unit in PRICE_RE.findall(normalize_text(update.evidence))]
-    return value == value.to_integral_value() and int(value) in values
+    return value == value.to_integral_value() and int(value) == single_money(update.evidence)
+
+
+def _historical_cost_quote(update, message):
+    expected = {
+        'unit_cost_vnd': {'gia von', 'gia nhap'}, 'packaging_vnd': {'dong goi'},
+        'shipping_subsidy_vnd': {'ho tro ship', 'ho tro van chuyen'},
+        'ads_per_order_vnd': {'quang cao'}, 'other_cost_vnd': {'chi phi khac'},
+        'fee_percent': {'phi san', 'tong phi', 'phi nen tang', 'phi'},
+    }.get(update.field, set())
+    source, quote = plain(normalize_text(message)), plain(normalize_text(update.evidence))
+    for match in re.finditer(re.escape(quote), source):
+        roles = re.findall(r'\b(?:gia von|gia nhap|dong goi|ho tro ship|ho tro van chuyen|quang cao|chi phi khac|phi san|tong phi|phi nen tang|phi|gia ban|ban)\b',
+                           source[max(0, match.start() - 60):match.end()])
+        if roles and roles[-1] in expected:
+            return True
+    return False
+
+
+def _explicit_unit_cost(message):
+    """Read a labelled seller cost without depending on model recall/scaling."""
+    for match in re.finditer(r'\b(?:(?:giá|gia)\s+(?:vốn|von|nhập|nhap)|vốn|von)\s*(?:là\s+|la\s+|[:=]\s*)?', message, re.I):
+        prefix = plain(message[max(0, match.start() - 30):match.start()])
+        if re.search(r'\b(?:khong phai|chua chot|dung lay|neu|gia su)\s*$', prefix):
+            continue
+        tail = message[match.end():].lstrip()
+        mentions = money_mentions(tail)
+        if mentions and mentions[0].start == 0 and mentions[0].value is not None and 0 <= mentions[0].value <= 1_000_000_000:
+            quote_end = match.end() + len(message[match.end():]) - len(tail) + mentions[0].end
+            from app.ai.advisor_contracts import EconomicsUpdate
+            return EconomicsUpdate(field='unit_cost_vnd', value=mentions[0].value,
+                                   evidence=message[match.start():quote_end])
+    return None
 
 
 def _valid_preference(update, message):
@@ -247,19 +281,37 @@ def pricing_reply(pricing):
     return answer
 
 
-async def enrich_advice(session, shop, provider, *, message, resolved, conversation_id, runs, history):
+async def enrich_advice(session, shop, provider, *, message, resolved, conversation_id, runs, history, facts=None):
     previous = next((json.loads(run.facts_json).get('pricing_context') for run in reversed(runs)
                      if json.loads(run.facts_json).get('pricing_context')), {}) or {}
     preferences = read_memory(session, shop, 'shop')
+    draft = session.scalar(select(ProductDraft).where(
+        ProductDraft.shop_slug == (shop.seller_shop_slug or 'local'),
+        ProductDraft.conversation_id == conversation_id,
+        ProductDraft.status.in_(['collecting', 'ready']),
+    ).order_by(ProductDraft.id.desc()).limit(1))
+    draft_context = ({'name': draft.name, 'description': draft.description,
+                      'category': draft.category_name, 'selling_price_vnd': draft.price_vnd,
+                      'stock': draft.stock, 'published': False} if draft else None)
+    draft_seller_messages = [run.message for run in runs if draft and run.product_draft_id == draft.id][-6:]
     extraction = AdviceExtraction()
     analysis_error = None
-    if callable(getattr(provider, 'analyze_advice', None)):
+    prepared_answer = None
+    if callable(getattr(provider, 'analyze_advice', None)) or callable(getattr(provider, 'prepare_advice', None)):
         try:
-            raw = await provider.analyze_advice(message, history=history, context={
+            context = {
                 'seller_preferences': preferences, 'previous_pricing': previous,
-                'previous_cost_inputs': read_memory(session, shop, previous['scope']) if previous.get('scope') else {}})
-            raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip(), flags=re.I)
-            extraction = AdviceExtraction.model_validate_json(raw)
+                'draft_context': draft_context,
+                'draft_seller_messages': draft_seller_messages,
+                'previous_cost_inputs': read_memory(session, shop, previous['scope']) if previous.get('scope') else {}}
+            if callable(getattr(provider, 'prepare_advice', None)):
+                prepared = await provider.prepare_advice(message, history=history, context=context, facts=facts or {})
+                prepared = AdvicePreparation.model_validate(prepared)
+                extraction, prepared_answer = prepared.extraction, prepared.answer
+            else:
+                raw = await provider.analyze_advice(message, history=history, context=context)
+                raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip(), flags=re.I)
+                extraction = AdviceExtraction.model_validate_json(raw)
         except (AIProviderError, ValidationError, ValueError, TypeError, AttributeError) as error:
             analysis_error = getattr(error, 'reason', 'invalid_response')
 
@@ -290,7 +342,35 @@ async def enrich_advice(session, shop, provider, *, message, resolved, conversat
             _save(session, shop, 'shop', update.field, update.value, update.evidence)
             preferences[update.field] = update.value
             saved.append(update.field)
-    valid_updates = [update for update in extraction.economics if _grounded_number(update, message)]
+    normalized_updates = []
+    source_messages = []
+    for update in extraction.economics:
+        source = message
+        # Reuse costs the seller already gave while drafting this same item.
+        # Never recover a price from AI text, another draft or a different SKU.
+        if (draft and selected is None and not extraction.new_scenario
+                and update.field in COST_LABELS and update.field not in economics
+                and not _valid_evidence(update.evidence, message)):
+            source = next((text for text in reversed(draft_seller_messages)
+                           if _valid_evidence(update.evidence, text) and _historical_cost_quote(update, text)), message)
+        # Unit slang is decoded by the same grammar as listing/price changes.
+        # Only a single exact quote from the seller may correct model scaling.
+        mentions = money_mentions(update.evidence)
+        if (update.field in MONEY_FIELDS and _valid_evidence(update.evidence, source)
+                and len(mentions) == 1 and mentions[0].colloquial
+                and single_money(update.evidence) is not None):
+            update = update.model_copy(update={'value': Decimal(single_money(update.evidence))})
+        normalized_updates.append(update)
+        source_messages.append(source)
+    valid_updates = [update for update, source in zip(normalized_updates, source_messages) if _grounded_number(update, source)]
+    labelled_cost = _explicit_unit_cost(message)
+    if (labelled_cost is None and draft and selected is None and not extraction.new_scenario
+            and 'unit_cost_vnd' not in economics and not any(item.field == 'unit_cost_vnd' for item in valid_updates)):
+        labelled_cost = next((cost for source in reversed(draft_seller_messages)
+                              if (cost := _explicit_unit_cost(source)) is not None), None)
+    if labelled_cost is not None:
+        # Current labelled costs win; historical costs fill only an empty slot.
+        valid_updates = [item for item in valid_updates if item.field != 'unit_cost_vnd'] + [labelled_cost]
     if any(update.field == 'selling_price_vnd' for update in valid_updates):
         _delete_memory(session, shop, scopes=[scenario_scope], keys=['discount_percent'])
         economics.pop('discount_percent', None)
@@ -306,12 +386,21 @@ async def enrich_advice(session, shop, provider, *, message, resolved, conversat
         economics[update.field] = value
 
     pricing = None
-    if extraction.topic == 'pricing' or extraction.economics:
+    if extraction.topic == 'pricing' or extraction.economics or labelled_cost is not None:
         values = dict(economics)
         if selected and selected.get('found') is not False and 'selling_price_vnd' not in values:
             values['selling_price_vnd'] = selected['price_vnd']
+        elif draft and selected is None and draft.price_vnd is not None and 'selling_price_vnd' not in values:
+            values['selling_price_vnd'] = draft.price_vnd
         pricing = calculate_pricing(values)
-    return {'seller_preferences': preferences, 'memory_updates_saved': saved,
+    # The speculative wording cannot precede newly calculated prices, resolved
+    # product searches or persistence checks. Keep those on the existing path.
+    if (analysis_error or pricing or extraction.economics or extraction.preferences
+            or extraction.product_query or selected is not None or extraction.new_scenario):
+        prepared_answer = None
+    return {'_prepared_answer': prepared_answer,
+            'seller_preferences': preferences, 'memory_updates_saved': saved,
+            'draft_context': draft_context,
             'selected_product': selected, 'candidate_products': candidates if len(candidates) > 1 else [],
             'pricing_context': {'scope': scope, 'sku': sku, 'topic': extraction.topic} if pricing else None,
             'pricing_analysis': pricing, 'context_extraction_error': analysis_error}

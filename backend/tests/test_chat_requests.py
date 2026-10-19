@@ -13,7 +13,7 @@ from app.models.chat_request import ChatRequestRecord
 
 class WaitingProvider:
     provider = 'opencode'
-    model = 'muse-spark-1.3-contributor-free'
+    model = 'glm-5.3-flash-free'
     natural_responses = True
     prefer_model_intent = True
 
