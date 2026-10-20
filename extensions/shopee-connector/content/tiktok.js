@@ -58,7 +58,7 @@
         }
       }
       let parent = el.parentElement;
-      for (let depth = 0; depth < 8 && parent && parent !== document.body; depth++) {
+      for (let depth = 0; !el.labels?.length && !el.getAttribute('aria-label') && depth < 4 && parent && parent !== document.body && !parent.matches('form,main,[role=main]'); depth++) {
         const labelEl = parent.querySelector('label, [class*="label"], [class*="title"]');
         if (labelEl && labelEl !== el && !labelEl.contains(el)) {
           const t = text(labelEl);
@@ -299,7 +299,9 @@
     const ALLOWED_KEYS = ['name', 'description', 'price_vnd', 'stock', 'images', 'category_name', 'brand', 'origin', 'weight_g'];
     if (!payload.draft || Object.keys(payload.draft).some(key => !ALLOWED_KEYS.includes(key))) throw Error('Bản nháp không hợp lệ.');
 
+    const written = new Map();
     function simulateClick(el) {
+      checkPage();
       if (!el) return;
       el.scrollIntoView?.({behavior: 'instant', block: 'center'});
       const rect = el.getBoundingClientRect();
@@ -345,7 +347,8 @@
     }
 
     function setInputValue(input, val) {
-      if (!input) return;
+      checkPage();
+      if (!input || input.disabled || input.readOnly) return;
       const content = String(val);
 
       if (input.isContentEditable) {
@@ -392,8 +395,7 @@
       input.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: content}));
       input.dispatchEvent(new Event('input', {bubbles: true}));
       input.dispatchEvent(new Event('change', {bubbles: true}));
-      input.dispatchEvent(new KeyboardEvent('keydown', {bubbles: true, key: 'Enter'}));
-      input.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true, key: 'Enter'}));
+      input.dispatchEvent(new Event('blur', {bubbles: true}));
     }
 
     function findFieldContainer(matcher) {
@@ -429,79 +431,24 @@
     }
 
     function fillSalesAndPricing(draft) {
-      const stockVal = String(draft.stock || 50);
-      const priceVal = String(draft.price_vnd || 300000);
-
-      // A. Điền vào thanh batch "Giá và hàng có sẵn"
-      const batchCandidates = [...document.querySelectorAll('div, section, form')].filter(el => {
-        if (!visible(el)) return false;
-        const t = text(el);
-        return /giá và hàng có sẵn/i.test(t) && /áp dụng/i.test(t);
-      });
-      batchCandidates.sort((a, b) => text(a).length - text(b).length);
-      const batchSection = batchCandidates[0];
-
-      if (batchSection) {
-        const batchInputs = [...batchSection.querySelectorAll('input:not([type="hidden"])')].filter(visible);
-        for (const inp of batchInputs) {
-          const pl = (inp.placeholder || inp.getAttribute('aria-label') || label(inp) || '').toLowerCase();
-          if (/số lượng|kho|stock/i.test(pl)) {
-            setInputValue(inp, stockVal);
-          } else if (/giá|price|bán lẻ/i.test(pl)) {
-            setInputValue(inp, priceVal);
-          }
-        }
-
-        const applyBtn = [...batchSection.querySelectorAll('button, [role="button"], div, span')].find(b => {
-          return visible(b) && /^áp dụng/i.test(text(b).trim());
-        });
-        if (applyBtn) {
-          simulateClick(applyBtn);
-          applyBtn.click?.();
-        }
-      }
-
-      // B. Điền trực tiếp vào bảng danh sách / biến thể (Table)
-      const allInputs = [...document.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])')].filter(visible);
-      for (const inp of allInputs) {
-        const pl = (inp.placeholder || inp.getAttribute('aria-label') || '').toLowerCase();
-        const lbl = (label(inp) || '').toLowerCase();
-        const cell = inp.closest('td, [role="cell"], [role="gridcell"], [class*="cell"], [class*="col"]');
-        const cellHeader = (cell ? getColumnHeaderText(cell) : '').toLowerCase();
-        const parentText = text(inp.closest('.arco-form-item, [class*="form-item"], [class*="formItem"], div') || '').toLowerCase();
-        const full = `${pl} ${lbl} ${cellHeader} ${parentText}`;
-
-        if (/giảm giá|discount|sku/i.test(full)) continue;
-
-        if (/hàng có sẵn|tồn kho|số lượng|stock/i.test(full)) {
-          setInputValue(inp, stockVal);
-        } else if (/giá bán lẻ|giá bán|đơn giá|price|nhập giá/i.test(full)) {
-          setInputValue(inp, priceVal);
-        }
+      for (const field of ['price_vnd', 'stock']) {
+        const value = draft[field];
+        if (!Number.isInteger(value) || (field === 'stock' ? value < 0 : value < 1000)) continue;
+        const inputs = findAll(field);
+        if (inputs.length !== 1) continue; // Multi-variant prices require explicit field mapping.
+        setInputValue(inputs[0], value);
+        written.set(field, {element: inputs[0], value: String(value)});
       }
     }
 
     function fillShippingInfo(draft) {
-      // 1. Trọng lượng kiện hàng (Bắt buộc) - Mặc định 500g nếu chưa có
-      const weightVal = String(draft.weight_g || draft.weight || 500);
-      const allInputs = [...document.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])')].filter(visible);
-
-      for (const inp of allInputs) {
-        const pl = (inp.placeholder || inp.getAttribute('aria-label') || '').toLowerCase();
-        const lbl = (label(inp) || '').toLowerCase();
-        const parentText = text(inp.closest('.arco-form-item, [class*="form-item"], [class*="formItem"], div') || '').toLowerCase();
-        const full = `${pl} ${lbl} ${parentText}`;
-
-        if (/trọng lượng.*kiện hàng|trọng lượng|nhập trọng lượng/i.test(full)) {
-          setInputValue(inp, weightVal);
-        } else if (/chiều cao|height/i.test(full) && !inp.value) {
-          setInputValue(inp, '15');
-        } else if (/chiều rộng|width/i.test(full) && !inp.value) {
-          setInputValue(inp, '20');
-        } else if (/chiều dài|length/i.test(full) && !inp.value) {
-          setInputValue(inp, '25');
-        }
-      }
+      if (!Number.isInteger(draft.weight_g) || draft.weight_g <= 0) return;
+      const inputs = [...document.querySelectorAll('input')].filter(el => visible(el) && !el.disabled && !el.readOnly && /trọng lượng|weight/i.test(label(el)));
+      if (inputs.length !== 1) return;
+      const unit = text(inputs[0].closest('.arco-form-item, [class*="form-item"]'));
+      // Do not confuse grams with kilograms or invent package dimensions.
+      if (/\bkg\b/i.test(unit) || !/\b(?:g|gam|gram)\b/i.test(unit)) return;
+      setInputValue(inputs[0], draft.weight_g);
     }
 
     // 1. Tự động tải ảnh lên nếu có
@@ -523,7 +470,8 @@
             dt.items.add(file);
           }
           if (dt.files.length > 0) {
-            imageInput.files = dt.files;
+            checkPage();
+          imageInput.files = dt.files;
             imageInput.dispatchEvent(new Event('input', {bubbles: true}));
             imageInput.dispatchEvent(new Event('change', {bubbles: true}));
             imagesUploaded = true;
@@ -539,15 +487,12 @@
       checkPage();
       if (value === null || value === undefined) continue;
       const elements = findAll(field);
-      let content = String(value);
-      if (field === 'name' && content.trim().length < 25) {
-        content = (content.trim() + ' - Chính hãng cao cấp').slice(0, 255);
-      }
-      for (const el of elements) {
-        if (el.maxLength > -1 && content.length > el.maxLength) continue;
-        setInputValue(el, content);
-      }
-      report.push({field, status: 'filled'});
+      const content = String(value);
+      if (elements.length !== 1) continue;
+      const el = elements[0];
+      if (el.maxLength > -1 && content.length > el.maxLength) continue;
+      setInputValue(el, content);
+      written.set(field, {element: el, value: content});
     }
 
     // 3. Tự động chọn Hạng mục khớp nhất từ các đề xuất của TikTok Shop (chờ API trả về đề xuất)
@@ -632,7 +577,8 @@
               bestItem = item;
             }
           }
-          if (!bestItem) bestItem = rows[0];
+          const ranked = rows.map(item => ({item, score: scoreCategoryMatch(item.text, draft.name, draft.description, draft.category_name)})).sort((a,b) => b.score - a.score);
+          if (!draft.category_name || ranked[0]?.score < 60 || ranked[1]?.score === ranked[0]?.score) bestItem = null;
           break;
         }
 
@@ -669,7 +615,7 @@
 
     let categorySelected = false;
     try {
-      categorySelected = await selectBestCategory(payload.draft, 8000);
+      if (payload.draft.category_name) categorySelected = await selectBestCategory(payload.draft, 8000);
     } catch { /* fallback */ }
 
     // Đợi TikTok Shop tải phần Thuộc tính phụ thuộc (Thương hiệu, Xuất xứ)
@@ -683,7 +629,7 @@
 
       const curValEl = container.querySelector('.arco-select-view-value, [class*="view-value"]');
       const curVal = text(curValEl);
-      if (curVal && !/chọn|select|vui lòng/i.test(curVal)) {
+      if (searchTerms.some(term => String(term).trim().toLocaleLowerCase() === curVal.trim().toLocaleLowerCase())) {
         for (const term of searchTerms) {
           if (new RegExp(term, 'i').test(curVal)) return true;
         }
@@ -701,8 +647,8 @@
         const candidates = [...document.querySelectorAll('.arco-select-option, [role="option"], .arco-trigger-popup div, .arco-select-popup div, [class*="option"], li')]
           .filter(visible);
         for (const term of searchTerms) {
-          const re = new RegExp(term, 'i');
-          const match = candidates.find(el => re.test(text(el).trim()));
+          const matching = candidates.filter(el => text(el).trim().toLocaleLowerCase() === String(term).trim().toLocaleLowerCase());
+          const match = matching.length === 1 ? matching[0] : null;
           if (match) return match;
         }
         return null;
@@ -733,55 +679,23 @@
       return false;
     }
 
-    async function selectFirstAvailableOption(container) {
-      if (!container) return false;
-      const curValEl = container.querySelector('.arco-select-view-value, [class*="view-value"]');
-      const curVal = text(curValEl);
-      if (curVal && !/chọn|select|vui lòng/i.test(curVal)) return true;
-
-      const arrow = container.querySelector('.arco-select-suffix, svg, [class*="arrow"]');
-      const selectView = container.querySelector('.arco-select-view, .arco-select, [role="combobox"]');
-      triggerClick(arrow || selectView || container);
-      await new Promise(r => setTimeout(r, 400));
-
-      const options = [...document.querySelectorAll('.arco-select-option, [role="option"], li')].filter(visible);
-      if (options.length > 0) {
-        triggerClick(options[0]);
-        await new Promise(r => setTimeout(r, 300));
-        return true;
-      }
-      document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
-      return false;
-    }
-
     try {
-      const brandContainer = await waitForField(/thương hiệu|brand|nhãn hiệu/i, 3000);
-      await selectDropdownOption(brandContainer, [payload.draft.brand || 'Không có thương hiệu', 'Không có thương hiệu', 'No Brand', 'không thương hiệu']);
-
-      const originContainer = await waitForField(/quốc gia xuất xứ|xuất xứ|nơi xuất xứ|country of origin/i, 3000);
-      await selectDropdownOption(originContainer, [payload.draft.origin || 'Việt Nam', 'Việt Nam', 'Vietnam']);
-
-      // Tự động điền các thuộc tính bắt buộc khác nếu có dropdown sẵn (ví dụ: Tên/Địa chỉ tổ chức chịu trách nhiệm)
-      const allFormItems = [...document.querySelectorAll('.arco-form-item, [class*="form-item"], [class*="attribute-item"]')].filter(visible);
-      for (const item of allFormItems) {
-        const lbl = text(item.querySelector('label, [class*="label"], [class*="title"]') || item);
-        if ((lbl.includes('*') || item.className?.includes('required')) && !/hạng mục|thương hiệu|xuất xứ|giá|tồn|kho|vận chuyển|trọng lượng/i.test(lbl)) {
-          const curValEl = item.querySelector('.arco-select-view-value, [class*="view-value"]');
-          const cv = text(curValEl);
-          if (!cv || /chọn|select|vui lòng/i.test(cv)) {
-            await selectFirstAvailableOption(item);
-          }
-        }
+      if (payload.draft.brand) {
+        const container = await waitForField(/thương hiệu|brand|nhãn hiệu/i, 1500);
+        await selectDropdownOption(container, [payload.draft.brand]);
       }
-    } catch { /* ignore */ }
+      if (payload.draft.origin) {
+        const container = await waitForField(/quốc gia xuất xứ|xuất xứ|country of origin/i, 1500);
+        await selectDropdownOption(container, [payload.draft.origin]);
+      }
+    } catch (error) { checkPage(); }
 
     // 5. Điền thông tin bán hàng (Giá, Tồn kho) và Vận chuyển (Trọng lượng, Kích thước)
     // Khối này chỉ hiển thị đầy đủ sau khi Hạng mục và Thuộc tính đã được kích hoạt
     await new Promise(resolve => setTimeout(resolve, 800));
     fillSalesAndPricing(payload.draft);
     fillShippingInfo(payload.draft);
-    report.push({field: 'price_vnd', status: 'filled'});
-    report.push({field: 'stock', status: 'filled'});
+
     await new Promise(resolve => setTimeout(resolve, 250));
     for (const inp of document.querySelectorAll('input')) {
       if (inp.value && visible(inp)) inp.dispatchEvent(new Event('blur', {bubbles: true}));
@@ -893,6 +807,12 @@
       }
     } catch { /* ignore */ }
 
+    checkPage();
+    for (const field of ['name', 'description', 'price_vnd', 'stock']) {
+      const write = written.get(field);
+      const retained = write?.element.isConnected && String(write.element.isContentEditable ? write.element.textContent : write.element.value).trim() === write.value.trim();
+      report.push({field, status: !write ? 'unmapped' : retained ? 'filled' : 'not_retained'});
+    }
     return {report, submitted: false, images: imagesUploaded ? 'auto' : 'manual', category: categorySelected ? 'auto' : 'manual', variants: 'manual', unfilled_required: unfilledRequired};
   }
   chrome.runtime.onMessage.addListener((message, sender, reply) => {

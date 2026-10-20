@@ -1,4 +1,6 @@
+import { dockContentInset } from '../../components/layout/dockGeometry';
 import { Ionicons } from '@expo/vector-icons';
+import { InterfaceIcon } from '../../components/ui/InterfaceIcon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
@@ -11,6 +13,7 @@ import { inExtension, isShopeeExtension } from '../../integrations/extension';
 import { decidePriceProposal, decideProductDraft, decideProductEdit, deleteConversation, pinConversation, getConversation, getConversations, productDraftImageUrl, sendSellerMessage, uploadProductImages } from '../../api/sellerPilot';
 import { ChatData, ConversationSummary, PriceProposal, ProductDraft, ProductEditProposal } from '../../api/types';
 import { ProductEditCard } from './ProductEditCard';
+import { ProductDraftCard } from './ProductDraftCard';
 import { BrandLogo } from '../../components/ui/BrandLogo';
 import { useTheme } from '../../theme/ThemeProvider';
 import { money } from '../dashboard/DashboardScreen';
@@ -31,10 +34,10 @@ const INPUT_LINE_HEIGHT = 23;
 const INPUT_VERTICAL_PADDING = 21;
 const STORAGE = 'sellerpilot:conversation:' + (inExtension() ? location.origin + ':' + new URLSearchParams(location.search).get('scope') : API_URL);
 const PROMPTS = [
-  { icon: 'stats-chart-outline', title: 'Hôm nay shop thế nào?', message: 'Hôm nay shop có bao nhiêu đơn và giá trị đơn hàng bao nhiêu?' },
-  { icon: 'layers-outline', title: 'Kiểm tra hàng sắp hết', message: 'Những sản phẩm nào sắp hết hàng?' },
-  { icon: 'search-outline', title: 'Tìm sản phẩm trong shop', message: 'Tìm sản phẩm bàn phím' },
-  { icon: 'sparkles-outline', title: 'Lập kế hoạch cho shop', message: 'Phân tích số liệu 7 ngày qua và lập kế hoạch kinh doanh 7 ngày tới. Chọn sản phẩm ưu tiên, lịch hành động, ý tưởng video TikTok và cách đo kết quả.' },
+  { icon: 'trend', title: 'Hôm nay shop thế nào?', message: 'Hôm nay shop có bao nhiêu đơn và giá trị đơn hàng bao nhiêu?' },
+  { icon: 'inventory', title: 'Kiểm tra hàng sắp hết', message: 'Những sản phẩm nào sắp hết hàng?' },
+  { icon: 'search', title: 'Tìm sản phẩm trong shop', message: 'Tìm sản phẩm bàn phím' },
+  { icon: 'plan', title: 'Lập kế hoạch cho shop', message: 'Phân tích số liệu 7 ngày qua và lập kế hoạch kinh doanh 7 ngày tới. Chọn sản phẩm ưu tiên, lịch hành động, ý tưởng video TikTok và cách đo kết quả.' },
 ] as const;
 const readableError = (e: unknown) => e instanceof ApiError ? e.message : 'Chưa kết nối được SellerPilot. Kiểm tra Wi-Fi và máy đang chạy backend, rồi thử lại.';
 const fallbackLabel = (reason: ChatData['fallback_reason']) => reason === 'invalid_response'
@@ -521,10 +524,13 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   }
   async function decideDraft(productDraft: ProductDraft, choice: 'publish' | 'cancel') {
     if (decisionLock.current) return;
+    const version = generation.current, decidedConversation = conversationRef.current;
     decisionLock.current = true; setProductDecision(productDraft.id);
     setProductErrors(errors => ({ ...errors, [productDraft.id]: '' }));
     try {
       const { data } = await decideProductDraft(productDraft.id, choice);
+      if (data.status === 'published') onShopChanged?.();
+      if (version !== generation.current || conversationRef.current !== decidedConversation) return;
       setMessages(items => {
         const index = items.findLastIndex(item => item.response?.product_draft?.id === data.id);
         return items.map((item, itemIndex) => itemIndex === index && item.response
@@ -534,12 +540,13 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       if (targetConvoId) {
         try {
           const convo = await getConversation(targetConvoId);
-          if (convo?.data?.turns?.length) setMessages(restoreMessages(convo.data.turns));
+          if (version === generation.current && conversationRef.current === decidedConversation && convo?.data?.turns?.length) setMessages(restoreMessages(convo.data.turns));
         } catch { /* ignore */ }
       }
-      onToast?.(data.status === 'filled' ? 'Đã điền form. Kiểm tra ảnh, ngành hàng và bấm lưu trên Shopee.' : data.status === 'published' ? 'Đã đăng sản phẩm lên UTech Official.' : 'Đã hủy bản nháp sản phẩm.');
-      if (data.status === 'published') onShopChanged?.();
+      if (version !== generation.current || conversationRef.current !== decidedConversation) return;
+      onToast?.(data.status === 'filled' ? 'Đã điền form. Kiểm tra các mục trên trang người bán trước khi lưu.' : data.status === 'published' ? 'Đã đăng sản phẩm lên UTech Official.' : 'Đã hủy bản nháp sản phẩm.');
     } catch (e) {
+      if (version !== generation.current || conversationRef.current !== decidedConversation) return;
       setProductErrors(errors => ({ ...errors, [productDraft.id]: readableError(e) }));
     } finally {
       decisionLock.current = false; setProductDecision(null);
@@ -555,7 +562,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   const last = messages[messages.length - 1];
   const productCardMessageIds = useMemo(() => latestProductCards(messages), [messages]);
   const proposalLabel = { approved: 'Đã cập nhật trên shop', rejected: 'Đã bỏ qua · Giá giữ nguyên', conflict: 'Giá đã thay đổi · Cần tạo đề xuất mới', pending: 'Chờ xác nhận' };
-  const productLabel = { collecting: 'Bản nháp', ready: 'Sẵn sàng kiểm tra', filled: 'Đã điền form · Chưa xác minh đăng', published: 'Đã đăng · UTech Official', cancelled: 'Đã hủy bản nháp', conflict: 'Cần kiểm tra lại' };
+
   return <View style={ui.chat}>
     <ScrollView ref={scroll} testID="chat-scroll" style={{ flex: 1 }} automaticallyAdjustKeyboardInsets={false} contentInsetAdjustmentBehavior="never" showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive"
       contentContainerStyle={[ui.chatScroll, !messages.length && ui.chatEmpty]}
@@ -576,7 +583,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       }}>
       {!messages.length && !restoring ? <>
         <View style={ui.welcome}><BrandLogo size={desktop ? 40 : keyboardVisible ? 40 : 56} /><Text accessibilityRole="header" style={[ui.welcomeTitle, { marginTop: desktop ? 16 : compact ? 16 : 24 }, !desktop && compact && { fontSize: 28, lineHeight: 36 }, keyboardVisible && { fontSize: 23, lineHeight: 30, letterSpacing: -.6 }]}>Mình giúp gì{ '\n' }cho shop hôm nay?</Text></View>
-        {!keyboardVisible ? <View style={[ui.promptGrid, compact && { marginTop: 22 }]}>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" accessibilityLabel={prompt.title} onPress={() => void send(prompt.message)} style={({ pressed }) => [ui.prompt, !desktop && compact && { minHeight: 84, padding: 12, gap: 8 }, pressed && { opacity: .65 }]}><Ionicons name={prompt.icon} size={desktop ? 18 : compact ? 20 : 22} color={BRAND.navy} /><Text style={ui.promptText}>{prompt.title}</Text></Pressable>)}</View> : null}
+        {!keyboardVisible ? <View style={[ui.promptGrid, compact && { marginTop: 22 }]}>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" accessibilityLabel={prompt.title} onPress={() => void send(prompt.message)} style={({ pressed }) => [ui.prompt, !desktop && compact && { minHeight: 84, padding: 12, gap: 8 }, pressed && { opacity: .65 }]}><InterfaceIcon name={prompt.icon} size={desktop ? 18 : compact ? 20 : 22} color={BRAND.navy} /><Text style={ui.promptText}>{prompt.title}</Text></Pressable>)}</View> : null}
       </> : null}
       {restoring ? <View style={ui.thinking}><ActivityIndicator color={BRAND.navy} /><Text style={ui.thinkingText}>Đang mở hội thoại…</Text></View> : <View style={ui.thread}>{messages.map(message => message.role === 'user'
         ? <MessageEntrance key={message.id} style={ui.userMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion}><View testID="user-message" style={[ui.userBubble, Boolean(message.imageUris?.length) && ui.userBubbleMedia]}>{message.imageUris?.length === 1 ? <Image testID="user-image-single" source={{ uri: message.imageUris[0] }} style={ui.userImageSingle} resizeMode="cover" /> : message.imageUris?.length ? <ScrollView testID="user-image-gallery" horizontal style={ui.userImageScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.userImageRow}>{message.imageUris.map((uri, index) => <Image key={uri + index} source={{ uri }} style={ui.userImageMultiple} resizeMode="cover" />)}</ScrollView> : null}<Text selectable style={[ui.userText, Boolean(message.imageUris?.length) && ui.userTextWithMedia]}>{message.text}</Text></View></MessageEntrance>
@@ -587,29 +594,17 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
               {decisionErrors[message.response.proposal.id] ? <Text style={ui.error}>{decisionErrors[message.response.proposal.id]}</Text> : null}</View>
             {message.response.proposal.status === 'pending' ? <View style={ui.proposalActions}><Pressable accessibilityRole="button" disabled={decision !== null} onPress={() => void decide(message.response!.proposal!, 'reject')} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={ui.secondaryText}>Bỏ qua</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={'Xác nhận đổi giá SKU ' + message.response.proposal.sku} disabled={decision !== null} onPress={() => void decide(message.response!.proposal!, 'confirm')} style={[ui.primaryButton, { flex: 1.6, paddingHorizontal: 8 }, decision !== null && { opacity: .55 }]}>{decision === message.response.proposal.id ? <ActivityIndicator color="#FFF" size="small" /> : <Ionicons name="checkmark" size={18} color="#FFF" />}<Text style={ui.primaryText}>Xác nhận đổi giá</Text></Pressable></View> : null}
           </View> : null}
-          {productCardMessageIds.has(message.id) && message.response?.product_draft ? <View style={ui.proposal}>
-            {message.response.product_draft.status !== 'cancelled' && message.response.product_draft.preview_url ? <Image source={{ uri: productDraftImageUrl(message.response.product_draft.preview_url) }} style={ui.draftImage} resizeMode="cover" /> : null}
-            {message.response.product_draft.status !== 'cancelled' && message.response.product_draft.preview_urls?.length > 1 ? <ScrollView testID="draft-image-gallery" horizontal style={ui.draftGalleryScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.draftGallery}>{message.response.product_draft.preview_urls.map((uri, index) => <Image key={uri} accessibilityLabel={`Ảnh sản phẩm ${index + 1}`} source={{ uri: productDraftImageUrl(uri) }} style={ui.draftThumbnail} resizeMode="cover" />)}</ScrollView> : null}
-            <View style={ui.proposalBody}><Text style={ui.proposalKicker}>{productLabel[message.response.product_draft.status]}</Text>
-              {message.response.product_draft.name ? <Text style={ui.listTitle}>{message.response.product_draft.name}</Text> : <Text style={ui.caption}>Sản phẩm mới</Text>}
-              {message.response.product_draft.sku ? <Text style={ui.caption}>SKU {message.response.product_draft.sku}</Text> : null}
-              {message.response.product_draft.price_vnd !== null ? <Text style={ui.newPrice}>{money(message.response.product_draft.price_vnd)}</Text> : null}
-              {message.response.product_draft.category_name ? <Text style={ui.caption}>{message.response.product_draft.category_name}{message.response.product_draft.stock !== null ? ' · Tồn kho ' + message.response.product_draft.stock : ''}</Text> : null}
-              {message.response.product_draft.description ? <Text numberOfLines={4} style={ui.caption}>{message.response.product_draft.description}</Text> : null}
-              {productErrors[message.response.product_draft.id] ? <Text style={ui.error}>{productErrors[message.response.product_draft.id]}</Text> : null}
-            </View>
-            {message.response.product_draft.status === 'ready' ? <View style={ui.proposalActions}><Pressable accessibilityRole="button" disabled={productDecision !== null} onPress={() => void decideDraft(message.response!.product_draft!, 'cancel')} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={ui.secondaryText}>Hủy</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={isShopeeExtension() ? "Điền bản nháp vào form Shopee" : "Đăng sản phẩm lên UTech Official"} disabled={productDecision !== null} onPress={() => void decideDraft(message.response!.product_draft!, 'publish')} style={[ui.primaryButton, { flex: 1.7, paddingHorizontal: 8 }, productDecision !== null && { opacity: .55 }]}>{productDecision === message.response.product_draft.id ? <ActivityIndicator color="#FFF" size="small" /> : <Ionicons name="cloud-upload-outline" size={18} color="#FFF" />}<Text style={ui.primaryText}>{isShopeeExtension() ? "Điền vào Shopee" : "Đăng sản phẩm"}</Text></Pressable></View> : null}
-          </View> : null}
+          {productCardMessageIds.has(message.id) && message.response?.product_draft ? <ProductDraftCard draft={message.response.product_draft} busy={productDecision !== null} saving={productDecision === message.response.product_draft.id} error={productErrors[message.response.product_draft.id]} browser={isShopeeExtension()} onDecide={choice => void decideDraft(message.response!.product_draft!, choice)} /> : null}
           <View style={ui.messageActions}><Pressable accessibilityRole="button" accessibilityLabel={Platform.OS === 'web' ? 'Sao chép câu trả lời' : 'Chia sẻ câu trả lời'} onPress={() => void share(message.text)} style={ui.messageAction}><Ionicons name={Platform.OS === 'web' ? 'copy-outline' : 'share-outline'} size={17} color={IOS.secondary} /></Pressable>{message.response?.mode === 'fallback' ? <Text style={ui.sourceText}>{fallbackLabel(message.response.fallback_reason)}</Text> : null}</View>
         </View></MessageEntrance>)}</View>}
       {busy ? <TypingIndicator /> : null}
       {error ? <View accessibilityLiveRegion="polite" style={ui.errorCard}><Text style={ui.error}>{error}</Text>{failedMessage ? <Pressable accessibilityRole="button" accessibilityLabel="Thử lại" disabled={busy} onPress={() => void send(failedMessage, true)} style={ui.secondaryButton}><Ionicons name="refresh" color={BRAND.navy} size={17} /><Text style={ui.secondaryText}>Thử lại</Text></Pressable> : null}{pendingChat.current && !busy ? <Pressable accessibilityRole="button" accessibilityLabel="Dừng yêu cầu" onPress={() => void stop()} style={ui.secondaryButton}><Text style={ui.secondaryText}>Dừng yêu cầu</Text></Pressable> : null}</View> : null}
-      {!busy && !restoring && !keyboardVisible && last?.response?.suggestions?.length ? <ScrollView testID="chat-follow-ups" horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, height: 62, maxHeight: 62, marginTop: 12 }} contentContainerStyle={{ gap: 8, paddingBottom: 2, alignItems: 'center' }}>{last.response.suggestions.slice(0, 3).map(suggestion => <Pressable key={suggestion} accessibilityRole="button" onPress={() => void send(suggestion)} style={[ui.followUp, { minHeight: 44, maxWidth: 260, paddingVertical: 10 }]}><Text numberOfLines={2} style={[ui.followUpText, { flex: 0, flexShrink: 1 }]}>{suggestion}</Text><Ionicons name="arrow-up-outline" size={15} color={BRAND.navy} /></Pressable>)}</ScrollView> : null}
+      {!busy && !restoring && !keyboardVisible && last?.response?.suggestions?.length ? <ScrollView testID="chat-follow-ups" horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, height: Math.ceil(48 * fontScale + 28), maxHeight: Math.ceil(48 * fontScale + 28), marginTop: 12 }} contentContainerStyle={{ gap: 8, paddingBottom: 2, alignItems: 'center' }}>{last.response.suggestions.slice(0, 3).map(suggestion => <Pressable key={suggestion} accessibilityRole="button" onPress={() => void send(suggestion)} style={[ui.followUp, { minHeight: 44, maxWidth: 260, paddingVertical: 10 }]}><Text numberOfLines={2} style={[ui.followUpText, { flex: 0, flexShrink: 1 }]}>{suggestion}</Text><Ionicons name="arrow-up-outline" size={15} color={BRAND.navy} /></Pressable>)}</ScrollView> : null}
     </ScrollView>
     {showLatest && messages.length ? <Pressable accessibilityRole="button" accessibilityLabel="Cuộn đến tin nhắn mới nhất" onPress={goBottom} style={[ui.circleButton, { position: 'absolute', right: 22, bottom: Math.max(12, composerAreaHeight + 12) }]}><Ionicons name="arrow-down" size={20} color={BRAND.navy} /></Pressable> : null}
-    <View testID="chat-composer" onLayout={event => { const height = Math.ceil(event.nativeEvent.layout.height); setComposerAreaHeight(current => Math.abs(current - height) > 1 ? height : current); }} style={[ui.composerArea, { paddingBottom: desktop || keyboardVisible ? 8 : 90 + insets.bottom, flexShrink: 0 }]}>
+    <View testID="chat-composer" onLayout={event => { const height = Math.ceil(event.nativeEvent.layout.height); setComposerAreaHeight(current => Math.abs(current - height) > 1 ? height : current); }} style={[ui.composerArea, { paddingBottom: desktop || keyboardVisible ? 8 : dockContentInset(insets.bottom), flexShrink: 0 }]}>
       {pendingImages.length ? <ScrollView testID="attachment-strip" horizontal style={ui.attachmentScroller} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={ui.attachmentRow}>{pendingImages.map((pendingImage, index) => <View key={pendingImage.uri + index} style={ui.attachmentPreview}><Image source={{ uri: pendingImage.uri }} style={ui.attachmentImage} resizeMode="cover" /><Pressable accessibilityRole="button" accessibilityLabel={`Bỏ ảnh số ${index + 1}`} hitSlop={10} onPress={() => setPendingImages(items => items.filter((_item, itemIndex) => itemIndex !== index))} style={ui.attachmentRemove}><Ionicons name="close" size={17} color="#FFF" /></Pressable></View>)}{pendingImages.length < MAX_PRODUCT_IMAGES ? <Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh sản phẩm" onPress={() => void pickProductImage()} style={ui.attachmentAdd}><Ionicons name="add" size={25} color={BRAND.navy} /><Text style={ui.attachmentCount}>{pendingImages.length}/{MAX_PRODUCT_IMAGES}</Text></Pressable> : null}</ScrollView> : null}
-      {quickOpen ? <ScrollView testID="quick-actions" keyboardShouldPersistTaps="handled" style={[ui.grouped, { marginBottom: 10, maxHeight: keyboardVisible ? 180 : 290, flexGrow: 0 }]}><Pressable accessibilityRole="button" accessibilityLabel="Chọn ảnh để đăng sản phẩm" onPress={() => void pickProductImage()} style={[ui.task, { minHeight: 52 }]}><Ionicons name="images-outline" size={21} color={BRAND.navy} /><Text style={ui.taskTitle}>Chọn tối đa 6 ảnh sản phẩm</Text></Pressable>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" onPress={() => { setDraft(prompt.message); setQuickOpen(false); input.current?.focus(); }} style={[ui.task, { minHeight: 47 }]}><Ionicons name={prompt.icon} size={19} color={BRAND.navy} /><Text style={ui.taskTitle}>{prompt.title}</Text></Pressable>)}</ScrollView> : null}
+      {quickOpen ? <ScrollView testID="quick-actions" keyboardShouldPersistTaps="handled" style={[ui.grouped, { marginBottom: 10, maxHeight: keyboardVisible ? 180 : 290, flexGrow: 0 }]}><Pressable accessibilityRole="button" accessibilityLabel="Chọn ảnh để đăng sản phẩm" onPress={() => void pickProductImage()} style={[ui.task, { minHeight: 52 }]}><Ionicons name="images-outline" size={21} color={BRAND.navy} /><Text style={ui.taskTitle}>Chọn tối đa 6 ảnh sản phẩm</Text></Pressable>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" onPress={() => { setDraft(prompt.message); setQuickOpen(false); input.current?.focus(); }} style={[ui.task, { minHeight: 47 }]}><InterfaceIcon name={prompt.icon} size={19} color={BRAND.navy} /><Text style={ui.taskTitle}>{prompt.title}</Text></Pressable>)}</ScrollView> : null}
       <View style={ui.composer}><Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh hoặc mở gợi ý" accessibilityState={{ expanded: quickOpen }} onPress={() => setQuickOpen(value => !value)} style={ui.composerPlus}><Ionicons name={quickOpen ? 'close' : 'add'} size={27} color={BRAND.navy} /></Pressable>
         <View style={ui.composerInputFrame}><TextInput ref={input} accessibilityLabel="Nhắn cho SellerPilot" placeholder={pendingImages.length ? 'Thêm yêu cầu…' : 'Hỏi SellerPilot…'} placeholderTextColor={IOS.secondary} value={draft} onChangeText={value => { setDraft(value); if (!value) setInputHeight(INPUT_MIN_HEIGHT); }} multiline maxLength={4000} scrollEnabled={inputHeight >= INPUT_MAX_HEIGHT - 1} returnKeyType="default" blurOnSubmit={false} onFocus={() => setTimeout(() => { if (nearBottom.current) scroll.current?.scrollToEnd({ animated: false }); }, 80)} style={[ui.composerInput, { height: inputHeight }]} editable={!restoring} />
           {Platform.OS !== 'web' ? <Text pointerEvents="none" accessible={false} aria-hidden onTextLayout={event => resizeComposerFromLines(event.nativeEvent.lines.length)} style={ui.composerMeasure}>{draft + '\u200B'}</Text> : null}</View>

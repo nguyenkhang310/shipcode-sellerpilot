@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { InterfaceIcon } from '../components/ui/InterfaceIcon';
 import { BrandLogo } from '../components/ui/BrandLogo';
 import { AssistantChat, AssistantHandle } from '../features/assistant/AssistantChat';
 import { useTheme } from '../theme/ThemeProvider';
@@ -8,11 +9,11 @@ import { BrowserConnection, BrowserPage, ExtensionBar } from './ExtensionBar';
 import { extensionCall } from './extension';
 
 const TABS = [
-  {key: 'overview', title: 'Tổng quan', icon: 'grid-outline'},
-  {key: 'products', title: 'Sản phẩm', icon: 'cube-outline'},
-  {key: 'assistant', title: 'Trợ lý', icon: 'sparkles-outline'},
-  {key: 'orders', title: 'Đơn hàng', icon: 'receipt-outline'},
-  {key: 'shop', title: 'Shop', icon: 'storefront-outline'},
+  {key: 'overview', title: 'Tổng quan', icon: 'overview'},
+  {key: 'products', title: 'Sản phẩm', icon: 'products'},
+  {key: 'assistant', title: 'Trợ lý', icon: 'assistant'},
+  {key: 'orders', title: 'Đơn hàng', icon: 'orders'},
+  {key: 'shop', title: 'Shop', icon: 'shop'},
 ] as const;
 type Tab = typeof TABS[number]['key'];
 
@@ -95,7 +96,7 @@ export function ExtensionShell() {
     <ExtensionBar onPage={setPage} onConnection={onConnection}/>
     <View accessibilityRole="tablist" style={{flexDirection: 'row', borderBottomWidth: 1, borderColor: IOS.separator, backgroundColor: IOS.card, paddingHorizontal: 6}}>
       {TABS.map(item => <Pressable key={item.key} accessibilityRole="tab" accessibilityLabel={item.title} accessibilityState={{selected: item.key === tab}} onPress={() => setTab(item.key)} style={{flex: 1, minWidth: 0, paddingVertical: 10, gap: 4, alignItems: 'center', borderBottomWidth: 2, borderColor: tab === item.key ? BRAND.navy : 'transparent'}}>
-        <Ionicons name={item.icon} size={17} color={tab === item.key ? BRAND.navy : IOS.secondary}/><Text numberOfLines={1} style={{fontSize: 11, fontWeight: tab === item.key ? '600' : '400', color: tab === item.key ? BRAND.navy : IOS.secondary}}>{item.title}</Text>
+        <InterfaceIcon name={item.icon} size={17} color={tab === item.key ? BRAND.navy : IOS.secondary}/><Text numberOfLines={1} style={{fontSize: 11, fontWeight: tab === item.key ? '600' : '400', color: tab === item.key ? BRAND.navy : IOS.secondary}}>{item.title}</Text>
       </Pressable>)}
     </View>
     {notice ? <Pressable accessibilityRole="button" accessibilityLabel="Đóng thông báo" onPress={() => setNotice('')} style={{padding: 10, backgroundColor: IOS.card}}><Text style={ui.caption}>{notice}</Text></Pressable> : null}

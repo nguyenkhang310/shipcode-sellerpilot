@@ -179,6 +179,10 @@ GEMINI_MODEL=gemini-3.5-flash-lite
 
 Dán key vào `.env` gốc repo, không phải `.env.example`. Tạo key tại
 [Google AI Studio](https://aistudio.google.com/apikey), rồi chạy `npm run ai:check`.
+Muốn đo thời gian từng luồng với shop kiểm thử tạm, chạy `npm run ai:benchmark`
+(có dùng quota API thật). Backend mặc định dành tổng cộng 60 giây cho các bước
+AI trong một lượt chat; câu đọc số liệu đơn giản được xử lý trực tiếp. Chi tiết
+cấu hình và cách đọc báo cáo: [Gemini API setup](docs/GEMINI_API_SETUP.md).
 File [.env.example](.env.example) đã chia các mục cho nhóm: key Gemini chính,
 hai key bổ sung không bắt buộc, Groq dự phòng và khóa ghép nối extension tự sinh.
 Chỉ cần một key Gemini để bắt đầu; nếu bật Groq, điền `GROQ_API_KEY` và đặt

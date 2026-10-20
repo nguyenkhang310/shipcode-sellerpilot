@@ -5,11 +5,17 @@ Từ root:
 ```sh
 npm run typecheck
 npm run test:api
+npm run test:svg
 npm run build
 npm run build:ios
 ```
 
 TypeScript bật strict và kiểm tra biến/tham số không dùng. `api-transport.cjs` kiểm tra ưu tiên URL API, ID ổn định khi thử lại, lấy kết quả đã lưu và hủy yêu cầu. `chat-messages.cjs` kiểm tra gộp bước upload nội bộ vào caption khi khôi phục lịch sử, giữ gallery và không tải lại ảnh đã hủy.
+
+`svg-gradients.cjs` chạy bộ trích gradient native thật của phiên bản
+`react-native-svg` đang cài. Bài này tái hiện cảnh báo `offset=".55"`, rồi kiểm
+tra giá trị Stop của dock/biểu đồ không cảnh báo và vẫn giữ mốc 0.55. Browser có
+thể chấp nhận chuỗi này nên riêng kiểm tra web không phát hiện được lỗi native.
 
 ## API UI giả lập
 
@@ -35,6 +41,7 @@ Với Playwright/Chrome đã cài, terminal khác từ root:
 ```sh
 node frontend/tests/app-audit.cjs
 node frontend/tests/dashboard-periods.cjs
+node frontend/tests/dock-themes.cjs
 node frontend/tests/chat-reliability.cjs
 node frontend/tests/chat-scroll.cjs
 node frontend/tests/chat-history.cjs
@@ -46,6 +53,7 @@ Nếu Playwright không nằm trong dependency cục bộ, đặt `PLAYWRIGHT_MO
 
 - `app-audit`: năm tab ở 320/375/430 px, ảnh sản phẩm, tìm kiếm, đơn, input co giãn, keyboard viewport, biểu đồ rỗng, lỗi đồng bộ và giao diện tối.
 - `dashboard-periods`: đổi Hôm nay/7/30 ngày khi API chậm, bấm liên tục, phản hồi về trễ, cache 60 giây, khung không co giật, đồng bộ lỗi và phản hồi sai kỳ.
+- `dock-themes`: 16 lần đổi sáng/tối ở 320/390/430/520px; kiểm tra material theo đúng theme, độ mờ, viền, backdrop, tab hiện tại, bản nháp chat và theme lưu sau reload. Chụp cả phần hiệu suất và thanh điều hướng. API bị chặn hoàn toàn bằng fixture, không cần 8123.
 - `chat-reliability`: Dừng, gửi tiếp sau Dừng, mất phản hồi sau commit, tải lại app và khôi phục upload mà không tạo bản nháp trùng.
 - `chat-scroll`: hiệu ứng ba chấm đang gõ, câu trả lời dài tự cuộn, giữ vị trí khi đang đọc tin cũ, nút về cuối và composer co giãn.
 - `chat-history`: vuốt trái thực tế, ghim/bỏ ghim, lưu qua reload, hủy/xác nhận xóa hội thoại đang mở và vùng chạm ở 320px.
@@ -96,3 +104,15 @@ retry cùng UUID sau khi mất phản hồi, tải lại khi 409 và xác nhận
 `app-audit.cjs` trước bài này nếu dùng chung một API QA; để chạy lại bài sửa đơn,
 khởi động lại đúng server QA 8123 để có đơn #5 ở trạng thái ban đầu. Ảnh/kết quả
 nằm tại `docs/evaluations/order-editor/` và không commit.
+
+## Độ dễ đọc và bản nháp dài
+
+`node frontend/tests/readability.cjs` chặn toàn bộ API bằng fixture; không ghi shop.
+Kiểm tra nút trợ lý 72px nhô lên, đường khoét cong, bấm được phần phía trên, bốn
+tab đủ 44px và chữ không bị thu xuống 10px; ảnh bấm đổi, tên/giá/tồn dài,
+đọc toàn bộ mô tả và tải lịch sử đến muộn sau khi chuyển sang hội thoại mới.
+Kiểm tra ở 320/390/430/520px; ảnh và JSON lưu tại `docs/evaluations/readability/`.
+Bài này không thay thế Dynamic Type hoặc kiểm tra bàn phím iOS thật.
+
+Các bài `chat-history` và `chat-reliability` cũng chuyển mọi API về server QA qua
+`qa-server.cjs`; bundle không cần chứa địa chỉ 8123. Hai bài vẫn cần API QA đang chạy.

@@ -161,3 +161,21 @@ Chrome của thành viên trước thuyết trình.
 
 Đã kiểm thử trên fixture, chưa xác minh bộ đọc với tất cả DOM Shopee đăng nhập.
 Không mô tả tỷ lệ thành công hoặc độ phủ toàn shop khi chưa nghiệm thu thực tế.
+
+## Kiểm tra tích hợp TikTok
+
+Nhánh TikTok dùng các host được khai báo trong manifest; nhãn kết nối dựa trên
+nền tảng của tab đang liên kết. Tin nhắn thuộc tính chỉ cập nhật bản nháp; phải
+bấm điền form lại sau khi xem xét. Không tự gán giá/tồn/trọng lượng, xuất xứ,
+thương hiệu hoặc chọn thuộc tính đầu tiên. Không tự thêm “chính hãng” vào tên.
+Điền đủ bốn ô tên/mô tả/giá/tồn mới được đánh dấu đã điền; không coi đó là đã đăng.
+
+```sh
+node extensions/shopee-connector/tests/tiktok-fixture.cjs
+```
+
+Dùng cùng `PLAYWRIGHT_MODULE`/`CHROME_EXECUTABLE` như fixture Shopee nếu cần.
+Bài này chỉ mở HTML giả lập, kiểm tra giữ tồn 0, không tự đoán vận chuyển,
+không submit, ô bị framework trả về giá trị cũ và nhiều ô giá gây mơ hồ.
+Chưa nghiệm thu trên DOM của tài khoản TikTok thật. Biến thể, ảnh và các trường
+ngành hàng/thuộc tính cần kiểm tra lại trên trang người bán trước khi gửi duyệt.

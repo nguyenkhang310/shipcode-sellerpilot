@@ -10,6 +10,7 @@ import json
 import logging
 import re
 from contextvars import ContextVar
+from contextlib import asynccontextmanager
 from datetime import date
 from time import monotonic, perf_counter
 
@@ -88,9 +89,18 @@ async def post_json(http, url, headers, body, timeout):
     if len(json.dumps(body, ensure_ascii=False).encode()) > MAX_REQUEST_BYTES:
         raise AIProviderError('invalid_response', stage='request_size')
     try:
-        response = await http.post(url, headers=headers, json=body, timeout=timeout, follow_redirects=False)
+        # A float here overrides the client's short connect timeout as well as
+        # its read timeout. Keep connection/pool waits short without truncating
+        # a valid generation. The caller still owns the overall deadline.
+        phase_timeout = httpx.Timeout(timeout, connect=min(5, timeout),
+                                      write=min(10, timeout), pool=min(5, timeout))
+        response = await http.post(url, headers=headers, json=body, timeout=phase_timeout, follow_redirects=False)
     except httpx.TimeoutException as error:
-        raise AIProviderError('provider_timeout', stage='api_network', retryable=True) from error
+        phase = ('connect' if isinstance(error, httpx.ConnectTimeout) else
+                 'read' if isinstance(error, httpx.ReadTimeout) else
+                 'write' if isinstance(error, httpx.WriteTimeout) else
+                 'pool' if isinstance(error, httpx.PoolTimeout) else 'network')
+        raise AIProviderError('provider_timeout', stage=f'api_{phase}_timeout', retryable=True) from error
     except httpx.HTTPError as error:
         raise AIProviderError('provider_unavailable', stage='api_network', retryable=True) from error
     code = response.status_code
@@ -128,6 +138,10 @@ class GroqBackup:
 
     def supports(self, count):
         return bool(self._key) and (count <= 3 if self.model == 'qwen/qwen3.8-27b' else count == 0)
+
+    @property
+    def available(self):
+        return bool(self._key) and monotonic() >= self._cooldown_until
 
     async def generate(self, system, payload, images, schema, *, timeout, max_tokens=None):
         if not self.supports(len(images)):
@@ -175,8 +189,9 @@ class GeminiClient:
     natural_responses = True
     prefer_model_intent = True
     prefer_direct_facts = True
+    prefer_direct_pricing = True
 
-    def __init__(self, http, api_key, model=MODEL, *, timeout=45, max_tokens=2048, advice_max_tokens=4096, backup=None, credentials=None, project='', rpm=None):
+    def __init__(self, http, api_key, model=MODEL, *, timeout=60, max_tokens=2048, advice_max_tokens=4096, backup=None, credentials=None, project='', rpm=None):
         if model not in {MODEL, 'gemini-3.8-flash'}:
             raise ValueError('Unsupported Gemini model')
         self.http, self.model = http, model
@@ -187,6 +202,21 @@ class GeminiClient:
         self._health = ProviderHealth(availability='unavailable')
         self._health_until = 0.0
         self._response_source = ContextVar('gemini_response_source', default=(self.provider, self.model))
+        self._deadline = ContextVar('gemini_turn_deadline', default=None)
+
+    @asynccontextmanager
+    async def generation_scope(self):
+        """One deadline across intent, extraction, correction and final wording."""
+        token = self._deadline.set(perf_counter() + self.timeout) if self._deadline.get() is None else None
+        try:
+            yield
+        finally:
+            if token is not None:
+                self._deadline.reset(token)
+
+    def remaining_seconds(self):
+        deadline = self._deadline.get()
+        return self.timeout if deadline is None else max(0, deadline - perf_counter())
 
     @property
     def response_provider(self):
@@ -232,7 +262,7 @@ class GeminiClient:
 
     async def respond(self, message, *, history, facts):
         try:
-            async with asyncio.timeout(self.timeout):
+            async with self.generation_scope(), asyncio.timeout(self.remaining_seconds()):
                 text = await self._generate(response_prompt(facts), {
                     'current_message': message, 'history': bounded_history(history),
                     'shop_facts': facts, 'money_interpretations': money_hints(message)})
@@ -275,7 +305,7 @@ class GeminiClient:
     async def _structured(self, system, payload, schema, *, images=None, context=None):
         payload = dict(payload)
         try:
-            async with asyncio.timeout(self.timeout):
+            async with self.generation_scope(), asyncio.timeout(self.remaining_seconds()):
                 for attempt in range(2):
                     text = await self._generate(system, payload, images=images, schema=schema.model_json_schema())
                     fenced = re.fullmatch(r'```(?:json)?\s*([\s\S]*?)\s*```', text.strip(), re.I)
@@ -291,10 +321,14 @@ class GeminiClient:
 
     async def _generate(self, system, payload, *, images=None, schema=None):
         started = perf_counter()
+        task = ('listing' if 'known_product' in payload else 'classify' if 'today' in payload else
+                'prepare_advice' if 'memory' in payload and 'shop_facts' in payload else
+                'extract_advice' if 'memory' in payload else 'product_edit' if 'current_product' in payload else 'chat')
+        actual_provider, actual_model, outcome = None, None, 'error'
         parts = image_parts(images or [])
         advice = bool(payload.get('shop_facts', {}).get('business_advisory'))
         output_tokens = self.advice_max_tokens if advice else self.max_tokens
-        can_backup = self.backup is not None and self.backup.supports(len(parts))
+        can_backup = self.backup is not None and self.backup.available and self.backup.supports(len(parts))
         try:
             if not self.keys.configured:
                 raise AIProviderError('provider_unavailable', stage='api_key_missing')
@@ -320,6 +354,7 @@ class GeminiClient:
                 if not text.strip() or len(text) > 16000:
                     raise AIProviderError('invalid_response', stage='api_content')
                 self._response_source.set((self.provider, self.model))
+                actual_provider, actual_model, outcome = self.provider, self.model, 'ok'
                 self._health = ProviderHealth(availability='available', model_available=True)
                 self._health_until = monotonic() + 30
                 return text.strip()
@@ -328,37 +363,59 @@ class GeminiClient:
                 self._health_until = monotonic() + 30
                 if not error.retryable or not can_backup:
                     raise
-                logger.warning('Gemini using configured Groq backup: reason=%s model=%s images=%s',
-                               error.reason, self.backup.model, len(parts))
-                remaining = self.timeout - (perf_counter() - started)
+                logger.warning('Gemini using configured Groq backup: reason=%s stage=%s elapsed_ms=%s model=%s images=%s',
+                               error.reason, error.stage, round((perf_counter() - started) * 1000), self.backup.model, len(parts))
+                remaining = min(self.remaining_seconds(), self.timeout - (perf_counter() - started))
                 if remaining <= 0:
                     raise
-                text = await self.backup.generate(system, payload, parts, schema, timeout=min(20, remaining),
-                                                  max_tokens=output_tokens)
+                try:
+                    actual_provider, actual_model = self.backup.provider, self.backup.model
+                    async with asyncio.timeout(min(20, remaining)):
+                        text = await self.backup.generate(system, payload, parts, schema, timeout=min(20, remaining),
+                                                          max_tokens=output_tokens)
+                except TimeoutError as deadline:
+                    raise AIProviderError('provider_timeout', stage='backup_deadline', retryable=True) from deadline
                 self._response_source.set((self.backup.provider, self.backup.model))
+                actual_provider, actual_model, outcome = self.backup.provider, self.backup.model, 'ok'
                 return text
+        except asyncio.CancelledError:
+            outcome = 'cancelled'
+            raise
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             raise AIProviderError('invalid_response', stage='api_protocol') from error
         finally:
-            logger.info('Gemini API timing: model=%s total_ms=%s images=%s', self.model,
-                        round((perf_counter() - started) * 1000), len(parts))
+            logger.info('AI generation timing: task=%s provider=%s model=%s status=%s total_ms=%s images=%s remaining_ms=%s',
+                        task, actual_provider or self.provider, actual_model or self.model, outcome,
+                        round((perf_counter() - started) * 1000), len(parts), round(self.remaining_seconds() * 1000))
 
     async def _gemini_request(self, body, *, can_backup, started):
         tried = set()
         last_error = None
-        while credential := self.keys.available(excluded=tried, reserve=True):
-            tried.add(credential.slot)
-            remaining = self.timeout - (perf_counter() - started)
+        while True:
+            remaining = min(self.remaining_seconds(), self.timeout - (perf_counter() - started))
             if remaining <= 0:
                 raise AIProviderError('provider_timeout', stage='api_deadline', retryable=True)
+            credential = self.keys.available(excluded=tried, reserve=True)
+            if credential is None:
+                break
+            tried.add(credential.slot)
             try:
                 # Extra Gemini credentials are for quota/auth failover. A slow but valid
                 # image request cannot safely be replayed with another key, so keep the
                 # full request deadline instead of shortening every multi-key call to 15s.
-                # Reserve a short window only when a configured backup can handle the call.
-                timeout = min(15, remaining) if can_backup else remaining
-                return await post_json(self.http, GEMINI_URL + self.model + ':generateContent',
-                    {'x-goog-api-key': credential.secret}, body, timeout)
+                # Reserve up to 20s for an available backup. A fixed 15s cutoff
+                # was rejecting valid Gemini replies (measured >16s on live API),
+                # leaving part of the configured deadline unused. For short
+                # deadlines share the time; never extend the overall deadline.
+                timeout = max(remaining / 2, remaining - 20) if can_backup else remaining
+                try:
+                    # httpx phase timeouts alone are not a wall-clock budget:
+                    # connect + upload + read can otherwise consume backup time.
+                    async with asyncio.timeout(timeout):
+                        return await post_json(self.http, GEMINI_URL + self.model + ':generateContent',
+                            {'x-goog-api-key': credential.secret}, body, timeout)
+                except TimeoutError as deadline:
+                    raise AIProviderError('provider_timeout', stage='api_primary_deadline', retryable=True) from deadline
             except AIProviderError as error:
                 if error.reason == 'provider_rate_limited':
                     self.keys.rate_limited(credential, getattr(error, 'retry_after_seconds', 60))

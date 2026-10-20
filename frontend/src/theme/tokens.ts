@@ -3,6 +3,9 @@ export const BRAND = {
   navyDeep: '#071633',
   gold: '#FFB800',
   goldSoft: '#FFF7DC',
+  orange: '#E46D22',
+  orangeInk: '#A8450D',
+  orangeSoft: '#FFF0E5',
   red: '#E1251B',
 };
 
@@ -10,7 +13,7 @@ export const LIGHT_IOS = {
   bg: '#F6F6F8',
   card: '#FFFFFF',
   label: '#1C1C1E',
-  secondary: '#8E8E93',
+  secondary: '#6F727A',
   tertiary: '#AEAEB2',
   separator: '#E5E5EA',
   fill: '#E9E9EE',

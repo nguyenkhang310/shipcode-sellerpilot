@@ -16,6 +16,7 @@ export function ProductThumbnail({ uri, size = 52, radius = 12, label = 'Ảnh s
   useEffect(() => setFailed(false), [source]);
 
   return <View accessibilityLabel={label} style={[ui.productImage, {
+    flexShrink: 0,
     width: size,
     height: size,
     borderRadius: radius,

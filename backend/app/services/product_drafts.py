@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from app.ai.contracts import AIProviderError
+from app.ai.quantities import quantity_value, EMPTY_STOCK_PHRASES
+from app.ai.listing_evidence import commercial_context as _commercial_context
 from app.ai.listing_contracts import ListingCopy, listing_validation_context, contextual_product_reference
 from app.ai.fallback import extract_price, normalize_text
 from app.ai.money import money_hints, money_mentions, single_money, affirmed_quote
@@ -287,7 +289,7 @@ async def advance_product_draft(
                 and mentions[0].value is not None and 1_000 <= mentions[0].value <= 1_000_000_000):
             draft.price_vnd = mentions[0].value
             changed.add('price_vnd')
-        bare = money_only or bool(re.fullmatch(r"[\d.,]+\s*(?:đ|₫|vnd|k|nghìn|ngàn|triệu|tr|sản phẩm|cái|chiếc)?", text))
+        bare = (field == "stock" and quantity_value(text) is not None) or money_only or bool(re.fullmatch(r"[\d.,]+\s*(?:đ|₫|vnd|k|nghìn|ngàn|triệu|tr|sản phẩm|cái|chiếc)?", text))
         if field == 'price_vnd' and draft.price_vnd is not None and text in {'giữ giá cũ', 'giu gia cu', 'không đổi giá', 'khong doi gia'}:
             pending_fields = [item for item in pending_fields if item != 'price_vnd']
             changed.add('price_vnd')
@@ -545,22 +547,6 @@ def _evidence_in_message(evidence: str | None, message: str) -> bool:
     return bool(evidence and normalize_text(evidence) in normalize_text(message))
 
 
-def _commercial_context(evidence: str, message: str, *, stock: bool = False) -> bool:
-    if not affirmed_quote(evidence, message):
-        return False
-    text, quote = normalize_text(message), normalize_text(evidence)
-    for match in re.finditer(re.escape(quote), text):
-        context = _plain(text[max(0, match.start() - 70):match.end()])
-        markers = re.findall(r'\b(?:gia von|gia nhap|chi phi|phi ship|phi van chuyen|gia cu|gia goc|gia ban|gia|ban|de|chot|kho|con|so luong|ram|dung luong)\b', context)
-        if markers and markers[-1] in {'gia von', 'gia nhap', 'chi phi', 'phi ship', 'phi van chuyen', 'gia cu', 'gia goc', 'ram', 'dung luong'}:
-            continue
-        if stock:
-            if re.search(r'\b(?:cai|chiec|san pham|sp)\b', _plain(quote)) or markers and markers[-1] in {'kho', 'con', 'so luong'}:
-                return True
-        elif any(item.explicit and item.value is not None for item in money_mentions(quote)) or markers and markers[-1] in {'gia ban', 'gia', 'ban', 'de', 'chot'}:
-            return True
-    return False
-
 
 def _apply_model_details(draft, copy: ListingCopy, message: str, categories, *, rewrite: bool):
     """Model interprets language; backend verifies seller-supplied commercial values."""
@@ -574,8 +560,7 @@ def _apply_model_details(draft, copy: ListingCopy, message: str, categories, *, 
             draft.price_vnd = amount
             applied.add('price_vnd')
     if copy.stock is not None and _evidence_in_message(copy.stock_evidence, message):
-        numbers = re.findall(r"(?<![\w.,])\d+(?![\w.,])", copy.stock_evidence or '')
-        if numbers == [str(copy.stock)] and _commercial_context(copy.stock_evidence, message, stock=True):
+        if quantity_value(copy.stock_evidence) == copy.stock and _commercial_context(copy.stock_evidence, message, stock=True):
             draft.stock = copy.stock
             applied.add('stock')
     if not copy.clarification:
@@ -587,7 +572,8 @@ def _apply_model_details(draft, copy: ListingCopy, message: str, categories, *, 
             # used only when no source description was supplied or rewriting was requested.
             draft.description = copy.description_evidence.strip() if _evidence_in_message(copy.description_evidence, message) else copy.description.strip()
             applied.add('description')
-        if copy.category_id is not None and (draft.category_id is None or _evidence_in_message(copy.name_evidence, message)):
+        if copy.category_id is not None and (draft.category_id is None or _evidence_in_message(copy.name_evidence, message)
+                                              or 'name' in applied and contextual_product_reference(message)):
             category = next(item for item in categories if item['id'] == copy.category_id)
             draft.category_id, draft.category_name = category['id'], category['name']
             applied.add('category_id')
@@ -625,8 +611,7 @@ def _chat_data(run, draft, answer, tool):
 
 
 def _extract_stock(text):
-    match = re.fullmatch(r"\s*([0-9][0-9.,]*)(?:\s*(?:sản phẩm|san pham|cái|cai|chiếc|chiec))?\s*", text)
-    return _stock_number(match.group(1)) if match else None
+    return quantity_value(text)
 
 
 def _stock_number(value: str) -> int | None:
@@ -796,6 +781,9 @@ def _extract_labeled_price(message: str) -> int | None:
 def _apply_explicit_details(draft, message: str, categories: list[dict]) -> set[str]:
     """Apply clearly labelled facts, including corrections to an existing draft."""
     changed: set[str] = set()
+    if _plain(message).strip(' .!?') in EMPTY_STOCK_PHRASES:
+        draft.stock = 0
+        changed.add('stock')
     name = _extract_labeled_value(message, r"tên(?:\s+sản phẩm)?|ten(?:\s+san pham)?|tiêu\s+đề|tieu\s+de")
     if not name:
         candidate = _command_product_name(message)

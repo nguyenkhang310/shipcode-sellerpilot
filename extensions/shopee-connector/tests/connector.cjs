@@ -229,3 +229,38 @@ test('missing connector routes explain stale backend, while lost jobs and networ
     await assert.rejects(api.backend('/health'), /127\.0\.0\.1:8000/);
   } finally {global.fetch = original;}
 });
+
+test('partial form fill never becomes a completed draft', async()=>{
+ const [state,api]=await load();saved={};
+ await state.bindCurrentTab('shopee');
+ await state.mutate(c=>{c.target={label:'fixture-shop'};c.drafts[1]={id:1,status:'ready',name:'Bàn phím',description:'Trắng',price_vnd:500000,stock:0};});
+ const send=chrome.tabs.sendMessage;
+ chrome.tabs.sendMessage=async(id,msg)=>msg.kind==='fill'?{ok:true,data:{report:[{field:'name',status:'filled'},{field:'stock',status:'not_retained'}],submitted:false}}:send(id,msg);
+ try{
+  await assert.rejects(api.handleApi('/product-drafts/1/publish','POST','{}'),/Chưa xác minh/);
+  assert.equal((await state.state()).drafts[1].status,'ready');
+ }finally{chrome.tabs.sendMessage=send;}
+});
+
+test('TikTok attribute replies preserve zero stock and require another explicit fill',async()=>{
+ const [state,api]=await load();saved={};
+ const originalGet=chrome.tabs.get,originalSend=chrome.tabs.sendMessage,originalFetch=global.fetch;
+ const conversation=crypto.randomUUID(),core={name:'Bàn phím',description:'Bàn phím màu trắng',price_vnd:500000,stock:0};let fills=0;
+ chrome.tabs.get=async id=>({id,url:'https://seller-vn.tiktok.com/product/create'});
+ chrome.tabs.sendMessage=async(_id,message)=>{
+  if(message.kind==='read')return {ok:true,data:{document_id:'doc',page_context:'context',snapshot:{url:'https://seller-vn.tiktok.com/product/create'}}};
+  if(message.kind==='fill'){fills++;assert.equal(message.draft.stock,0);assert.equal(message.draft.weight_g,500);assert.equal(message.draft.brand,'Nova');assert.equal(message.draft.origin,'Thái Lan');return {ok:true,data:{report:['name','description','price_vnd','stock'].map(field=>({field,status:'filled'})),submitted:false,unfilled_required:[]}};}
+  return {ok:true,data:{target_matches:true}};
+ };
+ global.fetch=async(url,options={})=>({ok:true,json:async()=>({data:options.method==='POST'?{status:'running'}:{status:'completed',result:{answer:'Đã ghi nhận thông tin. Bạn xem lại bản nháp.',draft:core,missing_fields:[],provider:'gemini',model:'fixture'}}})});
+ try{
+  await state.bindCurrentTab('shopee');await state.mutate(c=>{c.target={label:'fixture-shop'};c.drafts[1]={id:1,status:'filled',conversation_id:conversation,...core};});
+  assert.equal((await state.connectionStatus()).platform,'tiktok');
+  await api.handleApi('/chat','POST',JSON.stringify({request_id:crypto.randomUUID(),conversation_id:conversation,message:'Thương hiệu: Nova; Xuất xứ: Thái Lan; Trọng lượng: 0,5kg'}));
+  assert.equal(fills,0,'A chat message cannot write a page');
+  const draft=(await state.state()).drafts[1];assert.equal(draft.weight_g,500);assert.equal(draft.stock,0);assert.equal(draft.status,'ready');
+  await api.handleApi('/product-drafts/1/publish','POST','{}');assert.equal(fills,1);
+  const history=(await api.handleApi('/conversations/'+conversation,'GET',null)).data;
+  assert(history.turns.every(t=>t.response.run_id&&t.response.integration_mode==='shopee_browser'));
+ }finally{chrome.tabs.get=originalGet;chrome.tabs.sendMessage=originalSend;global.fetch=originalFetch;}
+});

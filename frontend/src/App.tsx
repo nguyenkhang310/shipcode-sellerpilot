@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppShell } from './app/AppShell';
@@ -10,18 +10,27 @@ import { ExtensionShell } from './integrations/ExtensionShell';
 export default function App() {
   const systemScheme = useColorScheme();
   const [darkMode, setDarkMode] = useState(systemScheme === 'dark');
+  const manualChoice = useRef(false), storedChoice = useRef(false);
+  const writes = useRef(Promise.resolve());
 
   useEffect(() => {
     let active = true;
     AsyncStorage.getItem('sellerpilot.theme').then((saved) => {
-      if (active && (saved === 'dark' || saved === 'light')) setDarkMode(saved === 'dark');
+      if (active && !manualChoice.current && (saved === 'dark' || saved === 'light')) {
+        storedChoice.current = true; setDarkMode(saved === 'dark');
+      }
     }).catch(() => undefined);
     return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    if (!manualChoice.current && !storedChoice.current) setDarkMode(systemScheme === 'dark');
+  }, [systemScheme]);
+
   const changeDarkMode = (value: boolean) => {
+    manualChoice.current = true;
     setDarkMode(value);
-    void AsyncStorage.setItem('sellerpilot.theme', value ? 'dark' : 'light').catch(() => undefined);
+    writes.current = writes.current.then(() => AsyncStorage.setItem('sellerpilot.theme', value ? 'dark' : 'light')).catch(() => undefined);
   };
 
   return (

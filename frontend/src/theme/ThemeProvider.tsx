@@ -9,6 +9,9 @@ function buildTheme(darkMode: boolean, desktop: boolean) {
     ...BRAND,
     navy: darkMode ? '#9EB9DC' : BRAND.navy,
     navyDeep: darkMode ? '#101A2A' : BRAND.navyDeep,
+    orange: darkMode ? '#FFA463' : BRAND.orange,
+    orangeInk: darkMode ? '#FFB27D' : BRAND.orangeInk,
+    orangeSoft: darkMode ? '#35261E' : BRAND.orangeSoft,
   };
   const mobile = createMobileStyles(IOS, darkMode, brand);
   return { IOS, BRAND: brand, isDark: darkMode, desktop, ui: desktop ? createExtensionStyles(mobile, IOS) : mobile };

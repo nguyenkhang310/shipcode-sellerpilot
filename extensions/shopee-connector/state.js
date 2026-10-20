@@ -26,6 +26,7 @@ export async function connectionStatus() {
   if (connection.mode === 'local') return {...result, tab_status: 'local'};
   if (!connection.tab_id) return {...result, tab_status: 'unlinked'};
   const tab = await chrome.tabs.get(connection.tab_id).catch(() => null);
+  if (tab && isSellerUrl(tab.url)) result.platform = TIKTOK_SOURCES.includes(new URL(tab.url).origin) ? 'tiktok' : 'shopee';
   if (tab && isSellerUrl(tab.url) && connection.target) {
     try {return {...result, tab_status: 'linked', ...await pageMessage(connection, {kind: 'target_status'})};}
     catch {return {...result, tab_status: 'linked', target_matches: false};}

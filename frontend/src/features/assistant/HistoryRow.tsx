@@ -36,10 +36,10 @@ export function HistoryRow(props: Props) {
     <View pointerEvents={props.revealed ? 'auto' : 'none'} accessibilityElementsHidden={!props.revealed} importantForAccessibility={props.revealed ? 'auto' : 'no-hide-descendants'} aria-hidden={!props.revealed}
       style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: ACTION_WIDTH, flexDirection: 'row', paddingVertical: 4, gap: 4 }}>
       <Pressable accessibilityRole="button" accessibilityLabel={props.item.is_pinned ? 'Bỏ ghim cuộc trò chuyện' : 'Ghim cuộc trò chuyện'} disabled={props.disabled} onPress={props.onPin} style={({ pressed }) => ({ flex: 1, minHeight: 54, alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 12, backgroundColor: isDark ? '#343640' : '#E6E8EE', opacity: pressed ? .65 : 1 })}>
-        {props.busy ? <ActivityIndicator color={IOS.label} /> : <Ionicons name={props.item.is_pinned ? 'pin-outline' : 'pin'} size={21} color={IOS.label} />}<Text style={{ color: IOS.label, fontSize: 11 }}>{props.item.is_pinned ? 'Bỏ ghim' : 'Ghim'}</Text>
+        {props.busy ? <ActivityIndicator color={IOS.label} /> : <Ionicons name={props.item.is_pinned ? 'pin-outline' : 'pin'} size={21} color={IOS.label} />}<Text style={{ color: IOS.label, fontSize: 13 }}>{props.item.is_pinned ? 'Bỏ ghim' : 'Ghim'}</Text>
       </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel="Xóa cuộc trò chuyện" disabled={props.disabled} onPress={props.onDelete} style={({ pressed }) => ({ flex: 1, minHeight: 54, alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 12, backgroundColor: '#D94E49', opacity: pressed ? .65 : 1 })}>
-        <Ionicons name="trash-outline" size={21} color="#FFF" /><Text style={{ color: '#FFF', fontSize: 11 }}>Xóa</Text>
+        <Ionicons name="trash-outline" size={21} color="#FFF" /><Text style={{ color: '#FFF', fontSize: 13 }}>Xóa</Text>
       </Pressable>
     </View>
     <Animated.View style={{ transform: [{ translateX: x }], flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? '#101114' : '#F5F5F7' }}>
@@ -49,7 +49,7 @@ export function HistoryRow(props: Props) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>{props.item.is_pinned ? <Ionicons name="pin" size={13} color={IOS.secondary} /> : null}<Text numberOfLines={2} style={[ui.listTitle, { flex: 1 }]}>{props.item.title}</Text></View>
         <Text style={ui.caption}>{new Date(props.item.updated_at).toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: 'numeric', month: 'numeric' })}</Text>
       </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={'Thao tác: ' + props.item.title} accessibilityState={{ expanded: props.revealed }} disabled={props.disabled} onPress={() => props.onReveal(props.revealed ? null : props.item.id)} style={{ width: 42, minHeight: 60, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="ellipsis-horizontal" size={19} color={IOS.secondary} /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel={'Thao tác: ' + props.item.title} accessibilityState={{ expanded: props.revealed }} disabled={props.disabled} onPress={() => props.onReveal(props.revealed ? null : props.item.id)} style={{ width: 44, minHeight: 60, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="ellipsis-horizontal" size={19} color={IOS.secondary} /></Pressable>
     </Animated.View>
   </View>;
 }

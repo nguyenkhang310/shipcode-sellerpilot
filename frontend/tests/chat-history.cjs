@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { useQaServer } = require('./qa-server.cjs');
 const api = process.env.QA_API_ORIGIN || 'http://127.0.0.1:8123';
 const output = path.resolve(__dirname, '../../docs/evaluations/chat-history');
 fs.mkdirSync(output, { recursive: true });
@@ -11,6 +12,7 @@ let browser, page;
 (async () => {
   browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless: true });
   page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await useQaServer(page);
   const errors = [], checks = [];
   page.on('pageerror', error => errors.push(error.message));
   const create = async message => {

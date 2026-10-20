@@ -423,3 +423,35 @@ def test_model_cannot_return_a_context_reference_as_product_title(message):
 def test_advice_and_negation_do_not_create_a_product_draft(message):
     from app.services.chat_dispatch import listing_request
     assert not listing_request(message)
+
+
+def test_deictic_product_correction_updates_category_as_well_as_copy(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    provider = SemanticProvider({'name': 'Laptop màu đen', 'description': 'Laptop màu đen theo hình ảnh của shop.', 'category_id': 4})
+    with client:
+        client.app.state.ai_provider = provider
+        _, reply = upload_and_reply(client)
+        first = reply('Đăng sản phẩm trong ảnh, bán 5 xị, kho còn 20 cái')['product_draft']
+        assert first['category_id'] == 4
+        provider.result = {'name': 'Xe đạp màu đen', 'description': 'Xe đạp màu đen theo hình ảnh của shop.', 'category_id': 7}
+        corrected = reply('không, xe đó')['product_draft']
+        assert corrected['name'] == 'Xe đạp màu đen' and corrected['category_id'] == 7
+        assert corrected['price_vnd'] == 500000 and corrected['stock'] == 20
+
+
+@pytest.mark.parametrize('message,expected', [('hai mươi cái',20), ('mười lăm',15), ('1.000 chiếc',1000), ('hết hàng',0), ('không còn hàng',0)])
+def test_stock_followup_accepts_natural_quantities_without_guessing_money(tmp_path, message, expected):
+    client, _, _ = make_client(tmp_path)
+    with client:
+        client.app.state.ai_provider = CopyProvider()
+        _, reply = upload_and_reply(client)
+        reply('Bàn phím Nova K75')
+        reply('5 xị')
+        draft = reply(message)['product_draft']
+        assert draft['stock'] == expected and draft['price_vnd'] == 500000
+
+
+@pytest.mark.parametrize('text', ['20.5 cái', 'âm hai cái', '-20', 'hai hoặc ba cái', 'hai mươi đến ba mươi cái', '20k', '5 xị', 'hết hàng chưa?'])
+def test_ambiguous_fractional_or_currency_quantities_are_not_stock(text):
+    from app.ai.quantities import quantity_value
+    assert quantity_value(text) is None

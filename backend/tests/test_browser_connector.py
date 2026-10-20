@@ -277,3 +277,10 @@ def test_invalid_synchronized_context_never_reaches_model(browser, change):
     response = client.post('/api/v1/browser-connector/requests', json=request, headers=HEADERS)
     assert response.status_code == 422
     assert provider.facts == []
+
+
+def test_browser_cost_is_never_applied_as_selling_price(browser):
+    client, _ = browser
+    result = finish(client, payload(mode='listing', message='Giá vốn 5 xị, mình chưa chốt giá bán. Còn 12 cái.'))
+    assert result['result']['draft']['price_vnd'] is None
+    assert result['result']['draft']['stock'] == 12

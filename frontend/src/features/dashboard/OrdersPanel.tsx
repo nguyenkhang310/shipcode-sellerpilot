@@ -1,3 +1,4 @@
+import { dockContentInset } from '../../components/layout/dockGeometry';
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Keyboard, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
@@ -70,7 +71,7 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
     const first = item.items?.[0], open = expanded === item.id;
     return <View style={ui.orderCard} testID={'order-card-' + item.id}>
       <Pressable accessibilityRole="button" accessibilityLabel={'Chi tiết đơn #' + item.id} accessibilityState={{ expanded: open }} onPress={() => { Keyboard.dismiss(); setExpanded(open ? null : item.id); }} style={({ pressed }) => [ui.orderSummary, pressed && { opacity: .7 }]}>
-        <View style={ui.between}><Text style={ui.listTitle}>Đơn #{item.id}</Text><View style={[ui.orderStatus, { backgroundColor: color + '14' }]}><View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: color }} /><Text style={{ fontSize: 12, fontWeight: '600', color }}>{state?.label || item.status}</Text></View></View>
+        <View style={[ui.between, { flexWrap: 'wrap' }]}><Text style={ui.listTitle}>Đơn #{item.id}</Text><View style={[ui.orderStatus, { backgroundColor: color + '14' }]}><View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: color }} /><Text style={{ fontSize: 12, fontWeight: '600', color }}>{state?.label || item.status}</Text></View></View>
         <View style={ui.row}>
           <ProductThumbnail uri={first?.image_url} size={48} radius={12} label={first?.name ? 'Ảnh ' + first.name : 'Ảnh sản phẩm trong đơn'} />
           <View style={ui.grow}><Text numberOfLines={1} style={ui.productName}>{item.customer_name || 'Khách hàng'}</Text><Text numberOfLines={1} style={ui.productMeta}>{first?.name || 'Đơn hàng tại shop'}</Text><Text style={[ui.productMeta, { marginTop: 3 }]}>{orderDate(item.created_at)}</Text></View>
@@ -85,7 +86,7 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
         {item.payment_method ? <View style={ui.detailLine}><Text style={ui.caption}>Thanh toán</Text><Text style={ui.productName}>{item.payment_method === 'COD' ? 'Khi nhận hàng' : item.payment_method}</Text></View> : null}
         {item.payment_status ? <View style={ui.detailLine}><Text style={ui.caption}>Trạng thái thanh toán</Text><Text style={ui.productName}>{{ paid: 'Đã thanh toán', unpaid: 'Chưa thanh toán', initiated: 'Đang xử lý', failed: 'Thất bại', cancelled: 'Đã hủy' }[item.payment_status] || item.payment_status}</Text></View> : null}
         <Pressable accessibilityRole="button" accessibilityLabel={'Quản lý đơn #' + item.id} onPress={() => setEditingId(item.id)} style={[ui.primaryButton, { marginTop: 10 }]}><Text style={ui.primaryText}>Quản lý đơn</Text></Pressable>
-        <Pressable accessibilityRole="button" onPress={() => onStore('/seller/orders/' + item.id)} style={[ui.secondaryButton, { marginTop: 8 }]}><Text style={ui.secondaryText}>Mở trên web</Text><Ionicons name="open-outline" size={16} color={BRAND.navy} /></Pressable>
+        <Pressable accessibilityRole="button" onPress={() => onStore('/seller/orders/' + item.id)} style={[ui.linkHit, ui.row, { marginTop: 4, justifyContent: 'center', gap: 6 }]}><Text style={ui.textLink}>Mở trên web</Text><Ionicons name="open-outline" size={16} color={BRAND.navy} /></Pressable>
       </View> : null}
     </View>;
   };
@@ -94,7 +95,7 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
     <View testID="order-filters" style={{ flexShrink: 0, minHeight: 62, paddingBottom: 10 }}><ScrollView ref={filters} horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 22, paddingVertical: 4, gap: 8, alignItems: 'center' }} style={{ flexGrow: 0, flexShrink: 0 }}>
       {[{ key: 'all', label: 'Tất cả' }, ...ORDER_STATES].map(state => <Pressable key={state.key} accessibilityRole="button" accessibilityLabel={state.label} accessibilityState={{ selected: status === state.key }} onLayout={e => { chipPositions.current[state.key] = e.nativeEvent.layout.x; }} onPress={() => chooseStatus(state.key)} style={[ui.orderChip, state.key === status && { backgroundColor: isDark ? '#DAE5F5' : '#0B1F3F', borderColor: 'transparent' }]}><Text style={[ui.orderChipText, state.key === status && { color: isDark ? '#0B1F3F' : '#FFF' }]}>{state.label}</Text></Pressable>)}
     </ScrollView></View>
-    <FlatList ref={list} testID="orders-list" data={items} keyExtractor={item => String(item.id)} renderItem={renderOrder} extraData={expanded} style={{ flex: 1 }} contentContainerStyle={[ui.sheetScroll, { paddingBottom: embedded ? 112 + insets.bottom : 24 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" initialNumToRender={8} maxToRenderPerBatch={6} windowSize={7}
+    <FlatList ref={list} testID="orders-list" data={items} keyExtractor={item => String(item.id)} renderItem={renderOrder} extraData={expanded} style={{ flex: 1 }} contentContainerStyle={[ui.sheetScroll, { paddingBottom: embedded ? dockContentInset(insets.bottom) : 24 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" initialNumToRender={8} maxToRenderPerBatch={6} windowSize={7}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(0, true)} tintColor={BRAND.navy} />}
       ListHeaderComponent={<Text style={[ui.caption, { marginBottom: 12 }]}>{total === null ? 'Đang tải đơn hàng…' : count(total) + ' đơn hàng'}</Text>}
       ListEmptyComponent={!loading && !error ? <View style={ui.center}><Ionicons name="receipt-outline" size={36} color={IOS.tertiary} /><Text style={ui.loadingText}>Không tìm thấy đơn hàng</Text></View> : null}

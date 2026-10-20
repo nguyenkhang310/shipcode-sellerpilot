@@ -109,6 +109,98 @@ def test_invalid_images_fail_before_network_without_dropping_files(images):
     run_call(handler, call, backup=True)
 
 
+@pytest.mark.parametrize('kind,stage', [
+    (httpx.ConnectTimeout, 'api_connect_timeout'),
+    (httpx.ReadTimeout, 'api_read_timeout'),
+    (httpx.WriteTimeout, 'api_write_timeout'),
+    (httpx.PoolTimeout, 'api_pool_timeout'),
+])
+def test_timeout_phase_is_diagnosed_without_exposing_credentials(kind, stage):
+    def handler(request):
+        raise kind('PRIVATE network details', request=request)
+    async def call(provider):
+        with pytest.raises(AIProviderError) as caught:
+            await provider.respond('Xin chào', history=[], facts={})
+        assert caught.value.reason == 'provider_timeout'
+        assert caught.value.stage == stage
+        assert 'PRIVATE' not in str(caught.value)
+    run_call(handler, call)
+
+
+def test_primary_has_time_past_old_cutoff_and_reserves_a_bounded_backup_window():
+    calls = []
+    def handler(request):
+        calls.append(request.url.host)
+        limits = request.extensions['timeout']
+        assert 39 <= limits['read'] <= 40
+        assert limits['connect'] == 5 and limits['pool'] == 5 and limits['write'] == 10
+        return httpx.Response(200, json=completed('Phản hồi từ Gemini.'))
+    async def call(provider):
+        assert await provider.respond('Xin chào', history=[], facts={}) == 'Phản hồi từ Gemini.'
+        assert provider.response_provider == 'gemini'
+    run_call(handler, call, backup=True)
+    assert calls == ['generativelanguage.googleapis.com']
+
+
+def test_read_timeout_uses_one_backup_without_replaying_primary_on_other_keys():
+    calls = []
+    def handler(request):
+        calls.append(request.url.host)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout('synthetic timeout', request=request)
+        assert request.extensions['timeout']['read'] <= 20
+        return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': 'Trả lời dự phòng.'}}]})
+    async def call(provider):
+        assert await provider.respond('Xin chào', history=[], facts={}) == 'Trả lời dự phòng.'
+        assert provider.response_provider == 'groq'
+    run_call(handler, call, backup=True)
+    assert calls == ['generativelanguage.googleapis.com', 'api.groq.com']
+
+
+def test_primary_wall_clock_budget_keeps_backup_time_even_before_httpx_phase_expires():
+    async def run():
+        calls = []
+        async def handler(request):
+            calls.append(request.url.host)
+            if request.url.host == 'generativelanguage.googleapis.com':
+                # MockTransport does not enforce httpx phase timeouts. The app
+                # must still cancel the primary before it consumes the deadline.
+                await asyncio.sleep(.55)
+                return httpx.Response(200, json=completed('Too late'))
+            return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': 'Trả lời dự phòng.'}}]})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            provider = GeminiClient(http, 'synthetic-key', timeout=.8,
+                                    backup=GroqBackup(http, 'synthetic-backup-key'))
+            answer = await provider.respond('Xin chào', history=[], facts={})
+            assert answer == 'Trả lời dự phòng.' and provider.response_provider == 'groq'
+            assert calls == ['generativelanguage.googleapis.com', 'api.groq.com']
+    asyncio.run(run())
+
+
+def test_sixty_second_turn_is_shared_across_multiple_operations_and_expires_without_spending_quota(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr('app.ai.gemini.perf_counter', lambda: clock[0])
+    calls = []
+    def handler(request):
+        calls.append(request.extensions['timeout']['read'])
+        return httpx.Response(200, json=completed())
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            provider = GeminiClient(http, 'synthetic-key')
+            assert provider.timeout == 60
+            async with provider.generation_scope():
+                await provider.respond('First', history=[], facts={})
+                clock[0] += 40
+                await provider.respond('Second', history=[], facts={})
+                clock[0] += 21
+                with pytest.raises(AIProviderError, match='provider_timeout'):
+                    await provider.respond('No time remaining', history=[], facts={})
+            assert calls == [60, 20]
+            assert sum(len(used) for used in provider.keys._used.values()) == 2
+            assert provider.remaining_seconds() == 60
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('code,reason', [(400,'provider_rejected'),(401,'provider_rejected'),
     (403,'provider_rejected'),(404,'model_unavailable'),(429,'provider_rate_limited'),(503,'provider_unavailable')])
 def test_http_errors_are_mapped_without_exposing_provider_body(code, reason):
@@ -370,3 +462,20 @@ def test_cancel_direct_api_request_does_not_invoke_backup():
             with pytest.raises(asyncio.CancelledError):
                 await task
     asyncio.run(run())
+
+
+def test_rate_limited_backup_does_not_shorten_the_healthy_primary_deadline(monkeypatch):
+    monkeypatch.setattr('app.ai.gemini.monotonic', lambda: 100.0)
+    calls = []
+    def handler(request):
+        calls.append(request)
+        assert 'groq' not in request.url.host
+        assert request.extensions['timeout']['read'] > 15
+        return httpx.Response(200, json=completed('Đã kiểm tra dữ liệu.'))
+    async def call(provider):
+        provider.backup._cooldown_until = 160
+        assert not provider.backup.available
+        answer = await provider.respond('Kiểm tra shop', history=[], facts={})
+        assert answer == 'Đã kiểm tra dữ liệu.'
+        assert len(calls) == 1
+    run_call(handler, call, backup=True)

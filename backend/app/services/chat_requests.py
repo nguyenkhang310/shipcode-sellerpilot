@@ -8,7 +8,9 @@ import asyncio
 import hashlib
 import json
 import logging
+from contextlib import AsyncExitStack
 from datetime import datetime
+from time import perf_counter
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -103,15 +105,22 @@ class ChatRequestManager:
                 'message': 'Cuộc trò chuyện đang được xóa. Bạn mở cuộc trò chuyện mới nhé.'})
 
     async def _run(self, key, payload, shop):
+        queued_at = perf_counter()
         try:
             async with asyncio.timeout(300):
                 async with self.execution:
+                    processing_at = perf_counter()
                     self._terminal(key, 'running')
                     with self.sessions() as connection_session:
                         bind = connection_session.get_bind()
                     with ChatTransaction(bind=bind, expire_on_commit=False, autoflush=False) as session:
                         session.info['defer_advisor_writes'] = True
-                        result = await dispatch_chat(payload, session, shop, self.provider(), self.settings)
+                        provider = self.provider()
+                        async with AsyncExitStack() as scope:
+                            generation_scope = getattr(provider, 'generation_scope', None)
+                            if callable(generation_scope):
+                                await scope.enter_async_context(generation_scope())
+                            result = await dispatch_chat(payload, session, shop, provider, self.settings)
                         from app.services.advisor import flush_memory_writes
                         flush_memory_writes(session)
                         row = session.get(ChatRequestRecord, key)
@@ -121,6 +130,10 @@ class ChatRequestManager:
                         # No await between service effects and final commit: an
                         # explicit cancel either wins before this or sees completed.
                         Session.commit(session)
+                        data = result.data
+                        logger.info('Chat timing: queue_ms=%s processing_ms=%s provider=%s model=%s mode=%s fallback=%s',
+                                    round((processing_at - queued_at) * 1000), round((perf_counter() - processing_at) * 1000),
+                                    data.provider, data.model, data.mode, data.fallback_reason)
         except asyncio.CancelledError:
             self._terminal(key, 'cancelled')
         except TimeoutError:

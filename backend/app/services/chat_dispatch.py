@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.ai.fallback import parse_fallback
 from app.ai.money import money_mentions
 from app.ai.money import plain
+from app.ai.quantities import quantity_value
 from app.integrations.ute_mall import ShopDatabaseError, UTEMallRepository
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.advisor import is_forget_request
@@ -70,7 +71,8 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
                 # not the draft's selling price. Labelled draft edits still resume it.
                 asking_shop = True
                 editing_draft = False
-        asking_shop = asking_shop and not editing_draft
+        quantity_reply = active_draft is not None and quantity_value(payload.message) is not None
+        asking_shop = asking_shop and not editing_draft and not quantity_reply
         if active_draft is not None and not labeled_edit:
             # A video caption or a plan to post content is advice, not a change
             # to the active product's listing caption/price/title.

@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     gemini_api_key_3: SecretStr = SecretStr('')
     gemini_project_id_3: str = ''
     gemini_model: Literal['gemini-3.5-flash-lite', 'gemini-3.8-flash'] = 'gemini-3.5-flash-lite'
-    gemini_generation_timeout_seconds: float = Field(default=45, ge=5, le=90)
+    gemini_generation_timeout_seconds: float = Field(default=60, ge=5, le=90)
     gemini_max_output_tokens: int = Field(default=2048, ge=256, le=4096)
     gemini_advice_max_output_tokens: int = Field(default=4096, ge=256, le=8192)
     groq_fallback_enabled: bool = False

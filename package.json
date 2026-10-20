@@ -8,6 +8,7 @@
   "scripts": {
     "demo": "node scripts/demo.cjs",
     "ai:check": "node scripts/check-ai.cjs",
+    "ai:benchmark": "node scripts/check-ai.cjs --benchmark",
     "dev": "npm run dev --workspace frontend",
     "start": "npm run start --workspace frontend",
     "ios": "npm run ios --workspace frontend",
@@ -17,6 +18,7 @@
     "build:ios": "npm run build:ios --workspace frontend",
     "typecheck": "npm run typecheck --workspace frontend",
     "test:api": "node --test frontend/tests/api-transport.cjs frontend/tests/chat-messages.cjs",
+    "test:svg": "node --test frontend/tests/svg-gradients.cjs",
     "extension:setup": "node scripts/extension.cjs setup",
     "extension:build": "node scripts/extension.cjs build",
     "test:extension": "node --test extensions/shopee-connector/tests/connector.cjs extensions/shopee-connector/tests/package.cjs extensions/shopee-connector/tests/sync.cjs",

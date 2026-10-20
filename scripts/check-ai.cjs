@@ -9,7 +9,8 @@ if (!existsSync(python)) {
   console.error('Chưa có backend/.venv. Cài môi trường theo README trước.');
   process.exitCode = 1;
 } else {
-  const child = spawn(python, ['-u', '-m', 'app.scripts.check_ai'], {cwd: backend, stdio: 'inherit'});
+  const args = process.argv.includes('--benchmark') ? ['-u', 'tests/benchmark_ai.py'] : ['-u', '-m', 'app.scripts.check_ai'];
+  const child = spawn(python, args, {cwd: backend, stdio: 'inherit'});
   child.on('error', error => { console.error(error.message); process.exitCode = 1; });
   child.on('exit', (code, signal) => { process.exitCode = signal ? 1 : code ?? 1; });
 }

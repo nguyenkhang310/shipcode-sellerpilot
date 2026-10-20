@@ -13,6 +13,8 @@ from app.ai.fallback import extract_price
 from app.ai.gemini import image_parts
 from app.ai.listing_contracts import ListingCopy, listing_validation_context
 from app.ai.money import money_hints
+from app.ai.quantities import quantity_value
+from app.ai.listing_evidence import commercial_context
 from app.ai.text import assistant_text
 
 
@@ -60,6 +62,7 @@ async def browser_assist(payload, provider):
     history = [row.model_dump() for row in payload.history]
     facts = {
         'integration_mode': 'shopee_browser',
+        'platform': 'tiktok' if 'tiktok.com' in payload.snapshot.url else 'shopee',
         'browser_snapshot': payload.snapshot.model_dump(mode='json'),
         'data_scope': 'Only the currently visible page; not a complete shop database.',
         'operations_executed': [],
@@ -85,7 +88,8 @@ async def browser_assist(payload, provider):
     image_parts(images)  # Validate encoding, signature and size before any provider call.
     known = {**payload.draft.model_dump(), 'current_message': payload.message,
              'allowed_categories': [], 'response_schema': ListingCopy.model_json_schema(),
-             'money_interpretations': money_hints(payload.message)}
+             'money_interpretations': money_hints(payload.message), 'image_count': len(images),
+             'last_question': history[-1]['content'] if history and history[-1]['role'] == 'assistant' else None}
     raw = await provider.compose_listing(facts=known, history=history, images=images)
     copy = ListingCopy.model_validate_json(raw, context=listing_validation_context(known, history))
     updates = {}
@@ -97,17 +101,18 @@ async def browser_assist(payload, provider):
             updates[field] = value
     if (copy.price_vnd is not None and copy.price_evidence
             and copy.price_evidence in payload.message
-            and extract_price(copy.price_evidence, sku=None) == copy.price_vnd):
+            and extract_price(copy.price_evidence, sku=None) == copy.price_vnd
+            and commercial_context(copy.price_evidence, payload.message)):
         updates['price_vnd'] = copy.price_vnd
     if copy.stock is not None and copy.stock_evidence and copy.stock_evidence in payload.message:
-        numbers = re.findall(r'\d+', copy.stock_evidence)
-        if numbers == [str(copy.stock)]:
+        if quantity_value(copy.stock_evidence) == copy.stock and commercial_context(copy.stock_evidence, payload.message, stock=True):
             updates['stock'] = copy.stock
     draft = payload.draft.model_copy(update=updates)
     missing = [field for field in ('name', 'description', 'price_vnd', 'stock') if getattr(draft, field) is None]
     labels = {'name': 'món hàng cần bán', 'description': 'thông tin mô tả', 'price_vnd': 'giá bán', 'stock': 'số lượng tồn kho'}
+    platform = 'TikTok Shop' if 'tiktok.com' in payload.snapshot.url else 'Shopee'
     answer = copy.clarification or (
-        'Mình đã soạn bản nháp. Bạn kiểm tra rồi bấm **Điền vào Shopee**; sản phẩm chưa được đăng.'
+        f'Mình đã soạn bản nháp. Bạn kiểm tra rồi bấm **Điền vào form** trên {platform}; sản phẩm chưa được đăng.'
         if not missing else 'Mình đã giữ các thông tin đã có. Bạn bổ sung ' + ', '.join(labels[key] for key in missing[:2]) + ' nhé?')
     return {'answer': answer, 'draft': draft.model_dump(), 'missing_fields': missing,
             'provider': getattr(provider, 'response_provider', getattr(provider, 'provider', 'gemini')),

@@ -69,7 +69,7 @@ async def verify(provider):
     else:
         if not (await provider.check_health()).model_available:
             raise ValueError('Provider chưa sẵn sàng. Với Gemini, kiểm tra key, quyền model và quota; với Antigravity, kiểm tra đăng nhập/quyền CLI.')
-        print(f'PASS · {provider.provider} / {provider.model}: model truy cập được.', flush=True)
+        print(f'PASS · {provider.provider} / {provider.model}: đọc được metadata model; chưa xác nhận quota sinh nội dung.', flush=True)
 
     today = datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')).date()
     change = 'Đổi giá SKU DEMO-KB-001 thành 5 xị'
@@ -173,7 +173,11 @@ async def main():
             'free_model_unavailable': 'Không thấy GLM Free active với đủ giá 0. Chạy opencode models opencode --refresh --verbose để kiểm tra.',
             'provider_timeout': 'Quá thời gian. Kiểm tra mạng và thử lại; mặc định 90 giây cho mỗi lượt gọi.',
         }
-        detail = ('Kiểm tra GEMINI_API_KEY, quyền model và quota trong AI Studio; xem docs/GEMINI_API_SETUP.md.'
+        gemini_detail = ({
+            'provider_timeout': 'Quá thời gian chờ. api_connect_timeout: kết nối/TLS; api_read_timeout: đã kết nối nhưng chưa nhận phản hồi; *_deadline: hết deadline chung. Xem log timing và docs/GEMINI_API_SETUP.md.',
+            'provider_rate_limited': 'Đã chạm quota Gemini hoặc Groq dự phòng (429). Xem log provider trước lỗi và quota trong AI Studio/Groq Console; đổi key cùng project không tạo quota mới.',
+        }.get(error.reason, 'Kiểm tra GEMINI_API_KEY, quyền model và quota trong AI Studio; xem docs/GEMINI_API_SETUP.md.'))
+        detail = (gemini_detail
                   if settings.ai_provider == 'gemini' else
                   'Kiểm tra agy, đăng nhập và docs/ANTIGRAVITY_SETUP.md; không bật credit hoặc quyền công cụ rộng.'
                   if settings.ai_provider == 'antigravity' else guidance.get(error.reason, 'Kiểm tra kết nối OpenCode; xem docs/GLM_SETUP.md.'))

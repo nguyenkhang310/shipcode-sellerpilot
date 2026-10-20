@@ -20,6 +20,7 @@ from app.ai.fallback import (
 )
 from app.ai.money import money_mentions, plain
 from app.ai.catalog_query import catalog_lookup
+from app.ai.quick_reads import quick_read, read_text, simple_pricing_read
 from app.ai.text import assistant_text
 from app.integrations.ute_mall import ShopItemNotFoundError, UTEMallRepository
 from app.integrations import management
@@ -124,7 +125,7 @@ async def handle_chat(
     direct = parse_fallback(resolved, today=today)
     forgetting = is_forget_request(message)
     catalog_read = direct.intent == 'product_search' and catalog_lookup(message) is not None
-    skip_classifier = catalog_read or callable(getattr(ai_provider, "respond", None)) and (
+    skip_classifier = bool(simple) or catalog_read or callable(getattr(ai_provider, "respond", None)) and (
         direct.intent == "sales_advice"
         or natural_responses and direct.intent in (
             "shop_summary", "inventory_query", "product_search"
@@ -206,6 +207,9 @@ async def handle_chat(
                 command = ParsedCommand(intent='sales_advice')
                 result.update(answer=pricing_reply(advisor['pricing_analysis']), tool='calculate_pricing',
                               tool_arguments=advisor['pricing_analysis']['inputs'])
+                if (getattr(ai_provider, 'prefer_direct_pricing', False)
+                        and not advisor.get('context_extraction_error') and simple_pricing_read(message)):
+                    direct_reply = True
     # Price proposals and confirmations retain the backend's exact wording.
     # OpenCode may phrase read-only tool results naturally using their actual facts.
     can_generate = command.intent in ("sales_advice", "unknown") or (
@@ -542,12 +546,12 @@ def execute_command(
 
 
 def simple_reply(message, runs):
-    text = normalize_text(message).strip("!.? ")
-    if text in {"chào", "chào bạn", "xin chào", "hello", "hi", "alo"}:
+    text = read_text(message)
+    if text in {'chao', 'chao ban', 'xin chao', 'xin chao ban', 'hello', 'hi', 'alo', 'helo'}:
         return "Chào bạn, mình là SellerPilot của ShipCode. Hôm nay bạn muốn mình giúp gì cho shop?"
-    if text in {"cảm ơn", "cảm ơn bạn", "thanks", "ok", "oke", "được rồi"}:
+    if text in {'cam on', 'cam on ban', 'cam on nhe', 'thanks', 'thank you', 'ok', 'oke', 'okie', 'duoc roi'}:
         return "Rất sẵn lòng. Khi cần xem số liệu hoặc xử lý việc tiếp theo cho shop, cứ nhắn mình nhé."
-    if runs and any(run.proposal_id for run in runs[-3:]) and re.search(r'^(?:(?:mình|tôi)\s+)?(?:xác nhận|đồng ý|confirm)\b', text):
+    if runs and any(run.proposal_id for run in runs[-3:]) and re.search(r'^(?:(?:minh|toi)\s+)?(?:xac nhan|dong y|confirm)\b', text):
         return "Để tránh thay đổi nhầm, bạn hãy bấm **Xác nhận đổi giá** trên đúng thẻ đề xuất. Tin nhắn này chưa thay đổi dữ liệu."
     return None
 
@@ -558,6 +562,8 @@ def is_exact_fact_question(message, command):
     Extra analysis, instructions and follow-up text fail the full match and
     continue through the natural assistant. This never handles write actions.
     """
+    if quick_read(message, today=command.day or date.today()) is not None:
+        return True
     text = plain(normalize_text(message)).strip(' ?!.')
     if command.intent == 'inventory_query':
         patterns = [

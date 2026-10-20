@@ -33,6 +33,7 @@ let browser,page;
     const dock=await page.getByTestId('bottom-dock').boundingBox();
     assert(field&&dock&&field.y+field.height<dock.y,'Composer must remain clear of navigation');
    }
+   await page.waitForFunction(()=>[...document.querySelectorAll('[role="heading"],textarea')].filter(el=>el.getClientRects().length).every(el=>{for(let node=el;node;node=node.parentElement)if(Number(getComputedStyle(node).opacity)<.99)return false;return true;}));
    await page.screenshot({path:path.join(OUTPUT,`${tab}-${width}.png`)});
   }
  }
@@ -41,9 +42,19 @@ let browser,page;
  await page.setViewportSize({width:390,height:844});
  await page.getByRole('button',{name:'Cài đặt shop và giao diện',exact:true}).click();
  const close=page.getByRole('button',{name:'Đóng',exact:true});await close.waitFor();
- await page.waitForFunction(()=>document.getAnimations().every(animation=>animation.playState!=='running'||animation.effect?.getTiming().iterations===Infinity));
+ // Modal's slide can start after its children mount. Wait for the actual
+ // close control to settle inside the viewport instead of sampling animations once.
+ await page.waitForFunction(()=>{
+  const button=document.querySelector('[aria-label="Đóng"]');if(!button)return false;
+  const box=button.getBoundingClientRect();
+  if(!(box.height>0&&box.y>=0&&box.bottom<=innerHeight))return false;
+  for(let p=button;p;p=p.parentElement)if(Number(getComputedStyle(p).opacity)<.99)return false;
+  const old=window.__qaCloseBox;const now=performance.now();
+  if(!old||Math.abs(old.y-box.y)>.2){window.__qaCloseBox={y:box.y,since:now};return false;}
+  return now-old.since>200;
+ });
  const closeBox=await close.boundingBox();
- assert(closeBox&&closeBox.y>=0&&closeBox.y+closeBox.height<=844,'Sheet close action must be visible');
+ assert(closeBox&&closeBox.y>=0&&closeBox.y+closeBox.height<=844,'Sheet close action must be visible: '+JSON.stringify(closeBox));
  await close.click();
  await page.getByRole('button',{name:'Lịch sử trò chuyện',exact:true}).click();
  await page.getByRole('button',{name:'Đóng lịch sử trò chuyện',exact:true}).click();

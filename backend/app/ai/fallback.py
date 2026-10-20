@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from app.ai.contracts import ParsedCommand
 from app.ai.money import money_mentions, affirmed_quote
 from app.ai.catalog_query import catalog_lookup
+from app.ai.quick_reads import quick_read
 
 
 CHANGE_PRICE_PHRASES = (
@@ -51,6 +52,9 @@ def reporting_days(message: str) -> int | None:
 
 
 def parse_fallback(message: str, *, today: date) -> ParsedCommand:
+    direct_read = quick_read(message, today=today)
+    if direct_read is not None:
+        return direct_read
     text = normalize_text(message)
     sku = extract_sku(text)
     if re.search(r'\b(?:không|khong|đừng|dung|chưa|chua)(?:\s+(?:cần|can|muốn|muon))?\s+(?:đổi|doi|sửa|sua|cập nhật|cap nhat)\s+giá', text):

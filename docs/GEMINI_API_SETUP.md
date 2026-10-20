@@ -138,3 +138,59 @@ Nguồn cấu hình: [Gemini models](https://ai.google.dev/gemini-api/docs/model
 [GenerateContent](https://ai.google.dev/api/generate-content),
 [Groq models](https://console.groq.com/docs/models),
 [Groq deprecations](https://console.groq.com/docs/deprecations).
+
+
+## Chẩn đoán timeout (cập nhật 21/10/2026)
+
+Với `GEMINI_GENERATION_TIMEOUT_SECONDS=60` và Groq đang khả dụng, backend dành khoảng 40 giây
+cho Gemini và tối đa 20 giây còn lại cho Groq. Trước đây Gemini bị cắt cứng ở 15
+giây, dù deadline chung còn dư. Khi Groq đang cooldown do 429 hoặc không nhận đủ
+số ảnh, Gemini dùng toàn bộ deadline; không chuyển sang một backup đã biết hết quota.
+Connect/pool tối đa 5 giây, write tối đa 10 giây, luôn nằm trong deadline chung.
+Không replay một request Gemini chậm qua tất cả các key.
+
+60 giây là ngân sách sinh nội dung **chung cho một lượt chat**, gồm phân tích ý
+định, trích dữ kiện, soạn câu trả lời và backup nếu có; không nhân thành 60 giây
+cho từng bước. Thời gian chờ khóa xử lý/database và truyền mạng tới điện thoại
+không nằm trong ngân sách này. Log `Chat timing` tách `queue_ms` và `processing_ms`;
+log `AI generation timing` ghi task, provider/model thực sự chạy và ngân sách còn lại.
+
+Các câu đọc số liệu đơn giản được nhận diện bằng quy tắc tiếng Việt có/không dấu,
+ví dụ “nay shop sao rồi”, “hôm nay chốt được mấy đơn”, “sản phẩm nào gần hết hàng”,
+“SKU SEED-PHONE còn mấy cái”. Chúng đọc dữ liệu đã xác thực và trả lời trực tiếp,
+không gọi model. Câu tư vấn, so sánh phức tạp và thay đổi dữ liệu vẫn đi qua luồng
+AI/xác nhận tương ứng. Đây là NLP theo quy tắc, không phải một model tiếng Việt mới.
+
+Với câu tính lời đơn giản, AI vẫn trích chi phí/phí/giá bán rồi backend kiểm tra
+bằng chứng và tính bằng Decimal. Sau đó dùng câu trả lời số liệu chuẩn, bỏ lượt
+gọi AI chỉ để diễn đạt lại, tránh AI sửa sai kết quả tính.
+
+Log phân biệt `api_connect_timeout`, `api_read_timeout`, `api_write_timeout`,
+`api_pool_timeout` và deadline chung; log fallback có stage và elapsed_ms, không có
+key/prompt. `npm run ai:check` cũng giải thích lỗi quota riêng với lỗi thời gian.
+Metadata đọc được không đồng nghĩa sinh nội dung đã sẵn sàng.
+
+Phép đo thật trong lượt rà soát: kết nối/TLS hoàn tất khoảng 0,23 giây; một yêu cầu
+cực ngắn trả HTTP 200 sau 16,52 giây. Một lượt qua prompt chat đầy đủ chạm deadline
+45 giây. Đây là bằng chứng mốc 15 giây quá ngắn cho một số lượt, đồng thời độ trễ
+provider vẫn biến động; tăng budget không bảo đảm hết mọi timeout. Groq trong bộ
+kiểm tra live cũng từng trả 429; không coi fallback là quota vô hạn.
+
+### Đo lại trên máy của nhóm
+
+Sau khi cài dependency phát triển của backend và điền key trong `.env`:
+
+```sh
+npm run ai:benchmark
+```
+
+Lệnh tạo database tạm và ảnh bàn phím tự vẽ, không đọc shop đang kết nối, không
+đăng sản phẩm. Có gọi API thật và dùng quota. Báo cáo không chứa key/prompt nằm
+ở `docs/evaluations/ai-latency/results.json` (gitignore); exit code khác 0 nếu
+có ca thất bại/fallback. Các ca: chào hỏi, tổng quan, đơn, kho, SKU, tư vấn,
+tính lời và bản nháp từ ảnh. Test này cần dependency `pytest` từ nhóm dev.
+
+Lần đo ngày 21/10: năm câu đơn giản 5–30ms trong backend, không gọi AI; tư vấn
+32,9s, tính lời 20,5s (một lượt trích dữ kiện), tạo bản nháp ảnh 16,5s. Tất cả
+qua kiểm tra nội dung và không fallback. Đây là số đo một lần trên máy phát triển,
+không phải cam kết độ trễ; model/quota/mạng có thể thay đổi kết quả.

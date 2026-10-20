@@ -2,6 +2,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
+const {qaFetch,useQaServer}=require('./qa-server.cjs');
 const APP_URL=process.env.QA_APP_URL || 'http://127.0.0.1:5174';
 const API_ORIGIN=process.env.QA_API_ORIGIN || 'http://127.0.0.1:8123';
 const OUTPUT=path.resolve(__dirname,'../../docs/evaluations/chat-reliability');
@@ -10,6 +11,7 @@ let browser,page;
 (async()=>{
  browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE || undefined,headless:true});
  page=await browser.newPage({viewport:{width:390,height:844}});
+ await useQaServer(page);
  const errors=[],checks=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(APP_URL,{waitUntil:'networkidle'});
  await page.getByRole('tab',{name:'SellerPilot',exact:true}).click();
@@ -28,7 +30,7 @@ let browser,page;
  let lostId,posts=0;
  await page.route('**/api/v1/chat',async route=>{
    posts++;lostId=route.request().postDataJSON().request_id;
-   await route.fetch();await route.abort('failed');
+   await qaFetch(route);await route.abort('failed');
  });
  await input.fill('Kiểm tra tình huống mất phản hồi');await send.click();
  await page.getByRole('button',{name:/Thử lại/}).waitFor();
@@ -63,7 +65,7 @@ let browser,page;
  let uploadId;
  await page.route('**/api/v1/product-drafts/images-data',async route=>{
    uploadId=route.request().postDataJSON().request_id;
-   await route.fetch();await route.abort('failed');
+   await qaFetch(route);await route.abort('failed');
  });
  await send.click();await page.getByRole('button',{name:/Thử lại/}).waitFor();
  await page.unroute('**/api/v1/product-drafts/images-data');
