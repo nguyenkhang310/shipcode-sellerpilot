@@ -51,7 +51,7 @@ export function restoreMessages(turns: ConversationDetail['turns']): Message[] {
     if (draft && turn.response.tool === 'create_product_draft' && followed.has(draft.id)) return [];
     const imageUris = draft && draft.status !== 'cancelled' && !shown.has(draft.id)
       ? draft.preview_urls.map(productDraftImageUrl) : undefined;
-    if (draft) shown.add(draft.id);
+    if (draft && imageUris?.length) shown.add(draft.id);
     return [
       { id: turn.response.run_id + ':u', role: 'user', text: turn.message, imageUris },
       assistantMessage(turn.response),

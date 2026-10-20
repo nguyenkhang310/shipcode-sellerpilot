@@ -60,7 +60,7 @@ let browser,page;
  await page.getByRole('tab',{name:'Đơn hàng',exact:true}).click();
  await page.getByRole('button',{name:'Chi tiết đơn #1',exact:true}).waitFor();
  await page.getByRole('button',{name:'Chi tiết đơn #1',exact:true}).click();
- await page.getByRole('button',{name:'Xử lý đơn #1 trên Shopee',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Quản lý đơn #1',exact:true}).waitFor();
  await page.getByRole('button',{name:'Chờ xác nhận',exact:true}).click();
  await page.getByRole('button',{name:'Chi tiết đơn #5',exact:true}).waitFor();
  const orderSearch=page.getByRole('textbox',{name:'Tìm đơn hàng'});

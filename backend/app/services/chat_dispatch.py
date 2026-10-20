@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.fallback import parse_fallback
 from app.ai.money import money_mentions
+from app.ai.money import plain
 from app.integrations.ute_mall import ShopDatabaseError, UTEMallRepository
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.advisor import is_forget_request
@@ -18,13 +19,29 @@ from app.ai.fallback import extract_sku
 from app.services.product_drafts import (
     ProductDraftConflictError, _wants_ai_description,
     advance_product_draft, get_active_draft,
+    create_text_product_draft,
 )
+
+
+def listing_request(message):
+    text = plain(message).lower()
+    if planning_request(message) or re.search(r'\b(?:neu|gia su|co nen|huong dan|cach dang)\b', text):
+        return False
+    if re.search(r'\b(?:khong|dung|chua)(?:\s+(?:can|muon))?\s+(?:dang|tao|them|dua)\b', text):
+        return False
+    return bool(re.search(r'\b(?:dang(?: ban)?|tao|them|dua)\s+(?:(?:mot|1)\s+)?(?:san pham|mat hang|mon hang)\b', text)
+                or re.search(r'\b(?:dang|dua)\b.{0,80}\blen (?:san|shop|gian hang)\b', text)
+                or re.match(r'^(?:(?:ban|hay|giup|minh|toi|em|muon)\s+){0,4}dang\s+(?!bai|video|tin|story|reel|ky)\S', text))
 
 
 async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRepository, provider, settings) -> ChatResponse:
     try:
         conversation_id = str(payload.conversation_id) if payload.conversation_id else None
         active_draft = get_active_draft(session, shop, conversation_id)
+        if active_draft is None and listing_request(payload.message):
+            active_draft = create_text_product_draft(session, shop, conversation_id)
+            return ChatResponse(data=await advance_product_draft(session, shop, provider, active_draft,
+                message=payload.message, upload_dir=settings.shop_product_upload_dir))
         previous=recent_runs(session,shop,conversation_id,limit=2)
         continue_edit=bool(pending_edit(previous) and not planning_request(payload.message)
             and (extract_sku(payload.message.lower()) or re.match(r'\s*(?:tiêu đề|tên sản phẩm|mô tả|giá|tồn)\s*[:=]',payload.message,re.I)

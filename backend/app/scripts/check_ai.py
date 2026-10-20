@@ -99,6 +99,7 @@ async def verify(provider):
         'synthetic_test_only': True, 'name': None, 'description': None,
         'price_vnd': None, 'stock': None, 'category_id': None, 'category': None,
         'current_message': message, 'copy_instructions': None,
+        'image_count': 1, 'missing_fields': ['name', 'description', 'category_id', 'price_vnd', 'stock'],
         'allowed_categories': [{'id': 2, 'name': 'Thời Trang Nam'}, {'id': 4, 'name': 'Máy Tính & Laptop'}],
         'response_schema': ListingCopy.model_json_schema(),
     }
@@ -108,8 +109,24 @@ async def verify(provider):
         history=[{'role': 'user', 'content': message}], images=[image])))
     if (not listing.name or 'bàn phím' not in listing.name.lower() or not listing.description
             or listing.category_id != 4 or listing.price_vnd != 500000 or listing.stock != 8):
-        raise ValueError('Đọc ảnh/soạn bản nháp chưa đúng sản phẩm, ngành hàng, giá hoặc tồn kho.')
+        raise ValueError('Đọc ảnh/soạn bản nháp chưa đúng: ' + json.dumps({
+            'name': listing.name, 'has_description': bool(listing.description),
+            'category_id': listing.category_id, 'price_vnd': listing.price_vnd, 'stock': listing.stock,
+        }, ensure_ascii=False))
     print('PASS · Đọc ảnh bàn phím giả lập, tự soạn tên/mô tả, trích giá và tồn kho.', flush=True)
+
+    followup = 'bàn phím đó'
+    known = {**facts, 'current_message': followup, 'price_vnd': 500000, 'stock': 8,
+             'last_question': 'Bạn muốn bán món nào trong ảnh?', 'missing_fields': ['name', 'description', 'category_id']}
+    resolved = ListingCopy.model_validate(parse_json(await provider.compose_listing(facts=known,
+        history=[{'role': 'user', 'content': message},
+                 {'role': 'assistant', 'content': known['last_question']},
+                 {'role': 'user', 'content': followup}], images=[image])))
+    if not resolved.name or 'bàn phím' not in resolved.name.lower() or not resolved.description or resolved.clarification:
+        raise ValueError('Chưa hiểu câu trả lời ngắn theo ảnh và câu hỏi trước.')
+    if {'price_vnd', 'stock'} & set(resolved.next_question_fields):
+        raise ValueError('Model hỏi lại giá/tồn đã có trong ngữ cảnh.')
+    print('PASS · Câu ngắn “bàn phím đó” được hiểu theo ảnh/lịch sử; tự viết nội dung, không hỏi lại giá/tồn.', flush=True)
 
 
 async def main():

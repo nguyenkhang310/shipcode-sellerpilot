@@ -48,11 +48,14 @@ if __name__ == '__main__':
         with sqlite3.connect(settings.shop_database_path) as connection:
             connection.execute("UPDATE product SET image_url='/static/catalog/sample.png'")
             connection.execute("ALTER TABLE \"order\" ADD COLUMN shipping_name TEXT")
+            for column in ['shipping_phone TEXT', 'shipping_address TEXT', 'note TEXT', 'payment_method TEXT', 'payment_status TEXT']:
+                connection.execute('ALTER TABLE "order" ADD COLUMN ' + column)
             for number in range(1, 36):
                 created = (datetime.utcnow() - timedelta(hours=number)).isoformat(sep=' ')
                 state = ['pending', 'paid', 'shipped', 'delivered', 'cancelled'][number % 5]
                 connection.execute('INSERT INTO \"order\" (id, shop_id, total_amount, status, created_at, shipping_name) VALUES (?,1,1000000,?,?,?)',
                     (number, state, created, 'Khách thử nghiệm ' + str(number)))
                 connection.execute('INSERT INTO order_item (order_id, product_id, quantity, price) VALUES (?,1,1,1000000)', (number,))
+            connection.execute("UPDATE \"order\" SET shipping_phone='0901234567', shipping_address='123 Đường Kiểm Thử', note='', payment_method='COD', payment_status='unpaid'")
         application = app.main.create_app(settings)
         uvicorn.run(application, host='127.0.0.1', port=8123, log_level='warning')

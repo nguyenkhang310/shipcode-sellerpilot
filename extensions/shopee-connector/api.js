@@ -108,7 +108,7 @@ export async function handleApi(path, method, raw, signal) {
   const connection = await state();
   if (connection.mode === 'local') {
     // Full existing app behavior is available only after an explicit source switch.
-    if (!/^\/(?:chat(?:\/requests\/[a-z0-9-]+(?:\/cancel)?)?|conversations(?:\/[a-z0-9-]+)?|management\/(?:dashboard|products|orders)|product-drafts(?:\/images-data|\/[0-9]+\/(?:publish|cancel))|product-edits\/[0-9]+\/(?:confirm|reject)|proposals\/[0-9]+\/(?:confirm|reject)|health)(?:\?[^#]*)?$/i.test(path)) fail('Đường dẫn không được phép.', 400);
+    if (!/^\/(?:chat(?:\/requests\/[a-z0-9-]+(?:\/cancel)?)?|conversations(?:\/[a-z0-9-]+)?|management\/(?:dashboard|products|orders(?:\/[0-9]+)?)|product-drafts(?:\/images-data|\/[0-9]+\/(?:publish|cancel))|product-edits\/[0-9]+\/(?:confirm|reject)|proposals\/[0-9]+\/(?:confirm|reject)|health)(?:\?[^#]*)?$/i.test(path)) fail('Đường dẫn không được phép.', 400);
     const response = await fetch(API + path, {method, body: method === 'GET' ? undefined : raw,
       headers: {'Content-Type': 'application/json'}, credentials: 'omit', redirect: 'error', signal});
     const result = await response.json();

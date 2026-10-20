@@ -350,7 +350,8 @@ def test_image_data_upload_supports_native_clients_without_multipart(tmp_path):
         })
         assert uploaded.status_code == 201
         data = uploaded.json()["data"]
-        assert data["answer"] == "Mình đã nhận ảnh. **Sản phẩm này tên gì?**"
+        assert "Đã nhận ảnh" in data["answer"]
+        assert "tên gì" not in data["answer"]
         assert data["product_draft"]["missing_fields"][0] == "name"
         assert len(list(upload_dir.iterdir())) == 1
 
@@ -544,6 +545,9 @@ def test_shop_question_can_interrupt_and_resume_a_draft_without_changing_its_nam
 
 def test_cost_clarification_during_draft_is_not_used_as_selling_price(tmp_path):
     class CostAdvisor(OfflineProvider):
+        async def compose_listing(self, **kwargs):
+            raise AIProviderError('provider_unavailable')
+
         natural_responses = True
         provider = 'opencode'
         model = 'glm-5.3-flash-free'

@@ -1,0 +1,86 @@
+// Uses the disposable QA ledger only. Never send mutations to the working shop.
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const assert=require('node:assert/strict');
+const path=require('node:path');
+const fs=require('node:fs');
+const {useQaServer,qaFetch}=require('./qa-server.cjs');
+const output=path.resolve(__dirname,'../../docs/evaluations/order-editor');
+fs.mkdirSync(output,{recursive:true});
+let browser;
+(async()=>{
+ browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE||undefined,headless:true});
+ const page=await browser.newPage({viewport:{width:390,height:844}});
+ const errors=[],checks=[],patches=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await useQaServer(page);
+ let lose=false,conflict=false;
+ await page.route('**/api/v1/management/orders/5',async route=>{
+  if(route.request().method()!=='PATCH')return route.fulfill({response:await qaFetch(route)});
+  patches.push(route.request().postDataJSON());
+  if(conflict){conflict=false;return route.fulfill({status:409,headers:{'Access-Control-Allow-Origin':'*'},json:{detail:'Đơn hàng vừa thay đổi. Tải lại chi tiết trước khi lưu.'}});}
+  const response=await qaFetch(route);
+  if(lose){lose=false;return route.abort('failed');}
+  await route.fulfill({response});
+ });
+ await page.goto(process.env.QA_APP_URL||'http://127.0.0.1:5174');
+ await page.getByRole('tab',{name:'Đơn hàng',exact:true}).click();
+ await page.getByRole('button',{name:'Chi tiết đơn #5',exact:true}).click();
+ const open=()=>page.getByRole('button',{name:'Quản lý đơn #5',exact:true}).click();
+ await open();
+ const name=page.getByRole('textbox',{name:'Người nhận',exact:true});await name.waitFor();
+ await page.waitForFunction(()=>document.getAnimations().every(a=>a.playState!=='running'||a.effect?.getTiming().iterations===Infinity));
+ for(const width of [320,390,520]){
+  await page.setViewportSize({width,height:width===320?640:844});
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'No horizontal overflow');
+  const close=await page.getByRole('button',{name:'Đóng chi tiết đơn hàng',exact:true}).boundingBox();
+  const footer=await page.getByRole('button',{name:'Xem thay đổi',exact:true}).boundingBox();
+  await page.screenshot({path:path.join(output,`details-${width}.png`)});
+  assert(close&&close.y>=0&&footer&&footer.y+footer.height<=page.viewportSize().height,'Close and primary actions remain visible: '+JSON.stringify({width,close,footer}));
+  await page.screenshot({path:path.join(output,`details-${width}.png`)});
+ }
+ checks.push('Order details fit 320/390/520px; close and footer remain reachable');
+ await page.setViewportSize({width:390,height:844});
+ await name.fill('Khách đã sửa');
+ const phone=page.getByRole('textbox',{name:'Số điện thoại',exact:true});await phone.fill('123');
+ await page.getByRole('button',{name:'Xem thay đổi',exact:true}).click();
+ await page.getByText('Số điện thoại cần từ 8 đến 15 chữ số.',{exact:true}).waitFor();
+ assert.equal(patches.length,0);
+ await phone.fill('0901234567');
+ await page.getByRole('button',{name:'Xem thay đổi',exact:true}).click();
+ await page.getByRole('heading',{name:'Xem lại thay đổi',exact:true}).waitFor();
+ assert.equal(patches.length,0,'Review never writes');
+ await page.getByRole('button',{name:'Chỉnh lại',exact:true}).click();
+ await name.fill('Khách thử lại');
+ await page.getByRole('button',{name:'Xem thay đổi',exact:true}).click();
+ lose=true;
+ await page.getByRole('button',{name:'Xác nhận lưu',exact:true}).click();
+ await page.getByText('Chưa lưu được đơn hàng. Bạn có thể thử lại.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Xác nhận lưu',exact:true}).click();
+ await name.waitFor({state:'hidden'});
+ assert.equal(patches.length,2);assert.equal(patches[0].request_id,patches[1].request_id);
+ checks.push('Validation and review do not write; lost-response retry reuses operation ID');
+ await open();await name.waitFor();await name.fill('Không được ghi đè');
+ await page.getByRole('button',{name:'Xem thay đổi',exact:true}).click();conflict=true;
+ await page.getByRole('button',{name:'Xác nhận lưu',exact:true}).click();
+ await page.getByRole('button',{name:'Tải lại chi tiết',exact:true}).click();
+ await name.waitFor();assert.equal(await name.inputValue(),'Khách thử lại');
+ checks.push('409 conflict requires a reload and restores the latest server version');
+ await page.getByRole('radio',{name:'Xác nhận đơn',exact:true}).click();
+ await page.getByRole('button',{name:'Xem thay đổi',exact:true}).click();
+ await page.getByRole('button',{name:'Xác nhận lưu',exact:true}).click();
+ await name.waitFor({state:'hidden'});
+ await open();await name.waitFor();
+ assert.equal(await page.getByRole('radio',{name:'Xác nhận đơn',exact:true}).count(),0);
+ await page.getByRole('radio',{name:'Hủy đơn',exact:true}).click();
+ await page.getByRole('button',{name:'Xem thay đổi',exact:true}).click();
+ await page.getByText(/Hàng trong đơn sẽ được hoàn về kho/).waitFor();
+ await page.screenshot({path:path.join(output,'cancel-review-390.png')});
+ await page.getByRole('button',{name:'Xác nhận hủy đơn',exact:true}).click();
+ await name.waitFor({state:'hidden'});await open();
+ await page.getByRole('heading',{name:'Đơn #5',exact:true}).waitFor();
+ assert.equal(await page.getByRole('radio').count(),0,'Cancelled is terminal');
+ checks.push('Confirm and cancel update permitted actions; cancellation has an explicit review');
+ assert.deepEqual(errors,[]);
+ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({checks,errors,mutations:patches.length},null,2));
+ console.log(JSON.stringify({checks,errors,mutations:patches.length},null,2));
+})().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>browser?.close());

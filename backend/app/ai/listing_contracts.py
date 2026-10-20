@@ -3,6 +3,14 @@ import re
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 from typing import Literal
 from app.ai.fallback import normalize_text
+from app.ai.money import plain
+
+
+def contextual_product_reference(value):
+    text = ' '.join(plain(value).strip(' .!,?').split())
+    text = re.sub(r'^(?:khong[, ]*|y (?:minh|toi) la\s+)', '', text)
+    return bool(re.fullmatch(r'(?:(?:cai|chiec|con|mau|loai|san pham|mat hang|xe|ao|quan|may|mon|ban phim|chuot)\s+)?'
+                             r'(?:nay|do|kia|day|ay|no)(?:\s+(?:nhe|nha))?', text))
 
 
 def listing_validation_context(facts, history):
@@ -24,6 +32,12 @@ class ListingCopy(BaseModel):
     stock_evidence: str | None = Field(default=None, max_length=500)
     next_question: str | None = Field(default=None, max_length=280)
     next_question_fields: list[Literal['name', 'price_vnd', 'stock', 'category_id', 'description']] = Field(default_factory=list, max_length=5)
+
+    @model_validator(mode='after')
+    def meaningful_title(self):
+        if self.name and contextual_product_reference(self.name):
+            raise ValueError('Resolve the product reference from images/history; do not use it as a title')
+        return self
 
     @model_validator(mode='after')
     def condition_claims_need_seller_evidence(self, info: ValidationInfo):

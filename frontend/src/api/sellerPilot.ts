@@ -1,5 +1,5 @@
 import { apiRequest, API_URL } from './client';
-import { ChatData, PriceProposal, ProductDraft, ProductEditProposal, ManagementData, StorePage, StoreProduct, StoreOrder, ConversationSummary, ConversationDetail } from './types';
+import { ChatData, PriceProposal, ProductDraft, ProductEditProposal, ManagementData, StorePage, StoreProduct, StoreOrder, OrderDetail, OrderChanges, ConversationSummary, ConversationDetail } from './types';
 import { createMessageId, recoverChatRequest } from './chatRequests';
 
 export function decideProductEdit(id: number, decision: 'confirm' | 'reject') {
@@ -26,6 +26,10 @@ export async function sendSellerMessage(message: string, signal?: AbortSignal, c
 export const getManagement = (days: number, signal?: AbortSignal) => apiRequest<ManagementData>('/management/dashboard?days=' + days, { signal });
 export const getProducts = (q = '', low = false, offset = 0, signal?: AbortSignal) => apiRequest<StorePage<StoreProduct>>('/management/products?' + new URLSearchParams({ q, low: String(low), offset: String(offset) }), { signal });
 export const getOrders = (status = 'all', q = '', offset = 0, signal?: AbortSignal) => apiRequest<StorePage<StoreOrder>>('/management/orders?' + new URLSearchParams({ status, q, offset: String(offset) }), { signal });
+export const getOrder = (id: number, signal?: AbortSignal) => apiRequest<OrderDetail>('/management/orders/' + id, {signal});
+export const updateOrder = (id: number, changes: OrderChanges, version: string, requestId: string) => apiRequest<OrderDetail>('/management/orders/' + id, {
+  method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({...changes, expected_version: version, request_id: requestId}), timeoutMs: 20000,
+});
 export const getConversations = (signal?: AbortSignal) => apiRequest<{ items: ConversationSummary[] }>('/conversations', { signal });
 export const getConversation = (id: string, signal?: AbortSignal) => apiRequest<ConversationDetail>('/conversations/' + encodeURIComponent(id), { signal });
 export const pinConversation = (id: string, isPinned: boolean) => apiRequest<{ id: string; is_pinned: boolean }>('/conversations/' + encodeURIComponent(id), { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ is_pinned: isPinned }) });

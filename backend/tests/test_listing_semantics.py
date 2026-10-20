@@ -344,3 +344,82 @@ def test_seller_supplied_negative_condition_is_preserved_without_becoming_a_posi
     assert ListingCopy.model_validate({'description':'Máy không mới, không bảo hành.'},context=context).description
     with pytest.raises(ValidationError):
         ListingCopy.model_validate({'description':'Máy mới, bảo hành 12 tháng.'},context=context)
+
+
+def test_text_request_starts_listing_then_images_attach_without_losing_facts(tmp_path):
+    import base64
+    client, path, _ = make_client(tmp_path)
+    provider = SemanticProvider({'name': 'Bàn phím Nova K75 màu trắng', 'description': 'Bàn phím màu trắng dành cho bàn làm việc.',
+                                 'category_id': 4, 'price_vnd': 500000, 'price_evidence': '5 xị', 'stock': 20, 'stock_evidence': '20 cái'})
+    with client:
+        client.app.state.ai_provider = provider
+        result = client.post('/api/v1/chat', json={'message': 'Đăng bàn phím Nova K75 lên sàn, bán 5 xị, kho còn 20 cái, tự viết mô tả.'})
+        assert result.status_code == 200, result.text
+        data = result.json()['data']
+        draft = data['product_draft']
+        assert draft and draft['status'] == 'collecting'
+        assert draft['preview_url'] == '' and draft['image_count'] == 0
+        assert draft['missing_fields'] == ['image']
+        assert 'ảnh' in data['answer']
+        assert client.post(f"/api/v1/product-drafts/{draft['id']}/publish").status_code == 409
+        uploaded = client.post('/api/v1/product-drafts/images-data', json={
+            'images_base64': [base64.b64encode(b'\xff\xd8\xffphoto').decode()], 'conversation_id': data['conversation_id']})
+        assert uploaded.status_code == 201, uploaded.text
+        attached = uploaded.json()['data']['product_draft']
+        assert attached['id'] == draft['id'] and attached['name'] == draft['name']
+        assert attached['price_vnd'] == 500000 and attached['stock'] == 20
+        result = client.post('/api/v1/chat', json={'message': 'đúng mẫu này nhé', 'conversation_id': data['conversation_id']})
+        assert result.status_code == 200, result.text
+        ready = result.json()['data']['product_draft']
+        assert ready['status'] == 'ready'
+        assert provider.calls[0]['images'] == [] and len(provider.calls[-1]['images']) == 1
+        assert provider.calls[-1]['facts']['last_question']
+        assert client.post(f"/api/v1/product-drafts/{draft['id']}/publish").status_code == 200
+        with sqlite3.connect(path) as db:
+            product = db.execute('SELECT name,price,stock,image_url FROM product ORDER BY id DESC LIMIT 1').fetchone()
+            assert product[:3] == (draft['name'], 500000, 20)
+            assert product[3].startswith('/static/')
+
+
+def test_short_subject_is_expanded_by_model_and_deictic_reply_uses_image_context(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    provider = SemanticProvider({'clarification': 'Bạn muốn bán món nào trong ảnh?'})
+    with client:
+        client.app.state.ai_provider = provider
+        _, reply = upload_and_reply(client)
+        first = reply('Đăng sản phẩm này lên giúp mình')
+        assert first['product_draft']['name'] is None
+        provider.result = {'name': 'Xe đạp màu đen', 'description': 'Xe đạp màu đen theo hình sản phẩm của shop.', 'category_id': 7}
+        result = reply('xe đó')
+        assert result['product_draft']['name'] == 'Xe đạp màu đen'
+        assert result['product_draft']['price_vnd'] is None and result['product_draft']['stock'] is None
+        assert len(provider.calls[-1]['images']) == 1
+        assert 'món nào' in provider.calls[-1]['facts']['last_question']
+        assert provider.calls[-1]['history'][-1]['content'] == 'xe đó'
+
+
+def test_short_product_label_uses_model_to_write_copy_instead_of_just_echoing(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    provider = SemanticProvider({'name': 'Bàn phím màu trắng cho góc làm việc',
+        'description': 'Bàn phím màu trắng theo hình ảnh shop cung cấp.', 'category_id': 4})
+    with client:
+        client.app.state.ai_provider = provider
+        _, reply = upload_and_reply(client)
+        draft = reply('bàn phím')['product_draft']
+        assert provider.calls and draft['name'] == provider.result['name']
+        assert draft['description'] == provider.result['description']
+
+
+@pytest.mark.parametrize('message', ['xe đó', 'cái này', 'ý mình là xe đó', 'mẫu kia'])
+def test_model_cannot_return_a_context_reference_as_product_title(message):
+    from app.ai.listing_contracts import ListingCopy
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ListingCopy.model_validate({'name': message})
+
+
+@pytest.mark.parametrize('message', ['Đừng đăng sản phẩm này', 'Chưa muốn đăng sản phẩm', 'Nếu đăng sản phẩm thì sao?',
+    'Hướng dẫn đăng sản phẩm', 'Có nên đăng sản phẩm lúc này không?', 'Lên kế hoạch đăng video TikTok', 'Đăng ký tài khoản'])
+def test_advice_and_negation_do_not_create_a_product_draft(message):
+    from app.services.chat_dispatch import listing_request
+    assert not listing_request(message)

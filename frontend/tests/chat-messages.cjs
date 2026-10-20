@@ -76,3 +76,13 @@ test('nested and fenced answer objects are decoded but code samples and literal 
    assert.equal(assistantText(text),text);
  }
 });
+
+test('a text-first draft does not consume its later gallery when history is restored',()=>{
+ const messages=restoreMessages([
+  turn(1,'update_product_draft','Đăng bàn phím giúp mình','Bạn thêm ảnh nhé.',{id:1,status:'collecting',preview_urls:[]}),
+  turn(2,'create_product_draft','Đã thêm 2 ảnh','Đã nhận ảnh.'),
+  turn(3,'prepare_product_publish','Đúng mẫu này','Bản nháp sẵn sàng.'),
+ ]);
+ assert.equal(messages[0].imageUris?.length||0,0);
+ assert.deepEqual(Array.from(messages[2].imageUris),['http://api/image-a','http://api/image-b']);
+});

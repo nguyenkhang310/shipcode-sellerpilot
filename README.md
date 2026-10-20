@@ -27,6 +27,7 @@ nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
 
 - Tổng quan hôm nay/7/30 ngày, biểu đồ giá trị đơn hàng, trạng thái đơn và việc cần xử lý.
 - Danh mục có ảnh, tìm theo tên/SKU, hàng sắp hết và chi tiết đơn hàng.
+- Xử lý đơn ngay trên app: sửa thông tin nhận hàng trước khi bàn giao, ghi chú, xác nhận/bàn giao/đã giao/hủy theo trạng thái hợp lệ. Xem lại trước khi lưu; chống ghi đè và hoàn kho trùng. [Phạm vi và cách dùng](docs/ORDER_MANAGEMENT.md).
 - Chat tra toàn bộ danh mục shop theo nhiều từ khóa và khoảng giá đã nêu,
   ví dụ `Shop có chuột máy tính dưới 1tr không?`; đếm kết quả trước khi phân trang,
   không suy loại hàng shop có từ vài sản phẩm mẫu. Áp dụng cho database shop local;
@@ -36,7 +37,7 @@ nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
 - Kế hoạch kinh doanh theo số liệu trong kỳ, lịch hành động, kịch bản video có cảnh/thoại/caption và hướng dẫn đo hiệu quả. [Cách dùng và giới hạn](docs/BUSINESS_ADVISOR.md).
 - Đổi giá bằng đề xuất → xác nhận → cập nhật shop → nhật ký.
 - Sửa tiêu đề/mô tả/giá/tồn nhiều trường qua chat, xem trước giá trị cũ/mới và xác nhận. [Hướng dẫn sửa sản phẩm](docs/PRODUCT_EDITS.md).
-- Chọn tối đa 6 ảnh, AI soạn tên/mô tả, hỏi lại thông tin thiếu, duyệt bản nháp rồi đăng lên gian hàng.
+- Tạo bản nháp từ tin nhắn hoặc tối đa 6 ảnh; AI soạn tên/mô tả, hiểu câu ngắn theo ngữ cảnh và hỏi phần thiếu. Có thể bổ sung ảnh sau, giữ giá/tồn đã cung cấp; duyệt bản nháp rồi đăng lên gian hàng local.
 - Gửi ảnh kèm đoạn mô tả tự nhiên trong một lượt: AI nhận tên, giá, tồn và ngành hàng cùng lúc; giữ caption đã viết, phân biệt giá vốn/giá bán, nhận chỉnh sửa nhiều trường và chỉ hỏi phần còn thiếu. Tin nhắn hỗ trợ tối đa 4.000 ký tự.
 - Mã yêu cầu chống xử lý trùng; Dừng hủy tác vụ trên backend; khôi phục kết quả sau mất kết nối.
 - Ngữ cảnh giữ đủ tin nhắn dài trong ngân sách prompt; câu hỏi nối tiếp giữ kỳ thống kê đang bàn. Kế hoạch cho tương lai được tách khỏi số liệu đã ghi nhận.
@@ -433,3 +434,5 @@ Dừng ba tiến trình bằng Ctrl+C ở từng terminal. API tự dọn OpenCo
 ## Đóng góp
 
 Tạo branch theo thay đổi, cập nhật test/hướng dẫn liên quan và chạy các kiểm tra trước khi mở pull request. Không commit `.env`, virtualenv, `node_modules`, database, mailbox, model, backup, ảnh upload hoặc kết quả hội thoại cá nhân. Không sửa trực tiếp dữ liệu nguồn để làm test pass. Kết quả UI test tự sinh trong `docs/evaluations/` và không thuộc source phát hành.
+
+Thiết kế prototype mới trên Lovable: [prompt giao diện SellerPilot](docs/LOVABLE_UI_PROMPT.md).

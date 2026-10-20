@@ -86,6 +86,15 @@ export type StoreOrder = {
   shipping_fee: number | null; discount_amount: number | null;
   items: { id: number; quantity: number; price_vnd: number; name: string | null; sku: string | null; variant_title: string | null; image_url: string | null }[];
 };
+export type OrderDetail = {
+  id: number; status: string; total_vnd: number; created_at: string; version: string;
+  shipping_name: string | null; shipping_phone: string | null; shipping_address: string | null; note: string | null;
+  payment_status: string | null; payment_method: string | null; shipping_fee: number | null; discount_amount: number | null;
+  allowed_statuses: string[]; editable_fields: string[]; items: StoreOrder['items']; replayed?: boolean;
+};
+export type OrderChanges = Partial<Pick<OrderDetail, 'shipping_name' | 'shipping_phone' | 'shipping_address' | 'note'>> & {
+  status?: 'paid' | 'shipped' | 'delivered' | 'cancelled';
+};
 export type StorePage<T> = { items: T[]; total: number; limit: number; offset: number };
 export type ManagementData = {
   shop: { name: string; slug: string; rating: number; followers: number; location: string; vacation_mode: boolean };

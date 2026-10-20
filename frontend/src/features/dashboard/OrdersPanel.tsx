@@ -9,9 +9,10 @@ import { StoreOrder } from '../../api/types';
 import { useTheme } from '../../theme/ThemeProvider';
 import { count, money } from './formatters';
 import { ORDER_STATES, orderDate } from './orderPresentation';
+import { OrderEditor } from './OrderEditor';
 
-export function OrdersPanel({ initialStatus = 'all', embedded, active = true, onStore }: {
-  initialStatus?: string; embedded: boolean; active?: boolean; onStore: (path: string) => void;
+export function OrdersPanel({ initialStatus = 'all', embedded, active = true, onStore, onChanged }: {
+  initialStatus?: string; embedded: boolean; active?: boolean; onStore: (path: string) => void; onChanged?: () => void;
 }) {
   const { ui, IOS, BRAND, isDark } = useTheme();
   const insets = useSafeAreaInsets();
@@ -19,6 +20,7 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
   const [items, setItems] = useState<StoreOrder[]>([]), [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(false), [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState(''), [expanded, setExpanded] = useState<number | null>(null);
   const request = useRef<AbortController | null>(null), failedOffset = useRef(0);
   const list = useRef<FlatList<StoreOrder>>(null);
@@ -82,7 +84,8 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
         {Boolean(item.discount_amount) ? <View style={ui.detailLine}><Text style={ui.caption}>Giảm giá</Text><Text style={ui.productName}>−{money(item.discount_amount!)}</Text></View> : null}
         {item.payment_method ? <View style={ui.detailLine}><Text style={ui.caption}>Thanh toán</Text><Text style={ui.productName}>{item.payment_method === 'COD' ? 'Khi nhận hàng' : item.payment_method}</Text></View> : null}
         {item.payment_status ? <View style={ui.detailLine}><Text style={ui.caption}>Trạng thái thanh toán</Text><Text style={ui.productName}>{{ paid: 'Đã thanh toán', unpaid: 'Chưa thanh toán', initiated: 'Đang xử lý', failed: 'Thất bại', cancelled: 'Đã hủy' }[item.payment_status] || item.payment_status}</Text></View> : null}
-        <Pressable accessibilityRole="button" accessibilityLabel={'Xử lý đơn #' + item.id + ' trên Shopee'} onPress={() => onStore('/seller/orders/' + item.id)} style={[ui.secondaryButton, { marginTop: 10 }]}><Text style={ui.secondaryText}>Xử lý trên Shopee</Text><Ionicons name="open-outline" size={16} color={BRAND.navy} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={'Quản lý đơn #' + item.id} onPress={() => setEditingId(item.id)} style={[ui.primaryButton, { marginTop: 10 }]}><Text style={ui.primaryText}>Quản lý đơn</Text></Pressable>
+        <Pressable accessibilityRole="button" onPress={() => onStore('/seller/orders/' + item.id)} style={[ui.secondaryButton, { marginTop: 8 }]}><Text style={ui.secondaryText}>Mở trên web</Text><Ionicons name="open-outline" size={16} color={BRAND.navy} /></Pressable>
       </View> : null}
     </View>;
   };
@@ -97,5 +100,6 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
       ListEmptyComponent={!loading && !error ? <View style={ui.center}><Ionicons name="receipt-outline" size={36} color={IOS.tertiary} /><Text style={ui.loadingText}>Không tìm thấy đơn hàng</Text></View> : null}
       ListFooterComponent={<>{error ? <View style={ui.errorCard}><Text style={ui.error}>{error}</Text><Pressable accessibilityRole="button" onPress={() => void load(failedOffset.current)} style={ui.secondaryButton}><Text style={ui.secondaryText}>Thử lại</Text></Pressable></View> : null}{loading && !items.length || loadingMore ? <ActivityIndicator color={BRAND.navy} style={{ margin: 24 }} /> : !error && total !== null && items.length < total ? <Pressable accessibilityRole="button" onPress={() => void load(items.length)} style={ui.secondaryButton}><Text style={ui.secondaryText}>Xem thêm đơn hàng</Text></Pressable> : null}</>}
     />
+    <OrderEditor id={editingId} onClose={() => setEditingId(null)} onUpdated={() => { loadedAt.current = 0; void load(0); onChanged?.(); }} />
   </View>;
 }

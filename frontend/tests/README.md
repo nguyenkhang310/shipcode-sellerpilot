@@ -81,3 +81,18 @@ QA, không phải dependency của app. Hook test không mô phỏng hiệu ứn
 `app-audit`, `chat-scroll` và `chat-motion` chuyển các yêu cầu API/ảnh qua
 `qa-server.cjs` tới server giả lập 8123, kể cả khi bundle đang chứa địa chỉ API
 phát triển. Vì vậy ba bài này không cần xuất lại bundle với địa chỉ 8123.
+
+## Sửa và xử lý đơn ngay trong app
+
+Sau khi chạy API QA với database tạm ở 8123 và phục vụ bundle web ở 5174:
+
+```sh
+node frontend/tests/order-editor.cjs
+```
+
+Bài này **ghi dữ liệu trong database QA tạm**, không dùng shop thật. Kiểm tra màn
+chi tiết ở 320/390/520px, validation điện thoại, bước xem lại chưa ghi dữ liệu,
+retry cùng UUID sau khi mất phản hồi, tải lại khi 409 và xác nhận/hủy đơn. Chạy
+`app-audit.cjs` trước bài này nếu dùng chung một API QA; để chạy lại bài sửa đơn,
+khởi động lại đúng server QA 8123 để có đơn #5 ở trạng thái ban đầu. Ảnh/kết quả
+nằm tại `docs/evaluations/order-editor/` và không commit.
