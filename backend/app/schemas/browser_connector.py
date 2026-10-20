@@ -20,9 +20,10 @@ class BrowserSnapshot(BaseModel):
     @classmethod
     def seller_origin_only(cls, value):
         parsed = urlsplit(value)
-        if (parsed.scheme != 'https' or parsed.netloc != 'banhang.shopee.vn'
+        allowed_netlocs = {'banhang.shopee.vn', 'seller-vn.tiktok.com', 'seller.tiktok.com'}
+        if (parsed.scheme != 'https' or parsed.netloc not in allowed_netlocs
                 or parsed.username or parsed.password or parsed.fragment):
-            raise ValueError('Only Shopee Seller Centre is supported')
+            raise ValueError('Only Shopee or TikTok Shop Seller Centre is supported')
         return value
 
     @field_validator('captured_at')

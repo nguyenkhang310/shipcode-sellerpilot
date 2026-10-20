@@ -12,13 +12,25 @@
   ],
   "host_permissions": [
     "https://banhang.shopee.vn/*",
+    "https://seller-vn.tiktok.com/*",
+    "https://seller.tiktok.com/*",
     "http://127.0.0.1/*"
   ],
-  "content_scripts": [{
-    "matches": ["https://banhang.shopee.vn/*"],
-    "js": ["content/shopee.js"],
-    "run_at": "document_idle"
-  }],
+  "content_scripts": [
+    {
+      "matches": ["https://banhang.shopee.vn/*"],
+      "js": ["content/shopee.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://seller-vn.tiktok.com/*",
+        "https://seller.tiktok.com/*"
+      ],
+      "js": ["content/tiktok.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"

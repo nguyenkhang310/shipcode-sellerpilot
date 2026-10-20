@@ -82,6 +82,9 @@ test('Shopee source never falls through to the local shop API', async () => {
   assert.deepEqual(calls, []);
   assert.equal(state.isSellerUrl('https://banhang.shopee.vn.evil.example/'), false);
   assert.equal(state.isSellerUrl('http://banhang.shopee.vn/'), false);
+  assert.equal(state.isSellerUrl('https://seller-vn.tiktok.com/'), true);
+  assert.equal(state.isSellerUrl('https://seller.tiktok.com/'), true);
+  assert.equal(state.isSellerUrl('https://seller-vn.tiktok.com.evil.example/'), false);
 });
 
 test('gallery replay, pinning and deletion preserve scope without duplicating images', async () => {
@@ -182,7 +185,12 @@ test('manifest has no cookie, debugger, remote-code or all-sites permissions', (
   const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../manifest.json')));
   assert.equal(manifest.manifest_version, 3);
   for (const permission of ['cookies', 'debugger', 'history', '<all_urls>']) assert(!manifest.permissions.includes(permission));
-  assert.deepEqual(manifest.host_permissions, ['https://banhang.shopee.vn/*', 'http://127.0.0.1/*']);
+  assert.deepEqual(manifest.host_permissions, [
+    'https://banhang.shopee.vn/*',
+    'https://seller-vn.tiktok.com/*',
+    'https://seller.tiktok.com/*',
+    'http://127.0.0.1/*'
+  ]);
   assert(manifest.content_security_policy.extension_pages.includes("script-src 'self';"));
 });
 

@@ -61,6 +61,39 @@ Cài công cụ từ nguồn chính thức: [Node.js](https://nodejs.org/), [Pyt
 
 > Backend API và UTE MALL dùng **hai virtualenv riêng**. Không dùng lẫn vì phiên bản dependency khác nhau. Mỗi lệnh bên dưới ghi rõ thư mục chạy.
 
+### Chuẩn bị trên Ubuntu
+
+Các bước dưới đây áp dụng cho Ubuntu Desktop/Server. Cài công cụ hệ thống:
+
+```sh
+sudo apt update
+sudo apt install -y build-essential curl git
+```
+
+Cài Node.js 22.13 trở lên từ [nodejs.org](https://nodejs.org/) và kiểm tra:
+
+```sh
+node --version
+npm --version
+git --version
+```
+
+Các lệnh tạo virtualenv phía dưới cần Python 3.11. Nếu Ubuntu chưa có `python3.11`, có thể dùng `uv` để cài riêng phiên bản này mà không thay Python hệ thống:
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv python install 3.11
+```
+
+Sau khi cài `uv`, mở terminal mới. Ở bước tạo virtualenv cho UTE MALL và backend bên dưới, dùng `uv venv --seed --python 3.11 <đường-dẫn-venv>` thay cho `python3.11 -m venv <đường-dẫn-venv>`. Ví dụ:
+
+```sh
+uv venv --seed --python 3.11 "UTE MALL/.venv"
+uv venv --seed --python 3.11 backend/.venv
+```
+
+`--seed` cài pip trong virtualenv để các lệnh cài dependency bên dưới chạy như bình thường. Trên Ubuntu, dùng web hoặc Android để xem ứng dụng; iOS Simulator chỉ có trên macOS.
+
 ## 1. Clone và cài frontend
 
 Từ terminal:
@@ -313,7 +346,20 @@ Từ thư mục gốc:
 npm run start --workspace frontend -- --clear
 ```
 
-Quét QR bằng Expo Go, hoặc nhấn `i` để mở iOS Simulator nếu đã cài Xcode. Xem bản web tại <http://localhost:5173> bằng terminal riêng với `npm run web`.
+Trên Ubuntu, dùng Android Emulator/Expo Go trên Android để mở app, hoặc chạy bản web trong terminal riêng:
+
+```sh
+npm run web
+```
+
+Mở <http://localhost:5173> để xem bản web. Android Emulator không thể dùng `127.0.0.1` để gọi API trên máy Ubuntu; tạo `frontend/.env` với URL đặc biệt `10.0.2.2`:
+
+```dotenv
+EXPO_PUBLIC_API_URL=http://10.0.2.2:8000/api/v1
+EXPO_PUBLIC_STORE_URL=http://10.0.2.2:5011
+```
+
+Với điện thoại Android thật, dùng IP LAN của máy Ubuntu thay `10.0.2.2` và bảo đảm điện thoại cùng mạng Wi-Fi. API và UTE MALL phải bind `0.0.0.0` như các lệnh ở trên; nếu bật firewall, cho phép kết nối vào cổng 8000, 5011 và cổng Metro của Expo. Restart Expo sau khi sửa `.env`.
 
 **iPhone thật:** điện thoại và máy chạy API phải cùng Wi-Fi. Không dùng `127.0.0.1` trên điện thoại để trỏ về máy tính. Khi không khai báo `EXPO_PUBLIC_API_URL`, bản phát triển Expo Go tự lấy IP LAN của Metro. Nếu cần chỉ định hoặc dùng tunnel, tạo `frontend/.env`:
 
