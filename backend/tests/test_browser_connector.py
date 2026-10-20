@@ -94,6 +94,14 @@ def test_wrong_origin_is_rejected(browser, url):
     assert provider.facts == []
 
 
+@pytest.mark.parametrize('url', ['https://seller-vn.tiktok.com/homepage', 'https://seller.tiktok.com/product/create'])
+def test_tiktok_origin_is_accepted(browser, url):
+    client, provider = browser
+    request = payload(); request['snapshot']['url'] = url
+    assert client.post('/api/v1/browser-connector/requests', json=request, headers=HEADERS).status_code == 202
+
+
+
 def test_stale_snapshot_and_cross_connection_job_cannot_be_used(browser):
     client, _ = browser
     request = payload()

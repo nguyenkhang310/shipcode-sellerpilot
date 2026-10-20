@@ -1,6 +1,8 @@
 export const SOURCE = 'https://banhang.shopee.vn';
+export const TIKTOK_SOURCES = ['https://seller-vn.tiktok.com', 'https://seller.tiktok.com'];
+export const SELLER_SOURCES = [SOURCE, ...TIKTOK_SOURCES];
 export const API = 'http://127.0.0.1:8000/api/v1';
-export const isSellerUrl = value => { try { return new URL(value).origin === SOURCE; } catch { return false; } };
+export const isSellerUrl = value => { try { return SELLER_SOURCES.includes(new URL(value).origin); } catch { return false; } };
 let gate = Promise.resolve();
 export async function mutate(update) {
   const next = gate.then(async () => {
@@ -36,6 +38,7 @@ export async function boundTab(connection) {
   if (!tab || !isSellerUrl(tab.url)) throw Error('Tab Shopee đã đóng hoặc đổi trang. Liên kết lại đúng tab của shop.');
   return tab;
 }
+export const contentScriptForUrl = url => (url && String(url).includes('tiktok.com')) ? 'content/tiktok.js' : 'content/shopee.js';
 export async function autoConnectShopee() {
   const current = await state();
   if (current.mode !== 'shopee' || current.target) return null;
@@ -43,7 +46,7 @@ export async function autoConnectShopee() {
   const candidates = tabs.filter(tab => isSellerUrl(tab.url));
   if (candidates.length !== 1) return null;
   const tab = candidates[0];
-  await chrome.scripting.executeScript({target: {tabId: tab.id}, files: ['content/shopee.js']});
+  await chrome.scripting.executeScript({target: {tabId: tab.id}, files: [contentScriptForUrl(tab.url)]});
   const result = await chrome.tabs.sendMessage(tab.id, {kind: 'auto_detect_target'});
   if (!result?.ok || !result.data?.label) return null;
   const label = result.data.label;
@@ -58,10 +61,10 @@ export async function autoConnectShopee() {
 export async function pageMessage(connection, message) {
   const tab = await boundTab(connection);
   if (['read', 'fill'].includes(message.kind) && !connection.target?.label && message.kind !== 'auto_detect_target')
-    throw Error('Chọn tài khoản Shopee để bắt đầu. Mở Kết nối → Chọn tài khoản trên trang.');
-  await chrome.scripting.executeScript({target: {tabId: tab.id}, files: ['content/shopee.js']});
+    throw Error('Chọn tài khoản Shop để bắt đầu. Mở Kết nối → Chọn tài khoản trên trang.');
+  await chrome.scripting.executeScript({target: {tabId: tab.id}, files: [contentScriptForUrl(tab.url)]});
   const result = await chrome.tabs.sendMessage(tab.id, {...message, target: connection.target || null});
-  if (!result?.ok) throw Error(result?.error || 'Chưa đọc được trang Shopee.');
+  if (!result?.ok) throw Error(result?.error || 'Chưa đọc được trang Kênh Người Bán.');
   return result.data;
 }
 export async function selectTarget() {

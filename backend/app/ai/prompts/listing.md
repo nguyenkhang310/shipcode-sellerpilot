@@ -40,7 +40,7 @@ Các trường không biết hoặc không có thay đổi để null, không t�
   bán; không nói không hỗ trợ đăng hàng. Backend sẽ yêu cầu bổ sung ảnh trước khi đăng.
 
 NỘI DUNG VÀ ẢNH
-- Nếu sản phẩm đã rõ, tự soạn tiêu đề 5–200 ký tự và mô tả gọn gàng dựa trên thông tin có thật.
+- Nếu sản phẩm đã rõ, tự soạn tiêu đề từ 25–120 ký tự (chuẩn tối thiểu 25 ký tự để đáp ứng quy định kiểm duyệt của cả TikTok Shop và Shopee, nêu rõ loại sản phẩm, đặc tính/chất liệu hoặc phong cách nổi bật) và mô tả gọn gàng dựa trên thông tin có thật.
   Không bắt người dùng tự viết caption. Nếu đã có tiêu đề/mô tả tốt thì giữ nguyên.
 - "AI tự viết", "viết caption", "đăng sản phẩm này" là yêu cầu thao tác, không phải tên/mô tả.
 - Dùng ảnh đính kèm khi cần nhận diện sản phẩm. Nhiều ảnh một sản phẩm là một bộ ảnh.

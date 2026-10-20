@@ -1,5 +1,5 @@
 // Read-only navigation in owned background tabs. No cookies/private API requests.
-import {state, boundTab, pageMessage, SOURCE, isSellerUrl} from './state.js';
+import {state, boundTab, pageMessage, SOURCE, isSellerUrl, contentScriptForUrl} from './state.js';
 import {TTL_MS, inventoryRows, summarizeInventory, pageFingerprint, resourcePresent} from './shop-data.js';
 const jobs = new Map();
 const KEYS = ['products', 'dashboard', 'orders'];
@@ -69,7 +69,7 @@ async function readTab(tabId, connection, message = {kind: 'read'}) {
   const tab = await chrome.tabs.get(tabId);
   if (!isSellerUrl(tab.url)) throw Error('Trang yêu cầu đăng nhập hoặc đã rời Kênh Người Bán.');
   if (tabId !== connection.tab_id && tab.active) throw Error('Tab đọc dữ liệu đang được bạn sử dụng. Đã dừng thao tác tự động trên tab này.');
-  await chrome.scripting.executeScript({target: {tabId}, files: ['content/shopee.js']});
+  await chrome.scripting.executeScript({target: {tabId}, files: [contentScriptForUrl(tab.url)]});
   const result = await chrome.tabs.sendMessage(tabId, {...message, target: connection.target});
   if (!result?.ok) throw Error(result?.error || 'Chưa đọc được trang Shopee.');
   return result.data;

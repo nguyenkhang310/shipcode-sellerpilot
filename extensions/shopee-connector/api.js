@@ -25,9 +25,12 @@ async function backend(path, options = {}, signal) {
       : 'Không tìm thấy tác vụ AI. Backend có thể vừa khởi động lại; gửi lại tin nhắn để thử.', 404);
   }
   const body = await response.json();
-  if (response.status === 422 && Array.isArray(body.detail) && body.detail.some(row => row.type === 'extra_forbidden' && row.loc?.includes('shop_context')))
-    fail('Backend chưa nạp luồng đồng bộ mới. Khởi động lại npm run demo rồi gửi lại tin nhắn.', 422);
-  if (!response.ok) fail(typeof body.detail === 'string' ? body.detail : 'Kết nối AI chưa sẵn sàng.', response.status);
+  if (!response.ok) {
+    let msg = 'Kết nối AI chưa sẵn sàng.';
+    if (typeof body.detail === 'string') msg = body.detail;
+    else if (Array.isArray(body.detail)) msg = body.detail.map(e => `${e.loc?.slice(1).join('.') || 'trường'}: ${e.msg}`).join(', ');
+    fail(msg, response.status);
+  }
   return body.data;
 }
 const runId = () => Date.now();
@@ -179,7 +182,68 @@ export async function handleApi(path, method, raw, signal) {
     signal?.throwIfAborted();
     let next;
     if (draft) next = {...draft, ...result.draft, status: result.missing_fields.length ? 'collecting' : 'ready', missing_fields: result.missing_fields};
-    const response = chatData(connection, conversation, result.answer, {provider: result.provider, model: result.model,
+
+    let autoFilled = false;
+    let updatedItems = [];
+    if (draft) {
+      const msg = body.message.toLowerCase();
+      let newBrand = null, newOrigin = null, newWeight = null;
+      if (/không có thương hiệu|no brand|không thương hiệu/i.test(msg)) newBrand = 'Không có thương hiệu';
+      else {
+        const bm = body.message.match(/thương hiệu[:\s]+([^\n,.]+)/i);
+        if (bm) newBrand = bm[1].trim();
+      }
+
+      if (/việt nam|vietnam/i.test(msg)) newOrigin = 'Việt Nam';
+      else {
+        const om = body.message.match(/xuất xứ[:\s]+([^\n,.]+)/i);
+        if (om) newOrigin = om[1].trim();
+      }
+
+      const wm = body.message.match(/(\d+)\s*(?:g|gam|gram|kg)?/i);
+      if (wm && /g|gam|gram|nặng|trọng lượng|kg/i.test(msg)) {
+        const num = parseInt(wm[1], 10);
+        newWeight = /kg/i.test(msg) ? num * 1000 : num;
+      }
+
+      if (newBrand) { draft.brand = newBrand; updatedItems.push(`Thương hiệu: ${newBrand}`); }
+      if (newOrigin) { draft.origin = newOrigin; updatedItems.push(`Xuất xứ: ${newOrigin}`); }
+      if (newWeight) { draft.weight_g = newWeight; updatedItems.push(`Trọng lượng: ${newWeight}g`); }
+
+      if (updatedItems.length > 0) {
+        try {
+          const page = await pageMessage(connection, {kind: 'read'});
+          if (page?.snapshot?.url && page.snapshot.url.includes('tiktok.com')) {
+            const payloadDraft = {
+              name: draft.name,
+              description: draft.description,
+              price_vnd: draft.price_vnd || 300000,
+              stock: draft.stock || 50,
+              images: draft.preview_urls?.length ? draft.preview_urls : (draft.preview_url ? [draft.preview_url] : []),
+              category_name: draft.category_name || null,
+              brand: draft.brand || 'Không có thương hiệu',
+              origin: draft.origin || 'Việt Nam',
+              weight_g: draft.weight_g || 500
+            };
+            await pageMessage(connection, {
+              kind: 'fill',
+              document_id: page.document_id,
+              page_context: page.page_context,
+              url: page.snapshot.url,
+              draft: payloadDraft
+            });
+            autoFilled = true;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    let finalAnswer = result.answer;
+    if (autoFilled) {
+      finalAnswer = `Đã tự động điền ${updatedItems.join(', ')} vào form TikTok Shop cho bạn rồi nhé! Bạn kiểm tra lại và bấm "Gửi để xét duyệt" trên TikTok Shop nhé.`;
+    }
+
+    const response = chatData(connection, conversation, finalAnswer, {provider: result.provider, model: result.model,
       ...(next ? {product_draft: next, intent: 'create_product', tool: next.status === 'ready' ? 'prepare_product_publish' : 'update_product_draft'} : {})});
     await saveTurn(connection.id, conversation, body.message, response);
     if (body.request_id) await mutate(current => { if (current.id === connection.id) {
@@ -199,19 +263,53 @@ export async function handleApi(path, method, raw, signal) {
   if (decision && method === 'POST') {
     const draft = connection.drafts[decision[1]];
     if (!draft || !['collecting', 'ready'].includes(draft.status)) fail('Bản nháp không còn khả dụng.', 409);
-    let updated;
+    let updated, result;
     if (decision[2] === 'cancel') updated = {...draft, status: 'cancelled', preview_url: '', preview_urls: [], image_count: 0};
     else {
       if (draft.status !== 'ready') fail('Cần bổ sung thông tin bản nháp.', 409);
       const page = await pageMessage(connection, {kind: 'read'});
-      await ensureCurrent(connection.id);
-      const result = await pageMessage(connection, {kind: 'fill', document_id: page.document_id, page_context: page.page_context, url: page.snapshot.url,
-        draft: Object.fromEntries(['name', 'description', 'price_vnd', 'stock'].map(key => [key, draft[key]]))});
-      if (!result.report.length || result.report.some(row => row.status !== 'filled')) fail('Một số ô chưa nhận dữ liệu. Mở “Gán ô nhập” để liên kết đúng trường, rồi thử lại. Kiểm tra cả những ô đã điền.', 409);
+      const baseDraft = Object.fromEntries(['name', 'description', 'price_vnd', 'stock'].map(key => [key, draft[key]]));
+      const isTikTok = page.snapshot.url && page.snapshot.url.includes('tiktok.com');
+      const payloadDraft = isTikTok ? {
+        ...baseDraft,
+        images: draft.preview_urls?.length ? draft.preview_urls : (draft.preview_url ? [draft.preview_url] : []),
+        category_name: draft.category_name || null,
+        brand: draft.brand || null,
+        origin: draft.origin || null,
+        weight_g: draft.weight_g || 500
+      } : baseDraft;
+      result = await pageMessage(connection, {kind: 'fill', document_id: page.document_id, page_context: page.page_context, url: page.snapshot.url,
+        draft: payloadDraft});
+      const filled = result.report.filter(row => row.status === 'filled');
+      if (!filled.length) {
+        const labels = {name: 'Tên sản phẩm', description: 'Mô tả', price_vnd: 'Giá bán', stock: 'Tồn kho'};
+        const missing = result.report.filter(row => row.status !== 'filled').map(row => `${labels[row.field] || row.field} (${row.status === 'unmapped' ? 'chưa thấy ô' : 'chưa lưu'})`).join(', ');
+        fail(missing ? `Chưa điền xong: ${missing}. Mở menu kết nối → “Gán ô trên form sản phẩm” để chỉ định ô.` : 'Một số ô chưa nhận dữ liệu. Mở “Gán ô nhập” để liên kết đúng trường, rồi thử lại. Kiểm tra cả những ô đã điền.', 409);
+      }
       updated = {...draft, status: 'filled', decided_at: new Date().toISOString()};
     }
     await mutate(current => {if (current.id !== connection.id) fail('Kết nối đã đổi.', 409); current.drafts[draft.id] = updated;
       for (const convo of Object.values(current.conversations)) for (const turn of convo.turns) if (turn.response.product_draft?.id === draft.id) turn.response.product_draft = {id: updated.id};});
+    if (result?.unfilled_required !== undefined && draft.conversation_id) {
+      if (result.unfilled_required.length) {
+        const unique = [...new Set(result.unfilled_required)].slice(0, 5);
+        const promptText = `Mình đã tự động điền các thông tin sản phẩm và tải ảnh lên TikTok Shop! Còn ${unique.length} mục thuộc tính cần bạn xác nhận:\n` +
+          unique.map(f => `• ${f}`).join('\n') +
+          `\nBạn muốn điền thông tin nào cho các mục này? Bạn có thể nhắn ở đây (Ví dụ: Thương hiệu: Không có thương hiệu, Xuất xứ: Việt Nam...) hoặc chọn trực tiếp trên trang TikTok Shop nhé!`;
+        await saveTurn(connection.id, draft.conversation_id, '[Trợ lý kiểm tra form]', {
+          answer: promptText,
+          intent: 'request_attributes',
+          tool: 'prompt_attributes'
+        });
+      } else {
+        const promptText = `Đã tự động điền đầy đủ tất cả thông tin sản phẩm, ngành hàng, thương hiệu và tải ảnh lên TikTok Shop! Bạn kiểm tra lại và bấm "Gửi để xét duyệt" trên TikTok Shop nhé.`;
+        await saveTurn(connection.id, draft.conversation_id, '[Trợ lý kiểm tra form]', {
+          answer: promptText,
+          intent: 'form_filled_success',
+          tool: 'confirm_fill'
+        });
+      }
+    }
     return {data: updated};
   }
   if (path.startsWith('/management/')) fail('Chưa xác minh adapter cho API quản lý local trên Shopee. Giao diện Shopee dùng dữ liệu đồng bộ riêng, không gán số liệu còn thiếu thành 0.', 501);

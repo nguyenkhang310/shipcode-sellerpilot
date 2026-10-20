@@ -530,6 +530,13 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
         return items.map((item, itemIndex) => itemIndex === index && item.response
           ? { ...item, response: { ...item.response, product_draft: data } } : item);
       });
+      const targetConvoId = conversationRef.current || conversationId;
+      if (targetConvoId) {
+        try {
+          const convo = await getConversation(targetConvoId);
+          if (convo?.data?.turns?.length) setMessages(restoreMessages(convo.data.turns));
+        } catch { /* ignore */ }
+      }
       onToast?.(data.status === 'filled' ? 'Đã điền form. Kiểm tra ảnh, ngành hàng và bấm lưu trên Shopee.' : data.status === 'published' ? 'Đã đăng sản phẩm lên UTech Official.' : 'Đã hủy bản nháp sản phẩm.');
       if (data.status === 'published') onShopChanged?.();
     } catch (e) {
