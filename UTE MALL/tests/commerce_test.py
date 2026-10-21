@@ -62,7 +62,12 @@ if changes:
     row=update_order(shop,row['id'],OrderUpdate(request_id=uuid4(),expected_version=row['version'],**changes))
 print(json.dumps({'order':row,'stats':{str(days):dashboard(shop,days) for days in (1,7,30)}},default=str))
 '''
-        api_python=ROOT.parent/'backend/.venv'/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+        # CI jobs have independent filesystems. The marketplace job prepares
+        # this API environment too; a backend job cannot provide it for us.
+        api_python=Path(os.environ.get('SELLERPILOT_API_PYTHON') or
+                        ROOT.parent/'backend/.venv'/('Scripts/python.exe' if os.name=='nt' else 'bin/python'))
+        self.assertTrue(api_python.is_file(),
+                        'Missing API Python: prepare backend/.venv or set SELLERPILOT_API_PYTHON.')
         result = subprocess.run([str(api_python), '-c', script, str(DB), str(order_id), json.dumps(changes or {})],
             cwd=ROOT.parent/'backend', capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
