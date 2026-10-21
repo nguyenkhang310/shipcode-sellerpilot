@@ -14,10 +14,10 @@ from app.services.chat import enrich_ai_command
 
 EVALUATION_DAY = date(2026, 10, 15)
 CASES_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "sample_data"
-    / "quick_demo"
-    / "evaluation_cases.json"
+    Path(__file__).resolve().parents[2]
+    / "tests"
+    / "fixtures"
+    / "intent_cases.json"
 )
 
 

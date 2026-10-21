@@ -104,3 +104,11 @@ test('appended photos stay with their own caption and an unfinished last upload 
  assert.deepEqual(Array.from(messages[6].imageUris),['http://api/back']);
  assert.equal(messages[6].text,'Ảnh 6');
 });
+
+test('a repeated photo resolves to its existing gallery position without showing unrelated photos',()=>{
+ const data={...turn(1,'create_product_draft','','').response,
+   product_draft:{...draft,preview_urls:['/front','/side','/back']},
+   facts:{image_start_index:3,new_image_count:0,image_indices:[1]}};
+ assert.deepEqual(Array.from(loaded.exports.uploadedImageUris(data)),['http://api/side']);
+ assert.equal(loaded.exports.uploadedImageUris({...data,facts:{image_start_index:3,new_image_count:0}}),undefined);
+});

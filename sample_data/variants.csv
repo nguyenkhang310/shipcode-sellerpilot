@@ -1,4 +1,0 @@
-external_variant_id,external_product_id,sku,size,color,price_vnd,stock,low_stock_threshold
-DEMO-V001,DEMO-P001,DEMO-AO-M-TRANG,M,Trắng,150000,3,5
-DEMO-V002,DEMO-P001,DEMO-AO-L-DEN,L,Đen,150000,0,5
-DEMO-V003,DEMO-P002,DEMO-TUI-KEM,ONE_SIZE,Kem,90000,5,5

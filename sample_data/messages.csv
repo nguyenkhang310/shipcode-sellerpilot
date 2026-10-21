@@ -1,3 +1,0 @@
-external_message_id,external_thread_id,customer_alias,role,content,created_at,product_external_id
-DEMO-M001,DEMO-C001,Khách demo 01,customer,Áo màu trắng size M còn không shop?,2026-10-14T04:00:00Z,DEMO-P001
-DEMO-M002,DEMO-C002,Khách demo 02,customer,Áo màu đen size L còn không shop?,2026-10-14T05:00:00Z,DEMO-P001

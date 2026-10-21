@@ -16,7 +16,7 @@ from app.models.action import ActionProposal
 from app.models.agent_run import AgentRun
 
 EVALUATION_CASES = json.loads(
-    (Path(__file__).resolve().parents[2] / "sample_data" / "quick_demo" / "evaluation_cases.json")
+    (Path(__file__).with_name("fixtures") / "intent_cases.json")
     .read_text(encoding="utf-8")
 )
 

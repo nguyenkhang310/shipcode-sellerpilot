@@ -475,7 +475,7 @@ def test_unrelated_images_require_clarification_even_with_price_and_stock(tmp_pa
     with client:
         client.app.state.ai_provider = AmbiguousProvider()
         uploaded = client.post('/api/v1/product-drafts/images-data', json={
-            'images_base64': [base64.b64encode(b'\xff\xd8\xffphoto').decode()] * 2,
+            'images_base64': [base64.b64encode(b'\xff\xd8\xffphoto' + bytes([i])).decode() for i in range(2)],
         }).json()['data']
         response = client.post('/api/v1/chat', json={
             'conversation_id': uploaded['conversation_id'],

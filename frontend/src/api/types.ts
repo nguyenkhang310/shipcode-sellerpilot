@@ -1,19 +1,6 @@
 /** Shared API envelope returned by the FastAPI backend. */
 export type ApiResponse<T> = { data: T; meta?: Record<string, unknown> };
 
-export type Health = {
-  status: 'ok' | 'degraded';
-  database: 'ok' | 'unavailable';
-  shop_database: 'ok' | 'unavailable';
-  provider: 'ollama' | 'opencode' | 'antigravity' | 'gemini';
-  ai_availability: 'available' | 'unavailable';
-  ollama: 'available' | 'unavailable';
-  model: string;
-  model_available: boolean;
-  demo_mode: boolean;
-  integration_mode: 'local_store' | 'not_connected';
-};
-
 export type ChatIntent = 'shop_summary' | 'inventory_query' | 'change_price' | 'product_search' | 'sales_advice' | 'create_product' | 'update_product' | 'unknown';
 export type ChatFallbackReason = 'provider_unavailable' | 'provider_timeout' | 'model_unavailable' | 'invalid_response' | 'provider_rejected' | 'provider_rate_limited' | 'free_tier_restricted' | 'free_model_unavailable' | 'tool_not_allowed';
 

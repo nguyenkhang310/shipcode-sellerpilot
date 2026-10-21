@@ -45,9 +45,13 @@ export function uploadedImageUris(data: ChatData): string[] | undefined {
   const draft = data.product_draft;
   if (!draft || draft.status === 'cancelled') return undefined;
   const urls = draft.preview_urls;
+  const indices = data.facts?.image_indices;
+  if (Array.isArray(indices) && indices.every(index => Number.isInteger(index) && index >= 0 && index < urls.length)) {
+    return indices.length ? Array.from(new Set(indices as number[])).map(index => productDraftImageUrl(urls[index]!)) : undefined;
+  }
   const start = data.facts?.image_start_index, count = data.facts?.new_image_count;
   const selected = typeof start === 'number' && Number.isInteger(start) && start >= 0
-    && typeof count === 'number' && Number.isInteger(count) && count > 0
+    && typeof count === 'number' && Number.isInteger(count) && count >= 0
     ? urls.slice(start, start + count) : urls;
   return selected.length ? selected.map(productDraftImageUrl) : undefined;
 }

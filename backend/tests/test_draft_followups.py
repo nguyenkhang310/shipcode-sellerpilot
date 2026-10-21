@@ -62,7 +62,7 @@ def test_gallery_limit_and_bad_append_leave_existing_images_untouched(tmp_path):
     with client:
         first, _ = upload_and_reply(client)
         original_files = set(uploads.iterdir())
-        for photos in ([b'\xff\xd8\xffextra'] * 6, [b'\xff\xd8\xffvalid', b'bad image']):
+        for photos in ([b'\xff\xd8\xffextra' + bytes([i]) for i in range(6)], [b'\xff\xd8\xffvalid', b'bad image']):
             response = gallery(client, first['conversation_id'], photos)
             assert response.status_code == 422, response.text
             assert set(uploads.iterdir()) == original_files

@@ -25,6 +25,59 @@ App giữ mã đang chờ trên AsyncStorage; không tự gửi một tin mới 
 trước chưa rõ. Nếu không xác nhận được việc hủy do mất mạng, app giữ yêu cầu hủy
 để thử lại, không báo rằng máy chủ đã dừng.
 
+## Ảnh bổ sung và ngữ cảnh bản nháp
+
+- Gửi ảnh trong hội thoại đang soạn sẽ thêm vào chính bản nháp đó, giữ giá,
+  tồn, tiêu đề và mô tả đã xác nhận. Không phải hủy bản nháp chỉ để thêm ảnh.
+- SHA-256 của **nội dung file đã giải mã** ngăn cùng file chiếm nhiều vị trí,
+  kể cả gửi bằng request ID mới. Đây không phải nhận diện ảnh giống nhau về
+  thị giác: ảnh chụp lại hoặc được nén lại có thể có nội dung byte khác.
+  Giới hạn sáu ảnh tính theo file riêng, ảnh trùng vẫn gửi lại được khi đã đủ sáu.
+- `facts.image_indices` lưu vị trí ảnh của từng lượt upload, để mở lại lịch sử
+  vẫn đặt đúng ảnh dưới lời nhắn của người bán. `new_image_count` chỉ đếm file
+  mới; không dùng nó để quyết định ảnh nào người bán vừa nhắc đến.
+- Khi AI cần đọc ảnh mới, gallery thực tế được đính kèm vào yêu cầu model.
+  `ai_image_count` chỉ ghi số ảnh đã gửi trong một lượt AI thành công; lượt lỗi
+  không đánh dấu ảnh là đã hiểu. Các lượt sửa giá/tồn đơn giản vẫn có thể chạy
+  bằng bộ phân tích tiếng Việt, không gọi model chỉ để điền số.
+- Thông báo upload là sự kiện nội bộ. Nó không thay `last_question`, không
+  chiếm chỗ lịch sử hội thoại gửi cho AI và không xóa `pending_fields`. Ví dụ
+  sau câu giá “500–600k”, thêm ảnh rồi nói “đây nha” vẫn phải chốt lại giá trước
+  khi đăng, không âm thầm lấy giá cũ làm giá đã được người bán đồng ý.
+- Khi ảnh chưa rõ món bán, trợ lý hỏi một câu phân biệt và giữ dữ kiện thương
+  mại đã xác nhận. Câu “đây nha” không được dùng làm tiêu đề sản phẩm.
+- Lỗi `active_product_draft` từ backend cũ là từ chối trước khi nhận upload.
+  App bỏ mã yêu cầu bị từ chối, giữ ảnh và lời nhắn, tránh vòng Thử lại vô hạn.
+
+`npm run demo` tự nạp lại Python trong `backend/app`. `--no-reload` giữ tiến
+trình cố định khi trình diễn; sau cập nhật code phải khởi động lại. Prompt `.md`
+và `.env` vẫn cần khởi động lại. Đừng sửa code trong lúc đang gọi AI vì reload
+có thể làm gián đoạn yêu cầu. Kiểm tra `GET /api/v1/health` có
+`draft_image_context_v2` trong `data.capabilities` để biết tiến trình đã nạp
+luồng mới; chỉ sửa file trên đĩa không cập nhật một backend đang chạy cố định.
+
+## Tiếng Việt, bộ nhớ và tính giá
+
+`5 xị` = 500.000đ, `hai củ rưỡi` = 2.500.000đ, `1tr2` = 1.200.000đ. Câu
+`bán 5 xị, còn 20 cái` chứa giá và tồn riêng; giá vốn, giá cũ, SKU và số model
+không được lấy làm giá bán. `5 rưỡi`, `500–600k` cần chốt rõ, không tự chọn
+mệnh giá hay một đầu khoảng. Có thể trả lời `5 xị` hoặc `giữ giá cũ` cho câu
+hỏi giá đang chờ. Câu ngắn `xe đó`, `đây nha` dùng ảnh và câu hỏi trước, không
+trở thành tiêu đề. Nội dung soạn sẵn của người bán được giữ nguyên.
+
+Khách mục tiêu, mục tiêu kinh doanh và giọng trả lời được ghi nhớ theo shop khi
+người bán xác nhận. Giá vốn/chi phí tách theo SKU hoặc bản nháp đang bàn, không
+lan sang món khác; không ghi số do AI tự thêm thành dữ kiện đã xác nhận. Nhắn
+`Xóa bộ nhớ cá nhân hóa` hoặc dùng `POST /api/v1/assistant/memory/reset` để xóa;
+`GET /api/v1/assistant/memory` kiểm tra. Reset không xóa lịch sử nhưng ngăn tư vấn
+dùng các lượt cũ để khôi phục dữ kiện đã quên.
+
+Backend tính bằng Decimal: lời mỗi sản phẩm = giá bán × (1 − tỷ lệ phí) − giá
+vốn − chi phí mỗi đơn / số sản phẩm trong đơn. Chi phí chưa khai được giữ là
+chưa biết, không mặc định phí sàn thật hay lợi nhuận ròng. “Lời 20%” chưa rõ
+trên giá vốn hay giá bán phải hỏi lại. Tư vấn giá không tự sửa giá shop; mọi
+thay đổi vẫn qua bước duyệt. Xem [kế hoạch kinh doanh](BUSINESS_ADVISOR.md).
+
 ## Transaction và giới hạn triển khai
 
 Chat history, proposal mới, chỉnh sửa bản nháp, bộ nhớ và kết quả yêu cầu được
@@ -43,8 +96,8 @@ atomic xuyên hai database hoặc giữa database và filesystem. Khi crash đú
 Bản local chạy **một tiến trình Uvicorn, một worker**, tối đa 16 tác vụ chờ/chạy,
 mỗi hội thoại chỉ một tin đang xử lý; hàng đợi có thời hạn tổng cộng 300 giây.
 Không dùng `--workers` nhiều hơn 1 hoặc nhiều backend chung agent DB. Muốn mở
-rộng cần worker queue và khóa phân tán. Đăng nhập/phân quyền nhiều chủ shop vẫn
-là công việc riêng trước khi đưa API ra Internet.
+rộng cần worker queue và khóa phân tán. Xác thực hiện tại dành cho shop local
+đang cấu hình; phân quyền nhiều chủ shop/Internet cần triển khai riêng.
 
 ## Kết nối app
 
@@ -60,7 +113,8 @@ Chạy backend cho iPhone cùng Wi-Fi, từ thư mục backend:
 HOST=0.0.0.0 ./run_api.sh
 ```
 
-Script tự chạy migration `20261016_09`. Thay `.env` cần khởi động lại Expo.
+Script tự chạy migration tới `head`. Thay `.env` backend cần khởi động lại API;
+thay biến `EXPO_PUBLIC_*` cần khởi động lại Expo.
 
 ## Kiểm chứng
 
@@ -81,3 +135,11 @@ Kiểm thử UI dùng shop hoàn toàn giả lập và AI giả lập có độ 
 đang liên kết hoặc gọi GLM. Xem [hướng dẫn frontend](../frontend/tests/README.md).
 Kết quả browser lưu ở `docs/evaluations/chat-reliability/`.
 Test web không thay thế kiểm tra bàn phím và vòng đời ứng dụng trên iPhone thật.
+
+Đợt sửa ảnh bổ sung 21/10/2026: 755 kiểm thử backend, 16 kiểm thử transport/chat
+và 11 kiểm thử xác thực đạt; TypeScript và export web/iOS đạt. Sau khi người dùng
+khởi động lại, API xác nhận có `draft_image_context_v2`; 15 tình huống browser
+với shop tạm và 16 ca AI/NLP (tám lượt gọi Gemini thật) đạt, không fallback hay
+timeout trong lượt đo. Benchmark chỉ dùng dữ liệu tổng hợp, có kiểm tra đường
+dẫn database/static/uploads thuộc thư mục tạm trước khi gọi provider. Đây không
+phải cam kết model luôn đúng hoặc provider không bao giờ bị giới hạn/quá hạn.

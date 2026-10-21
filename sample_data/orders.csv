@@ -1,3 +1,0 @@
-external_order_id,fulfillment_status,payment_status,total_vnd,created_at
-DEMO-O001,pending,paid,300000,2026-10-14T02:00:00Z
-DEMO-O002,cancelled,paid,90000,2026-10-14T03:00:00Z

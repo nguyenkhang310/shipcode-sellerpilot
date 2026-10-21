@@ -544,6 +544,8 @@ def test_gemini_health_uses_api_model_and_does_not_label_it_ollama(client):
 
 def test_six_image_api_flow_asks_only_missing_stock_then_publishes_once(tmp_path):
     import sqlite3
+    import struct
+    import zlib
     from test_product_drafts import make_client
     calls=[]
     def handler(request):
@@ -558,8 +560,14 @@ def test_six_image_api_flow_asks_only_missing_stock_then_publishes_once(tmp_path
     try:
         with api:
             api.app.state.ai_provider=GeminiClient(http,'synthetic-key')
-            png=base64.b64encode(synthetic_keyboard_png()).decode()
-            upload=api.post('/api/v1/product-drafts/images-data',json={'images_base64':[png]*6})
+            source=synthetic_keyboard_png()
+            images=[]
+            for index in range(6):
+                # Six distinct valid PNG files; exact duplicates now share a slot.
+                metadata=b'tEXt'+b'QA-view\0'+str(index).encode()
+                chunk=struct.pack('!I',len(metadata)-4)+metadata+struct.pack('!I',zlib.crc32(metadata))
+                images.append(base64.b64encode(source[:-12]+chunk+source[-12:]).decode())
+            upload=api.post('/api/v1/product-drafts/images-data',json={'images_base64':images})
             assert upload.status_code==201,upload.text
             conversation=upload.json()['data']['conversation_id']
             response=api.post('/api/v1/chat',json={'conversation_id':conversation,

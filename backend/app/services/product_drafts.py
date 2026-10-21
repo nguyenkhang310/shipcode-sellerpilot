@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -9,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
@@ -20,7 +21,7 @@ from app.ai.draft_actions import draft_action
 from app.ai.listing_evidence import commercial_context as _commercial_context
 from app.ai.listing_contracts import ListingCopy, listing_validation_context, contextual_product_reference
 from app.ai.fallback import extract_price, normalize_text
-from app.ai.money import money_hints, money_mentions, single_money, affirmed_quote
+from app.ai.money import money_hints, money_mentions, single_money, affirmed_quote, plain
 from app.integrations.ute_mall import (
     ProductPublishConflictError,
     UTEMallRepository,
@@ -171,6 +172,17 @@ def create_text_product_draft(session, shop, conversation_id=None):
     return draft
 
 
+def _draft_dialogue(session, draft, limit=6):
+    if draft.id is None:
+        return []
+    # Image-upload receipts are transport events, not a new question to the
+    # seller. Retried uploads must not bury the last real question or its fields.
+    return list(reversed(session.scalars(select(AgentRun).where(
+        AgentRun.product_draft_id == draft.id,
+        or_(AgentRun.tool_name.is_(None), AgentRun.tool_name != 'create_product_draft'),
+    ).order_by(AgentRun.id.desc()).limit(limit)).all()))
+
+
 def create_product_draft_images(
     session: Session,
     shop: UTEMallRepository,
@@ -185,11 +197,29 @@ def create_product_draft_images(
     ensure_conversation_open(session, shop.seller_shop_slug or 'local', conversation_id)
     existing = get_active_draft(session, shop, conversation_id)
     previous_images = draft_stored_images(existing) if existing else []
-    if len(previous_images) + len(contents) > MAX_PRODUCT_IMAGES:
+    dialogue = _draft_dialogue(session, existing, limit=1) if existing else []
+    pending_fields = json.loads(dialogue[-1].facts_json).get('pending_fields', []) if dialogue else []
+    fingerprints = {}
+    for index, image in enumerate(previous_images):
+        path = upload_dir / Path(image['filename']).name
+        if path.is_file():
+            fingerprints[hashlib.sha256(path.read_bytes()).digest()] = index
+    unique_contents, image_indices = [], []
+    for content in contents:
+        if not content or len(content) > MAX_IMAGE_BYTES:
+            raise ProductDraftError('Ảnh đang trống hoặc vượt quá 8 MB. Bạn chọn lại ảnh nhé.')
+        image_kind(content)
+        digest = hashlib.sha256(content).digest()
+        if digest not in fingerprints:
+            fingerprints[digest] = len(previous_images) + len(unique_contents)
+            unique_contents.append(content)
+        image_indices.append(fingerprints[digest])
+    image_indices = list(dict.fromkeys(image_indices))
+    if len(previous_images) + len(unique_contents) > MAX_PRODUCT_IMAGES:
         raise ProductDraftError(f"Bản nháp đã có {len(previous_images)} ảnh. Mỗi sản phẩm tối đa {MAX_PRODUCT_IMAGES} ảnh.")
     stored: list[tuple[str, str, str, int]] = []
     try:
-        for content in contents:
+        for content in unique_contents:
             filename, image_url, mime = store_image(content, upload_dir)
             stored.append((filename, image_url, mime, len(content)))
         new_images = [
@@ -220,14 +250,18 @@ def create_product_draft_images(
             f"Đã nhận **{len(stored)} ảnh**. Mình sẽ dùng ảnh cùng yêu cầu của bạn để soạn sản phẩm."
             if len(stored) > 1 else "Đã nhận ảnh. Mình sẽ dùng ảnh cùng yêu cầu của bạn để soạn sản phẩm."
         )
+        if not stored:
+            answer = 'Ảnh này đã có trong bản nháp. Mình dùng lại ảnh đã nhận và giữ nguyên thông tin sản phẩm.'
         run = _record_run(
             session, draft,
-            message=f"Đã thêm {len(stored)} ảnh sản phẩm",
+            message=f"Đã thêm {len(stored)} ảnh sản phẩm" if stored else 'Đã gửi lại ảnh sản phẩm',
             answer=answer,
             tool="create_product_draft", facts={
                 "draft_id": draft.id, "image_count": len(images),
                 "image_start_index": len(previous_images), "new_image_count": len(new_images),
-                "missing_fields": missing_fields(draft),
+                "image_indices": image_indices, "duplicate_image_count": len(contents) - len(unique_contents),
+                "missing_fields": list(dict.fromkeys(pending_fields + missing_fields(draft))),
+                "pending_fields": pending_fields,
             },
         )
         session.commit()
@@ -251,10 +285,10 @@ async def advance_product_draft(
     upload_dir: Path,
 ) -> dict:
     text = normalize_text(message).strip(".! ")
-    previous = session.scalar(select(AgentRun).where(AgentRun.product_draft_id == draft.id)
-                              .order_by(AgentRun.id.desc()).limit(1)) if draft.id is not None else None
-    pending_fields = json.loads(previous.facts_json).get('pending_fields', []) if previous else []
+    dialogue = _draft_dialogue(session, draft, limit=1)
+    pending_fields = json.loads(dialogue[-1].facts_json).get('pending_fields', []) if dialogue else []
     used_model = False
+    ai_image_count = 0
     fallback_reason = None
     fallback_stage = None
     categories = shop.product_categories()
@@ -341,7 +375,7 @@ async def advance_product_draft(
         needs_model = wants_copy or simple_name or semantic_turn or repaired or (core_complete and not draft.description)
         if needs_model:
             try:
-                copy = await _compose_product_copy(session, ai_provider, draft, categories, upload_dir, message)
+                copy, ai_image_count = await _compose_product_copy(session, ai_provider, draft, categories, upload_dir, message)
                 used_model = True
                 changed.update(_apply_model_details(draft, copy, message, categories, rewrite=wants_copy or simple_name or contextual_product_reference(message)))
                 clarification = copy.clarification
@@ -410,7 +444,8 @@ async def advance_product_draft(
         draft.updated_at = datetime.utcnow()
 
     return _save_draft_turn(session, draft, message, answer, used_model, fallback_reason,
-                            ai_provider=ai_provider, pending_fields=pending_fields, fallback_stage=fallback_stage)
+                            ai_provider=ai_provider, pending_fields=pending_fields, fallback_stage=fallback_stage,
+                            ai_image_count=ai_image_count)
 
 
 def publish_product_draft(session: Session, shop: UTEMallRepository, draft_id: int) -> ProductDraft:
@@ -470,7 +505,7 @@ def _owned_draft(session, shop, draft_id):
     return draft
 
 
-def _save_draft_turn(session, draft, message, answer, used_model, fallback_reason, tool=None, ai_provider=None, pending_fields=None, fallback_stage=None):
+def _save_draft_turn(session, draft, message, answer, used_model, fallback_reason, tool=None, ai_provider=None, pending_fields=None, fallback_stage=None, ai_image_count=0):
     if draft.id is None:
         session.flush()
     tool = tool or ("prepare_product_publish" if draft.status == "ready" else "update_product_draft")
@@ -478,6 +513,7 @@ def _save_draft_turn(session, draft, message, answer, used_model, fallback_reaso
         session, draft, message=message, answer=answer, tool=tool,
         facts={"draft_id": draft.id, "image_count": len(draft_stored_images(draft)),
                "missing_fields": missing_fields(draft), 'pending_fields': pending_fields or [],
+               **({'ai_image_count': ai_image_count} if used_model else {}),
                **({'ai_failure': {'reason': fallback_reason, 'stage': fallback_stage}} if fallback_reason else {})},
         provider=getattr(ai_provider, 'response_provider', getattr(ai_provider, "provider", "unknown")) if used_model else "deterministic_parser",
         model=getattr(ai_provider, 'response_model', getattr(ai_provider, "model", None)) if used_model else None,
@@ -504,10 +540,8 @@ def _repair_command_content(draft: ProductDraft) -> bool:
     return False
 
 
-async def _compose_product_copy(session, ai_provider, draft, categories, upload_dir, message) -> ListingCopy:
-    runs = list(reversed(session.scalars(select(AgentRun).where(
-        AgentRun.product_draft_id == draft.id,
-    ).order_by(AgentRun.id.desc()).limit(6)).all())) if draft.id is not None else []
+async def _compose_product_copy(session, ai_provider, draft, categories, upload_dir, message) -> tuple[ListingCopy, int]:
+    runs = _draft_dialogue(session, draft)
     history = []
     for run in runs:
         history.extend([{'role': 'user', 'content': run.message[:4000]},
@@ -526,13 +560,15 @@ async def _compose_product_copy(session, ai_provider, draft, categories, upload_
         'missing_fields': list(dict.fromkeys((json.loads(runs[-1].facts_json).get('pending_fields', []) if runs else []) + missing_fields(draft))),
         'response_schema': ListingCopy.model_json_schema(),
     }
+    images = []
     if hasattr(ai_provider, 'compose_listing'):
-        images = []
         # Include the gallery on the first interpretation, even if the seller
         # supplied a name. Later price/stock corrections can reuse confirmed facts.
-        if (not draft.name or contextual_product_reference(message)
-                or not any(run.provider in {'opencode', 'ollama', 'antigravity', 'gemini', 'groq'} and run.model
-                           and json.loads(run.facts_json).get('image_count', 0) > 0 for run in runs)):
+        seen_facts = [json.loads(run.facts_json) for run in runs
+                      if run.provider in {'opencode', 'ollama', 'antigravity', 'gemini', 'groq'} and run.model]
+        seen_count = max((item.get('ai_image_count', item.get('image_count', 0)) for item in seen_facts), default=0)
+        visual_question = bool(re.search(r'\b(?:anh|hinh|mau|kieu dang|nhan dien|mat (?:truoc|sau|ben))\b', plain(message)))
+        if not draft.name or contextual_product_reference(message) or visual_question or len(draft_stored_images(draft)) > seen_count:
             for item in draft_stored_images(draft):
                 path = upload_dir / Path(item['filename']).name
                 if path.is_file():
@@ -549,7 +585,7 @@ async def _compose_product_copy(session, ai_provider, draft, categories, upload_
         result = ListingCopy.model_validate_json(raw, context=listing_validation_context(facts, history))
     except (ValidationError, ValueError, TypeError, AttributeError) as error:
         raise AIProviderError('invalid_response', stage='listing_validation') from error
-    return result
+    return result, len(images)
 
 
 def _evidence_in_message(evidence: str | None, message: str) -> bool:
@@ -708,13 +744,6 @@ def _simple_name_reply(message: str) -> bool:
                 and not re.search(r'\b(?:minh|toi|giup|dang|gia|kho|con|doi|sua|cho|hay|nhe|mo ta|noi dung|tieu de)\b', text)
                 and not re.search(r'\d\s*(?:k|tr|trieu|nghin|ngan|đ|₫)\b', text)
                 and _candidate_product_name(message))
-
-
-def _description_value(message: str) -> str | None:
-    if _wants_ai_description(message) or _is_publish_command(message) or _is_generic_product_command(message):
-        return None
-    value = _extract_labeled_value(message, r"mô\s+tả|mo\s+ta") or message.strip()
-    return value.strip(" \t\r\n") or None
 
 
 def _extract_labeled_stock(message: str) -> int | None:

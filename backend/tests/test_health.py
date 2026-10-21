@@ -18,6 +18,7 @@ def test_health_works_without_ollama(client):
         "provider": "ollama", "ai_availability": "unavailable",
         "model": "qwen3:4b-instruct", "model_available": False,
         "demo_mode": True, "integration_mode": "local_store",
+        "capabilities": ['draft_image_append', 'draft_image_dedup', 'draft_image_context_v2', 'chat_request_recovery'],
     }
 
 

@@ -88,7 +88,7 @@ test('cancel uses an independent request and gallery uploads carry a stable ID',
 test('terminal upload/chat failures release pending work; transient errors keep its identity', () => {
   const {load, ApiError} = loadApi();
   const {isTerminalChatError} = load('./chatRequests');
-  for (const code of ['chat_cancelled','chat_interrupted','chat_failed','chat_timeout','conversation_deleted']) {
+  for (const code of ['chat_cancelled','chat_interrupted','chat_failed','chat_timeout','conversation_deleted','active_product_draft']) {
     assert.equal(isTerminalChatError(new ApiError(409, 'Đã dừng', code)), true);
   }
   for (const error of [new TypeError('offline'), new ApiError(408, 'timeout'),

@@ -16,6 +16,7 @@ npm-debug.log*
 .DS_Store
 
 # Machine-specific configuration and credentials
+.vscode/
 extensions/shopee-connector/connection.local.json
 .env
 .env.*

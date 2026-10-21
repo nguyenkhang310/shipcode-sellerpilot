@@ -168,7 +168,7 @@ async def main():
         return 0
     except AIProviderError as error:
         guidance = {
-            'free_tier_restricted': 'Gateway trả 403: "OpenCode\'s free tier can only be used from within OpenCode." Model có trong danh sách không đồng nghĩa backend được quyền gọi. Cần quyền/API được provider cho phép hoặc chọn model local; chạy lại không bảo đảm mở khóa. Xem docs/GLM_SETUP.md.',
+            'free_tier_restricted': 'Gateway trả 403: "OpenCode\'s free tier can only be used from within OpenCode." Model có trong danh sách không đồng nghĩa backend được quyền gọi. Cần quyền/API được provider cho phép hoặc chọn model local; chạy lại không bảo đảm mở khóa. Xem mục Chọn AI provider trong README.md.',
             'provider_rate_limited': 'Đã đạt hạn mức (429). Kiểm tra hạn mức ở OpenCode Console và thử lại sau.',
             'free_model_unavailable': 'Không thấy GLM Free active với đủ giá 0. Chạy opencode models opencode --refresh --verbose để kiểm tra.',
             'provider_timeout': 'Quá thời gian. Kiểm tra mạng và thử lại; mặc định 90 giây cho mỗi lượt gọi.',
@@ -180,8 +180,8 @@ async def main():
         }.get(error.reason, 'Kiểm tra GEMINI_API_KEY, quyền model và quota trong AI Studio; xem docs/GEMINI_API_SETUP.md.'))
         detail = (gemini_detail
                   if settings.ai_provider == 'gemini' else
-                  'Kiểm tra agy, đăng nhập và docs/ANTIGRAVITY_SETUP.md; không bật credit hoặc quyền công cụ rộng.'
-                  if settings.ai_provider == 'antigravity' else guidance.get(error.reason, 'Kiểm tra kết nối OpenCode; xem docs/GLM_SETUP.md.'))
+                  'Kiểm tra agy, đăng nhập và mục Antigravity trong README.md; không bật credit hoặc quyền công cụ rộng.'
+                  if settings.ai_provider == 'antigravity' else guidance.get(error.reason, 'Kiểm tra kết nối OpenCode; xem mục Chọn AI provider trong README.md.'))
         print(f'FAIL · {error.reason} ({error.stage or "unknown"}): {detail}', flush=True)
         return 1
     except ValidationError:

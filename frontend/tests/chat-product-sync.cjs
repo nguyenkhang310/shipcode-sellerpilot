@@ -29,11 +29,11 @@ let browser, page;
     await send.click();
     return (await (await response).json()).data;
   }
-  async function photo() {
+  async function photo(filename = 'shipcode-logo-app.png') {
     await page.getByRole('button', {name: 'Thêm ảnh hoặc mở gợi ý'}).click();
     const selected = page.waitForEvent('filechooser');
     await page.getByRole('button', {name: 'Chọn ảnh để đăng sản phẩm'}).click();
-    await (await selected).setFiles([path.resolve(__dirname, '../assets/shipcode-logo-app.png')]);
+    await (await selected).setFiles([path.resolve(__dirname, '../assets', filename)]);
     await page.getByTestId('attachment-strip').waitFor();
     await page.waitForFunction(() => document.querySelector('[aria-label="Gửi tin nhắn"]')?.getAttribute('aria-disabled') !== 'true');
   }
@@ -48,7 +48,7 @@ let browser, page;
   assert.equal(await publish.isDisabled(), true);
   await page.getByTestId('typing-indicator').waitFor({state: 'detached'});
   checks.push('Publish is disabled while AI rewrites the draft');
-  await photo();
+  await photo('hcm-ute-account-logo.png');
   result = await say('Bổ sung ảnh mặt bên cho sản phẩm này, giữ nguyên giá và tồn.');
   assert.equal(result.product_draft.id, draftId);
   assert.equal(result.product_draft.image_count, 2);

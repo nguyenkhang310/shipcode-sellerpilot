@@ -32,7 +32,7 @@ class EndedChatRequestError extends ApiError {}
 export const isTerminalChatError = (error: unknown): error is ApiError =>
   error instanceof EndedChatRequestError || error instanceof ApiError && (
     error.status === 422 || error.status === 413 ||
-    ['chat_cancelled', 'chat_interrupted', 'chat_failed', 'chat_timeout', 'conversation_deleted'].includes(error.code || ''));
+    ['chat_cancelled', 'chat_interrupted', 'chat_failed', 'chat_timeout', 'conversation_deleted', 'active_product_draft'].includes(error.code || ''));
 
 export async function recoverChatRequest(id: string, signal?: AbortSignal) {
   try {

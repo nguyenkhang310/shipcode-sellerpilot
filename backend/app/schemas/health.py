@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthData(BaseModel):
@@ -14,6 +14,7 @@ class HealthData(BaseModel):
     model_available: bool
     demo_mode: bool
     integration_mode: Literal["local_store", "not_connected"] = "not_connected"
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):

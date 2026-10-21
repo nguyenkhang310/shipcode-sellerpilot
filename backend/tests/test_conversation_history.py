@@ -123,7 +123,7 @@ def test_delete_draft_removes_private_images_and_blocks_all_upload_retries(tmp_p
     client, _, uploads = make_client(tmp_path)
     with client:
         data = {'request_id': str(uuid4()), 'conversation_id': str(uuid4()),
-                'images_base64': [base64.b64encode(b'\xff\xd8\xffphoto').decode()] * 2}
+                'images_base64': [base64.b64encode(b'\xff\xd8\xffphoto' + bytes([i])).decode() for i in range(2)]}
         uploaded = client.post('/api/v1/product-drafts/images-data', json=data).json()['data']
         draft_id = uploaded['product_draft']['id']
         assert len(list(uploads.iterdir())) == 2

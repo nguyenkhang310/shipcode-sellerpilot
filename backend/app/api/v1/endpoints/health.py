@@ -44,4 +44,5 @@ async def health(request: Request, response: Response, session: Session = Depend
         model_available=provider.model_available,
         demo_mode=settings.demo_mode,
         integration_mode="local_store" if shop_database == "ok" else "not_connected",
+        capabilities=['draft_image_append', 'draft_image_dedup', 'draft_image_context_v2', 'chat_request_recovery'],
     ))

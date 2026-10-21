@@ -7,7 +7,9 @@ Not collected by pytest. Requires the backend dev dependencies.
 import asyncio
 import base64
 import json
+import struct
 import tempfile
+import zlib
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -54,7 +56,7 @@ async def main():
             provider.http.event_hooks['request'].append(count_request)
             app.state.ai_provider = provider
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://qa') as api:
-                async def measure(label, message, conversation=None, *, quick=False, listing=False):
+                async def measure(label, message, conversation=None, *, quick=False, listing=False, vision_images=None):
                     calls.clear()
                     started = perf_counter()
                     response = await api.post('/api/v1/chat', json={
@@ -67,10 +69,13 @@ async def main():
                     if listing:
                         draft = data.get('product_draft') or {}
                         ok = ok and draft.get('status') == 'ready' and draft.get('price_vnd') == 500000 and draft.get('stock') == 8
+                    if vision_images is not None:
+                        ok = ok and data.get('facts', {}).get('ai_image_count') == vision_images
                     row = {'case': label, 'ok': ok, 'elapsed_ms': elapsed, 'http_status': response.status_code,
                            'provider': data.get('provider'), 'model': data.get('model'),
                            'fallback_reason': data.get('fallback_reason'), 'inference_calls': dict(calls),
                            'answer_chars': len(data.get('answer', '')),
+                           'ai_image_count': data.get('facts', {}).get('ai_image_count'),
                            'fallback_stage': data.get('facts', {}).get('ai_failure', {}).get('stage')}
                     results.append(row)
                     print(json.dumps(row, ensure_ascii=False), flush=True)
@@ -85,8 +90,10 @@ async def main():
                 await measure('pricing', 'Giá vốn 5 xị, đóng gói 20k mỗi đơn, phí sàn 10%. Nếu bán 1 củ thì còn lời bao nhiêu?')
                 await measure('connection_question', 'Có kết nối được không?')
                 await measure('listing_start_without_product', 'Đăng sản phẩm mới lên shop, giúp mình soạn tiêu đề và mô tả.')
+                drawn_image = synthetic_keyboard_png()
+                encoded_image = base64.b64encode(drawn_image).decode()
                 upload = await api.post('/api/v1/product-drafts/images-data', json={
-                    'images_base64': [base64.b64encode(synthetic_keyboard_png()).decode()]})
+                    'images_base64': [encoded_image]})
                 if upload.status_code != 201:
                     raise RuntimeError('Không tạo được ảnh QA; dừng thay vì dùng ảnh của shop.')
                 await measure('image_listing', 'Bán sản phẩm trong ảnh giá 5 xị, kho 8 chiếc. Tự viết tên và mô tả theo hình, không bịa thông số.',
@@ -94,6 +101,27 @@ async def main():
                 await measure('listing_acknowledgement', 'cảm ơn nhé', upload.json()['data']['conversation_id'], quick=True)
                 await measure('postpone_listing', 'Để sau', upload.json()['data']['conversation_id'], quick=True, listing=True)
                 await measure('image_followup_here_it_is', 'đây nè', upload.json()['data']['conversation_id'], listing=True)
+                conversation = upload.json()['data']['conversation_id']
+                draft_id = upload.json()['data']['product_draft']['id']
+                repeated = await api.post('/api/v1/product-drafts/images-data', json={
+                    'images_base64': [encoded_image], 'conversation_id': conversation, 'request_id': str(uuid4())})
+                assert repeated.status_code == 201
+                repeated_data = repeated.json()['data']
+                assert repeated_data['product_draft']['id'] == draft_id
+                assert repeated_data['product_draft']['image_count'] == 1 and repeated_data['facts']['new_image_count'] == 0
+                await measure('repeated_photo_short_caption', 'đây nha', conversation, listing=True, vision_images=1)
+                # A second valid synthetic PNG file, tagged with QA metadata.
+                # Never read any photo from the working shop or device.
+                metadata = b'tEXt' + b'QA-view\0second'
+                chunk = struct.pack('!I', len(metadata) - 4) + metadata + struct.pack('!I', zlib.crc32(metadata))
+                second_image = drawn_image[:-12] + chunk + drawn_image[-12:]
+                appended = await api.post('/api/v1/product-drafts/images-data', json={
+                    'images_base64': [base64.b64encode(second_image).decode()],
+                    'conversation_id': conversation, 'request_id': str(uuid4())})
+                assert appended.status_code == 201
+                assert appended.json()['data']['product_draft']['id'] == draft_id
+                assert appended.json()['data']['product_draft']['image_count'] == 2
+                await measure('appended_photo_short_caption', 'đây nha', conversation, listing=True, vision_images=2)
                 await measure('cancel_listing_naturally', 'Thôi không đăng nữa', upload.json()['data']['conversation_id'], quick=True)
     report = {'tested_at': datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')).isoformat(),
               'timeout_seconds': settings.gemini_generation_timeout_seconds, 'cases': results}

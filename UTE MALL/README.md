@@ -29,6 +29,11 @@ Mở <http://127.0.0.1:5011>. Kênh Người Bán nằm tại `/seller`, gian h�
 
 Catalog có provenance theo sản phẩm, nhiều ngành hàng và shop. Giá VND, tồn kho, gán shop và giao dịch demo được mô phỏng. Ảnh nguồn dataset được ghi attribution tại [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). Ảnh tải lên lưu trong `static/uploads/` và không được commit.
 
+`data/demo-catalog.json.gz` chỉ chứa category, shop, product và product_variant;
+không chứa tài khoản, mật khẩu, đơn hàng, chat hoặc token. Bootstrap nạp catalog
+vào database mới rồi sinh giao dịch mô phỏng. Giấy phép Livostyle đầy đủ giữ tại
+`data/LIVOSTYLE_LICENSE.txt`.
+
 `bootstrap_demo.py` dùng khi tạo máy mới. `seed_utech_operations.py` dành cho chủ động tái tạo **các đơn có marker mô phỏng**; không chạy trên dữ liệu đang chỉnh sửa nếu chưa sao lưu.
 
 COD, trạng thái vận chuyển, hoàn tiền và mailbox khôi phục hoạt động trong hệ thống local. Chưa gửi tiền, vận đơn hoặc email ra dịch vụ thực tế.

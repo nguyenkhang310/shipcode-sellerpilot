@@ -122,33 +122,10 @@ Free Tier không có nghĩa là không giới hạn. Xem quota trực tiếp tro
 [Groq rate limits](https://console.groq.com/docs/rate-limits).
 Không mặc định mỗi key có 1.500 lượt/ngày hay ba key làm quota tăng gấp ba.
 
-Ảnh AI Studio của nhóm ngày 19/10/2026 hiển thị 3.5 Flash-Lite 15 RPM,
-3.8 Flash 5 RPM, 2.5 Pro 0 RPM. Đồ thị 500 RPD đang chọn **3.1 Flash-Lite**;
-không lấy con số đó áp cho mọi model. Quota có thể thay đổi theo project.
-
 Test tự động dùng HTTP giả lập để kiểm tra key pool, 429, xác thực, timeout,
 schema, ảnh, nguồn trả lời và luồng đăng có xác nhận. Chúng không chứng minh quota,
 độ trễ hay chất lượng model thật. Chỉ `npm run ai:check` với key hợp lệ mới kiểm
 tra kết nối thật trên máy của thành viên.
-
-Kiểm chứng local ngày 19/10/2026: `npm run ai:check` với Gemini 3.5 Flash-Lite
-đã qua cả bốn ca thật, gồm đọc ảnh bàn phím tự vẽ, trong tổng 7,3 giây.
-Đây là một lần đo nhiều yêu cầu, không phải cam kết độ trễ mỗi tin nhắn.
-Kiểm tra tiếp cùng ngày: cả ba key Gemini riêng lẻ đều trích đúng `5 xị = 500.000đ`;
-pool thật luân phiên slot 1 → 2 → 3. Chưa khai báo project ID nên chưa xác nhận
-ba key có quota độc lập; các key hiện vẫn chia sẻ nhóm giới hạn bảo thủ.
-
-Groq Qwen 3.8 đã thử thật với chat và ảnh bàn phím sau lỗi Gemini 429 **được tiêm
-giả lập**, không cố dùng cạn quota Gemini để thử. Ban đầu best-effort schema bỏ
-mô tả/ngành hàng; chuyển sang strict schema và reasoning low cho tác vụ có cấu trúc
-đã trả đủ tên, mô tả, ngành hàng, giá và tồn. Plain chat vẫn dùng instruct để giảm
-độ trễ. Bộ chuyển schema giữ nullable, đóng object và yêu cầu đủ trường trên bản
-copy; validation nghiệp vụ phía backend không bị bỏ qua.
-Nguồn: [Groq Structured Outputs](https://console.groq.com/docs/structured-outputs).
-
-Một lượt đọc ảnh Groq sau sửa mất 3,17 giây; đây là phép thử ảnh tự vẽ, không phải
-cam kết chất lượng caption mọi ảnh thật. Groq đã trả 429 khi thử dồn nhiều lượt,
-vì vậy dự phòng cũng chịu hạn mức riêng và không bảo đảm luôn khả dụng.
 
 Nguồn cấu hình: [Gemini models](https://ai.google.dev/gemini-api/docs/models),
 [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing),
@@ -186,12 +163,6 @@ Log phân biệt `api_connect_timeout`, `api_read_timeout`, `api_write_timeout`,
 `api_pool_timeout` và deadline chung; log fallback có stage và elapsed_ms, không có
 key/prompt. `npm run ai:check` cũng giải thích lỗi quota riêng với lỗi thời gian.
 Metadata đọc được không đồng nghĩa sinh nội dung đã sẵn sàng.
-
-Phép đo thật trong lượt rà soát: kết nối/TLS hoàn tất khoảng 0,23 giây; một yêu cầu
-cực ngắn trả HTTP 200 sau 16,52 giây. Một lượt qua prompt chat đầy đủ chạm deadline
-45 giây. Đây là bằng chứng mốc 15 giây quá ngắn cho một số lượt, đồng thời độ trễ
-provider vẫn biến động; tăng budget không bảo đảm hết mọi timeout. Groq trong bộ
-kiểm tra live cũng từng trả 429; không coi fallback là quota vô hạn.
 
 ### Đo lại trên máy của nhóm
 
@@ -235,15 +206,7 @@ AI đã trả nội dung không hợp lệ với lỗi gọi dịch vụ. `ai:ch
 `invalid_response` riêng, không mặc định quy lỗi cho API key.
 
 Benchmark được chặn nếu **bất kỳ** đường database/static/uploads nào trỏ ra
-ngoài thư mục tạm. Hai ca mới kiểm tra khởi đầu đăng hàng chưa rõ sản phẩm và
-câu nối tiếp “đây nè”. Ngày 21/10 sau sửa: 10/10 ca qua, đọc trực tiếp 6–30ms,
-các lượt Gemini 1,4–2,4s, không fallback. Các lần đo độc lập có thể khác nhau;
-gói miễn phí vẫn chịu quota của nhà cung cấp.
+ngoài thư mục tạm.
 
 Sau khi nhận code, khởi động lại phiên `npm run demo` đang chạy để API nạp mã
 mới; không cần đổi key hoặc tạo lại database chỉ vì `invalid_response`.
-
-Lần đo ngày 21/10: năm câu đơn giản 5–30ms trong backend, không gọi AI; tư vấn
-32,9s, tính lời 20,5s (một lượt trích dữ kiện), tạo bản nháp ảnh 16,5s. Tất cả
-qua kiểm tra nội dung và không fallback. Đây là số đo một lần trên máy phát triển,
-không phải cam kết độ trễ; model/quota/mạng có thể thay đổi kết quả.

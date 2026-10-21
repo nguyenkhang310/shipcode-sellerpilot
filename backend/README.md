@@ -31,7 +31,7 @@ Mở Swagger tại <http://127.0.0.1:8000/docs>. Backend hỗ trợ bốn provid
   Xem [cài đặt Gemini/Groq](../docs/GEMINI_API_SETUP.md).
 - `AI_PROVIDER=antigravity`: headless CLI chính thức, dùng Gemini 3.8 Flash qua
   tài khoản đã đăng nhập, nhận 1–6 ảnh bằng `view_file` trong workspace tạm.
-  Xem [cài đặt Antigravity](../docs/ANTIGRAVITY_SETUP.md).
+  Xem mục Chọn AI provider trong [README gốc](../README.md#chọn-ai-provider).
 - `AI_PROVIDER=opencode`: khởi động một OpenCode server riêng trên localhost và
   chỉ cho phép `glm-5.3-flash-free`.
 - `AI_PROVIDER=ollama`: dùng Qwen local như trước.
@@ -39,8 +39,8 @@ Mở Swagger tại <http://127.0.0.1:8000/docs>. Backend hỗ trợ bốn provid
 Nếu provider không sẵn sàng, chat chuyển sang parser fallback; các seller tools
 đọc dữ liệu shop vẫn hoạt động.
 
-Script demo không bật file watcher để chạy ổn định trên macOS. Khi phát triển có thể
-chạy `.venv/bin/uvicorn app.main:app --reload` sau khi migration đã hoàn tất.
+`npm run demo` tự nạp lại Python khi phát triển; `npm run demo -- --no-reload`
+giữ phiên cố định khi trình diễn. `run_api.sh` chạy một worker không watcher.
 Với Ollama, `run_api.sh` nạp nóng model trước khi mở API để câu đầu tiên không phải
 chờ HDD. Với Gemini, OpenCode hoặc Antigravity, bước nạp Qwen được bỏ qua. Dùng
 `SKIP_OLLAMA_WARMUP=1 ./run_api.sh` khi muốn khởi động Ollama nhanh hơn.
@@ -87,16 +87,16 @@ giữ nguyên. Chạy một Uvicorn worker; chi tiết transaction, API và gi�
 
 Ảnh được chọn trong chat được kiểm tra định dạng và giới hạn 8 MB, sau đó lưu tại
 `../UTE MALL/static/uploads/sellerpilot/`. Bản nháp đọc toàn bộ tin nhắn, chỉ hỏi tên,
-giá, tồn kho hoặc ngành hàng thực sự còn thiếu. GLM nhận ảnh và tự soạn tên/mô tả; ảnh khác mặt hàng thì hỏi
+giá, tồn kho hoặc ngành hàng thực sự còn thiếu. Provider hỗ trợ ảnh nhận gallery và tự soạn tên/mô tả; ảnh khác mặt hàng thì hỏi
 người bán chọn sản phẩm. Khi người bán bấm **Đăng sản phẩm** hoặc nhắn chính xác
 `đăng sản phẩm`, backend mới tạo sản phẩm cùng biến thể tiêu chuẩn trong shop
 `utech-official`. Qwen đang cài là model văn bản, nên chỉ soạn từ thông tin người bán
-đã cung cấp. Chi tiết: [luồng soạn nội dung](../docs/PRODUCT_COPY_VERIFICATION.md).
+đã cung cấp. Chi tiết: [ngữ cảnh ảnh và bản nháp](../docs/CHAT_RELIABILITY.md).
 
 Tư vấn tự nhiên nhận ngữ cảnh kinh doanh, nhớ khách mục tiêu/mục tiêu/giọng trả lời
 do người bán xác nhận và lưu chi phí riêng theo SKU. Bộ tính Decimal xử lý hòa vốn,
 biên lời, lời trên giá vốn và giảm giá; hỏi ý kiến về giá không tự tạo lệnh đổi giá.
-Nhắn “Xóa bộ nhớ cá nhân hóa” để xóa. Xem [tài liệu trợ lý](../docs/PERSONAL_ADVISOR.md).
+Nhắn “Xóa bộ nhớ cá nhân hóa” để xóa. Xem [hội thoại và bộ nhớ](../docs/CHAT_RELIABILITY.md).
 
 Qwen nằm trên HDD nên lượt đầu có thể mất gần hai phút. GLM 5.3 Flash chạy qua Internet
 trong OpenCode; timeout mặc định là 90 giây.
@@ -122,7 +122,8 @@ Kiểm tra provider Gemini, Antigravity hoặc OpenCode đã cấu hình, bằng
 .venv/bin/python -m app.scripts.evaluate_advisor
 ```
 
-Các bài thử không đọc database shop thật. Xem [cài đặt GLM cho nhóm](../docs/GLM_SETUP.md).
+Các bài thử không đọc database shop thật. Bộ phân loại dùng dữ liệu trong
+`tests/fixtures/intent_cases.json`; không phải catalog hoặc CSV để import vào shop.
 
 OpenCode server do backend tạo chỉ lắng nghe ở `127.0.0.1`, có mật khẩu ngẫu nhiên,
 chạy trong thư mục tạm và bị tắt cùng backend. Backend kiểm tra model vẫn có giá

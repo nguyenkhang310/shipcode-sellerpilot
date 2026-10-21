@@ -116,6 +116,36 @@ let browser,page;
  assert.notEqual(resent.request_id,uploadId);
  await page.getByText(/Mình đã soạn tiêu đề và mô tả/).waitFor();
  checks.push('A failed gallery record with a business-specific 503 releases the stale ID and resends retained images');
+ // An older backend rejects appending photos before accepting an operation.
+ // Release that rejected ID while retaining the seller's photo and caption.
+ await page.getByRole('button',{name:'Thêm ảnh hoặc mở gợi ý'}).click();
+ const legacyChooser=page.waitForEvent('filechooser');
+ await page.getByRole('button',{name:'Chọn ảnh để đăng sản phẩm'}).click();
+ await (await legacyChooser).setFiles([path.resolve(__dirname,'../assets/hcm-ute-account-logo.png')]);
+ await page.getByTestId('attachment-strip').waitFor();
+ await input.fill('đây nha');
+ let rejectedId;
+ await page.route('**/api/v1/product-drafts/images-data',route=>{
+   rejectedId=route.request().postDataJSON().request_id;
+   return route.fulfill({status:409,json:{detail:{code:'active_product_draft',
+     message:'Hãy hoàn tất hoặc hủy sản phẩm đang soạn trước khi thêm ảnh mới.'}}});
+ });
+ await send.click();
+ await page.getByText(/Máy chủ đang dùng luồng nhận ảnh cũ/).waitFor();
+ assert.equal(await input.inputValue(),'đây nha');
+ assert.equal(await page.getByRole('button',{name:/Thử lại/}).count(),0);
+ assert.equal(await page.getByRole('button',{name:'Dừng yêu cầu',exact:true}).count(),0);
+ await page.getByTestId('attachment-strip').waitFor();
+ await page.unroute('**/api/v1/product-drafts/images-data');
+ const recovered=page.waitForResponse(r=>r.url().endsWith('/api/v1/chat')&&r.request().method()==='POST');
+ const newUpload=page.waitForRequest(r=>r.url().endsWith('/api/v1/product-drafts/images-data')&&r.method()==='POST');
+ await send.click();
+ assert.notEqual((await newUpload).postDataJSON().request_id,rejectedId);
+ const recoveredDraft=(await (await recovered).json()).data.product_draft;
+ assert.equal(recoveredDraft.image_count,2);
+ await page.waitForFunction(()=>document.querySelector('[aria-label="Nhắn cho SellerPilot"]')?.value==='');
+ assert.equal(await input.inputValue(),'');
+ checks.push('Legacy append rejection preserves the caption and photo, avoids a retry loop, and resends with a fresh ID');
  assert.deepEqual(errors,[]);
  await page.screenshot({path:path.join(OUTPUT,'final.png')});
  fs.writeFileSync(path.join(OUTPUT,'results.json'),JSON.stringify({checks,errors},null,2));

@@ -208,7 +208,7 @@ ANTIGRAVITY_MODEL=gemini-3.8-flash-low
 ANTIGRAVITY_GENERATION_TIMEOUT_SECONDS=120
 ```
 
-Cài và đăng nhập CLI `agy` theo [hướng dẫn Antigravity](docs/ANTIGRAVITY_SETUP.md).
+Cài và đăng nhập CLI `agy` theo tài liệu chính thức đã dẫn ở phần yêu cầu môi trường.
 Không cần HDD, Ollama hoặc API key cho chế độ tài khoản đã đăng nhập. Provider dùng
 headless CLI chính thức; nhận ảnh bằng công cụ xem ảnh trong workspace tạm riêng,
 kiểm tra từng ảnh đã được đọc rồi mới nhận nội dung. Giữ `Use G1 Credits=off`,
@@ -216,8 +216,8 @@ quyền `request-review`, tắt truy cập ngoài workspace; không bật auto-a
 Chạy `npm run ai:check` trước buổi demo. CLI có thêm thời gian khởi động và vẫn
 phụ thuộc quota tài khoản; model có trong danh sách chưa chứng minh lượt sinh sẽ thành công.
 Flash Low là mặc định cho demo. Câu đọc số liệu rõ ràng lấy trực tiếp từ database;
-tư vấn thông thường gộp đọc hiểu và trả lời để giảm số lượt model. Xem
-[kết quả đo tốc độ và giới hạn CLI](docs/ANTIGRAVITY_SETUP.md#tối-ưu-độ-trễ-cho-bản-demo).
+tư vấn thông thường gộp đọc hiểu và trả lời để giảm số lượt model. Không dùng
+kết quả một lượt đo làm cam kết thời gian phản hồi.
 
 **OpenCode / GLM** — `.env` ở thư mục gốc:
 
@@ -237,7 +237,7 @@ Sau khi cài môi trường Python và cập nhật `.env`, chạy tại thư m�
 npm run ai:check
 ```
 
-Lệnh này gọi **GLM thật** bằng dữ liệu/ảnh tự vẽ để kiểm tra bốn agent: hiểu lệnh, hội thoại, trích chi phí và soạn sản phẩm từ ảnh. Không đọc shop hoặc lịch sử thật, không đăng sản phẩm, không sửa giá. Cần Internet; khi xong sẽ tự dọn server OpenCode thử nghiệm. Chi tiết chuyển cấu hình cũ, lỗi 403/429 và giới hạn tại [hướng dẫn GLM cho nhóm](docs/GLM_SETUP.md).
+Lệnh này gọi **GLM thật** bằng dữ liệu/ảnh tự vẽ để kiểm tra bốn agent: hiểu lệnh, hội thoại, trích chi phí và soạn sản phẩm từ ảnh. Không đọc shop hoặc lịch sử thật, không đăng sản phẩm, không sửa giá. Cần Internet; khi xong sẽ tự dọn server OpenCode thử nghiệm. Lỗi `free_tier_restricted` nghĩa gateway từ chối đường gọi của backend dù model còn trong danh sách; đổi key hay thử lại không bảo đảm được cấp quyền. Lỗi 429 là giới hạn dịch vụ, cần chờ theo thời gian phản hồi.
 
 Code chỉ chấp nhận model Free đã cấu hình và kiểm tra metadata chi phí; không tự chuyển sang model tính phí. Model hoặc hạn mức miễn phí có thể không còn sẵn trên bản OpenCode của thành viên. Khi đó chat báo chế độ dự phòng; các truy vấn trực tiếp được hỗ trợ vẫn đọc dữ liệu shop. Đây không phải cam kết dịch vụ miễn phí lâu dài.
 
@@ -245,7 +245,7 @@ Lời gọi OpenCode có tối đa một lần thử lại cho lỗi dịch vụ
 
 Đầu ra JSON của agent phân loại, trích chi phí và soạn sản phẩm được kiểm tra schema. Nếu sai định dạng, backend yêu cầu sửa một lần trong cùng deadline; không tự đoán dữ kiện để vá JSON. Mọi giá bán, tồn kho và chi phí vẫn được đối chiếu với lời người bán và bộ tính Decimal.
 
-Tiền Việt được quy đổi thống nhất: `5 xị = 500.000đ`, `hai củ rưỡi = 2.500.000đ`, `1tr2 = 1.200.000đ`. Giá mơ hồ sẽ được hỏi lại và nhớ trường đang chờ cho lượt tiếp theo. Khi tư vấn giá của bản nháp, có thể dùng lại giá vốn mà chính người bán đã cung cấp cho món đó. Xem [hội thoại tiếng Việt](docs/VIETNAMESE_CHAT.md).
+Tiền Việt được quy đổi thống nhất: `5 xị = 500.000đ`, `hai củ rưỡi = 2.500.000đ`, `1tr2 = 1.200.000đ`. Giá mơ hồ sẽ được hỏi lại và nhớ trường đang chờ cho lượt tiếp theo. Khi tư vấn giá của bản nháp, có thể dùng lại giá vốn mà chính người bán đã cung cấp cho món đó. Xem [ngữ cảnh và độ ổn định chat](docs/CHAT_RELIABILITY.md).
 
 **Ollama / Qwen** — lựa chọn local:
 
@@ -270,6 +270,8 @@ npm run demo
 ```
 
 Lệnh này kiểm tra app và web dùng chung database, kiểm tra cổng, chạy migration, mở UTE MALL + API + Expo và in QR/địa chỉ cho iPhone. Nếu dùng file dữ liệu riêng, đặt `SHOP_DATABASE_PATH` (API) và `STORE_DATABASE_PATH` (web) cùng đường dẫn tuyệt đối; lệnh dừng sớm nếu hai bên khác nguồn. **Ctrl+C một lần** sẽ dừng cả ba và OpenCode do backend tạo. Không tự cài package, seed lại shop hoặc kill tiến trình đang chiếm cổng. Muốn chỉ kiểm tra môi trường: `npm run demo -- --check`.
+
+API tự nạp lại khi sửa file Python trong `backend/app`, để tránh app tiếp tục gọi code cũ. Khi trình diễn cần giữ tiến trình cố định, dùng `npm run demo -- --no-reload`; sau khi cập nhật code phải dừng và chạy lại. Đừng sửa code trong lúc đang gửi yêu cầu AI vì việc nạp lại có thể ngắt yêu cầu đó. Thay `.env` hoặc prompt `.md` vẫn cần khởi động lại. Endpoint `/api/v1/health` có `capabilities` để kiểm tra bản đang chạy hỗ trợ nhận thêm ảnh (`draft_image_append`), bỏ ảnh trùng nội dung (`draft_image_dedup`) và gửi đúng ngữ cảnh ảnh bổ sung cho AI (`draft_image_context_v2`).
 
 Launcher tự dùng IP LAN hiện tại để tránh cấu hình IP cũ trong `frontend/.env`. Nếu muốn dùng URL riêng, khai báo `EXPO_PUBLIC_API_URL` / `EXPO_PUBLIC_STORE_URL` trong môi trường terminal trước khi chạy. iPhone cần cùng Wi-Fi với máy; lần gọi Qwen đầu tiên vẫn có thể chậm vì nạp model từ HDD.
 
@@ -435,7 +437,7 @@ Hướng dẫn kiểm thử giao diện, bàn phím mô phỏng, mất mạng v�
 ```mermaid
 flowchart LR
     Mobile[SellerPilot iOS] --> API[FastAPI]
-    API --> AI[OpenCode hoặc Ollama]
+    API --> AI[Gemini / Groq hoặc provider tùy chọn]
     API --> AgentDB[(Agent SQLite)]
     API --> StoreDB[(UTE MALL SQLite)]
     Store[UTE MALL Flask] --> StoreDB
@@ -451,7 +453,7 @@ flowchart LR
 - Không có transaction atomic xuyên hai SQLite và filesystem. Khi crash trong lúc ghi shop, cần đối chiếu bản nháp/nhật ký trước khi gửi lệnh mới.
 - App có xác thực phiên cho thành viên của shop local đang cấu hình; triển khai nhiều shop, phân quyền theo chức danh và Internet cần triển khai riêng. [Chi tiết bảo mật và Face ID](docs/AUTHENTICATION.md).
 
-[Luồng chat và chống trùng](docs/CHAT_RELIABILITY.md) · [Tư vấn và bộ nhớ](docs/PERSONAL_ADVISOR.md).
+[Luồng chat, bộ nhớ và chống trùng](docs/CHAT_RELIABILITY.md) · [Kế hoạch kinh doanh](docs/BUSINESS_ADVISOR.md).
 
 ## Cấu trúc source
 
@@ -478,10 +480,10 @@ UTE MALL/
   data/demo-catalog.json.gz     Catalog công khai đã chọn, không phải database
   static/catalog/              Ảnh dataset có attribution
   tests/                       Kiểm thử mua–bán trên database tạm
-sample_data/                   Bộ ca kiểm thử ý định
+backend/tests/fixtures/        Bộ ca kiểm thử ý định, không nạp vào shop
 ```
 
-`App.tsx` ở root chỉ re-export entry frontend để tương thích cấu hình IDE. Kế hoạch ban đầu và tài liệu cuộc thi được giữ riêng; README này là hướng dẫn vận hành hiện tại.
+`App.tsx` ở root chỉ re-export entry frontend để tương thích cấu hình IDE. README này là hướng dẫn vận hành; `docs/` chỉ giữ tài liệu cấu hình AI, xác thực, chat, kế hoạch kinh doanh, sản phẩm và đơn hàng. API đầy đủ được mô tả trực tiếp ở Swagger `/docs` của backend đang chạy.
 
 ## Xử lý sự cố
 
@@ -489,7 +491,7 @@ sample_data/                   Bộ ca kiểm thử ý định
 | --- | --- |
 | `package.json does not exist` | Terminal đang ở sai thư mục. `cd shipcode-sellerpilot` trước khi chạy npm. |
 | iPhone không kết nối | Cùng Wi-Fi, IP LAN đúng, API bind `0.0.0.0`, firewall cho phép cổng 8000/5011; restart Expo sau sửa `.env`. |
-| Chat phản hồi dự phòng | Kiểm tra health và `opencode --version` hoặc Ollama/model. Đọc `fallback_reason` trong Swagger. |
+| Chat phản hồi dự phòng | Kiểm tra health, chạy `npm run ai:check` với provider đã cấu hình và đọc `fallback_reason`/`stage` trong log. |
 | `no such table: chat_request` | Từ `backend/`, chạy `.venv/bin/alembic upgrade head`, rồi restart API. |
 | Shop database không tồn tại | Chạy bootstrap UTE MALL trước API; không sửa tên thư mục bằng tay. |
 | Chọn ảnh nhưng chưa gửi | Đây là bản đính kèm. Nhập yêu cầu rồi bấm nút gửi; chọn ảnh không tự đăng hàng. |
@@ -502,5 +504,3 @@ Dừng ba tiến trình bằng Ctrl+C ở từng terminal. API tự dọn OpenCo
 ## Đóng góp
 
 Tạo branch theo thay đổi, cập nhật test/hướng dẫn liên quan và chạy các kiểm tra trước khi mở pull request. Không commit `.env`, virtualenv, `node_modules`, database, mailbox, model, backup, ảnh upload hoặc kết quả hội thoại cá nhân. Không sửa trực tiếp dữ liệu nguồn để làm test pass. Kết quả UI test tự sinh trong `docs/evaluations/` và không thuộc source phát hành.
-
-Thiết kế prototype mới trên Lovable: [prompt giao diện SellerPilot](docs/LOVABLE_UI_PROMPT.md).

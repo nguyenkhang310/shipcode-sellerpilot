@@ -43,7 +43,9 @@ const PROMPTS = [
   { icon: 'search', title: 'Tìm sản phẩm trong shop', message: 'Tìm sản phẩm bàn phím' },
   { icon: 'plan', title: 'Lập kế hoạch cho shop', message: 'Phân tích số liệu 7 ngày qua và lập kế hoạch kinh doanh 7 ngày tới. Chọn sản phẩm ưu tiên, lịch hành động, ý tưởng video TikTok và cách đo kết quả.' },
 ] as const;
-const readableError = (e: unknown) => e instanceof ApiError ? e.message : 'Chưa kết nối được SellerPilot. Kiểm tra Wi-Fi và máy đang chạy backend, rồi thử lại.';
+const readableError = (e: unknown) => e instanceof ApiError
+  ? e.code === 'active_product_draft' ? 'Máy chủ đang dùng luồng nhận ảnh cũ. Cần khởi động lại backend để nhận ảnh bổ sung; ảnh và lời nhắn của bạn vẫn được giữ.' : e.message
+  : 'Chưa kết nối được SellerPilot. Kiểm tra Wi-Fi và máy đang chạy backend, rồi thử lại.';
 const fallbackLabel = (reason: ChatData['fallback_reason']) => reason === 'invalid_response'
   ? 'Phản hồi AI chưa hợp lệ' : reason === 'provider_timeout' ? 'AI phản hồi quá lâu'
   : reason === 'provider_rate_limited' ? 'AI đang giới hạn lượt gọi'

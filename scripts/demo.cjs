@@ -116,7 +116,9 @@ async function main() {
     child.on('exit', code => { children.delete(child); code === 0 ? resolve() : reject(new Error('Migration chưa thành công.')); });
   });
   launch('Shopee Demo', python('UTE MALL'), ['app.py'], path.join(root, 'UTE MALL'), {...env, PORT: '5011', FLASK_DEBUG: '0'});
-  launch('SellerPilot API', python('backend'), ['-m', 'uvicorn', 'app.main:app', '--workers', '1', '--host', '0.0.0.0', '--port', '8000'], backend, env);
+  const apiMode = process.argv.includes('--no-reload') ? ['--workers', '1']
+    : ['--reload', '--reload-dir', path.join(backend, 'app')];
+  launch('SellerPilot API', python('backend'), ['-m', 'uvicorn', 'app.main:app', ...apiMode, '--host', '0.0.0.0', '--port', '8000'], backend, env);
   await Promise.all([ready('http://127.0.0.1:5011/'), ready('http://127.0.0.1:8000/api/v1/health', 120_000)]);
   const address = lanAddress();
   const frontendEnv = {...env};
