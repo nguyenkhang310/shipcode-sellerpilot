@@ -410,12 +410,73 @@ def test_short_product_label_uses_model_to_write_copy_instead_of_just_echoing(tm
         assert draft['description'] == provider.result['description']
 
 
-@pytest.mark.parametrize('message', ['xe đó', 'cái này', 'ý mình là xe đó', 'mẫu kia'])
+@pytest.mark.parametrize('message', ['xe đó', 'cái này', 'ý mình là xe đó', 'mẫu kia', 'đây nè', 'đó nè', 'cái này nè', 'nó nè', 'hình này', 'ảnh đây'])
 def test_model_cannot_return_a_context_reference_as_product_title(message):
     from app.ai.listing_contracts import ListingCopy
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
         ListingCopy.model_validate({'name': message})
+
+
+def test_a_valid_product_question_is_not_reported_as_ai_failure(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    provider = SemanticProvider({'next_question':'Bạn muốn bán mặt hàng nào?', 'next_question_fields':['name']})
+    with client:
+        client.app.state.ai_provider = provider
+        _, reply = upload_and_reply(client)
+        result = reply('Đăng sản phẩm này lên giúp mình')
+        assert result['mode'] == 'ai' and result['fallback_reason'] is None
+        assert 'Bạn muốn bán mặt hàng nào?' in result['answer']
+        assert result['product_draft']['name'] is None
+
+
+def test_here_it_is_resolves_from_the_image_instead_of_poisoning_known_name(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    provider = SemanticProvider({'name':'Bàn phím màu đen', 'description':'Bàn phím màu đen theo hình ảnh shop cung cấp.', 'category_id':4})
+    with client:
+        client.app.state.ai_provider = provider
+        _, reply = upload_and_reply(client)
+        result = reply('đây nè')
+        assert provider.calls[-1]['facts']['name'] is None
+        assert len(provider.calls[-1]['images']) == 1
+        assert result['product_draft']['name'] == provider.result['name']
+
+
+def test_new_experience_does_not_mean_the_product_is_brand_new():
+    from app.ai.listing_contracts import ListingCopy, listing_validation_context
+    result = ListingCopy.model_validate({'name':'Bàn phím màu đen', 'description':'Một trải nghiệm mới cho góc làm việc.'},
+        context=listing_validation_context({'current_message':'Bàn phím màu đen'}, []))
+    assert result.description
+
+
+def test_caption_cta_is_not_confused_with_a_request_to_create_product_copy():
+    from app.ai.listing_contracts import ListingCopy, listing_validation_context
+    result = ListingCopy.model_validate({'name':'Bàn phím màu đen',
+        'description':'Bàn phím màu đen theo hình shop cung cấp. Thêm sản phẩm này vào giỏ hàng để đặt mua.'},
+        context=listing_validation_context({'current_message':'Bàn phím màu đen'}, []))
+    assert result.description.endswith('để đặt mua.')
+
+
+def test_checked_copy_survives_a_long_conversation_and_new_condition_is_still_rejected():
+    from app.ai.listing_contracts import ListingCopy, listing_validation_context
+    from pydantic import ValidationError
+    context = listing_validation_context({'current_message':'Giữ mô tả đã chốt',
+        'description':'Bàn phím màu đen, bảo hành 12 tháng.'}, [])
+    assert ListingCopy.model_validate({'description':'Bàn phím màu đen, bảo hành 12 tháng.'},context=context)
+    with pytest.raises(ValidationError):
+        ListingCopy.model_validate({'description':'Bàn phím mới, bảo hành 12 tháng.'},context=context)
+
+
+def test_invalid_listing_keeps_failure_stage_without_claiming_network_failure(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    with client:
+        client.app.state.ai_provider = SemanticProvider({'name':'đây nè'})
+        _, reply = upload_and_reply(client)
+        result = reply('Tự soạn nội dung cho sản phẩm này')
+        assert result['fallback_reason'] == 'invalid_response'
+        assert result['facts']['ai_failure'] == {'reason':'invalid_response','stage':'listing_validation'}
+        assert 'AI đã phản hồi' in result['answer']
+        assert 'chưa gọi được AI' not in result['answer']
 
 
 @pytest.mark.parametrize('message', ['Đừng đăng sản phẩm này', 'Chưa muốn đăng sản phẩm', 'Nếu đăng sản phẩm thì sao?',

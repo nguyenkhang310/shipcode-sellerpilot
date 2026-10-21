@@ -174,6 +174,7 @@ async def main():
             'provider_timeout': 'Quá thời gian. Kiểm tra mạng và thử lại; mặc định 90 giây cho mỗi lượt gọi.',
         }
         gemini_detail = ({
+            'invalid_response': 'AI đã trả phản hồi nhưng nội dung/schema chưa hợp lệ; không đồng nghĩa key hoặc mạng bị lỗi. Xem stage structured_output, structured_backup, listing_validation hoặc api_output_limit trong log.',
             'provider_timeout': 'Quá thời gian chờ. api_connect_timeout: kết nối/TLS; api_read_timeout: đã kết nối nhưng chưa nhận phản hồi; *_deadline: hết deadline chung. Xem log timing và docs/GEMINI_API_SETUP.md.',
             'provider_rate_limited': 'Đã chạm quota Gemini hoặc Groq dự phòng (429). Xem log provider trước lỗi và quota trong AI Studio/Groq Console; đổi key cùng project không tạo quota mới.',
         }.get(error.reason, 'Kiểm tra GEMINI_API_KEY, quyền model và quota trong AI Studio; xem docs/GEMINI_API_SETUP.md.'))

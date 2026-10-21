@@ -307,17 +307,48 @@ class GeminiClient:
         try:
             async with self.generation_scope(), asyncio.timeout(self.remaining_seconds()):
                 for attempt in range(2):
-                    text = await self._generate(system, payload, images=images, schema=schema.model_json_schema())
-                    fenced = re.fullmatch(r'```(?:json)?\s*([\s\S]*?)\s*```', text.strip(), re.I)
                     try:
+                        text = await self._generate(system, payload, images=images, schema=schema.model_json_schema())
+                        fenced = re.fullmatch(r'```(?:json)?\s*([\s\S]*?)\s*```', text.strip(), re.I)
                         return schema.model_validate_json(fenced.group(1) if fenced else text, context=context)
-                    except ValidationError as error:
+                    except AIProviderError as error:
+                        if error.stage != 'api_output_limit':
+                            raise
+                        payload['format_correction'] = [{'field':'<object>', 'type':'output_limit',
+                            'rule':'Return one complete compact JSON object. Keep generated copy concise. Do not change seller-provided facts.'}]
                         if attempt:
-                            raise AIProviderError('invalid_response', stage='structured_output') from error
+                            return await self._structured_backup(system, payload, schema, images, context, error)
+                    except ValidationError as error:
+                        fields = sorted({str(item['loc'][0]) if item['loc'] and item['loc'][0] in schema.model_fields else '<object>'
+                                         for item in error.errors()})
+                        logger.warning('AI structured response rejected: schema=%s attempt=%s fields=%s types=%s',
+                                       schema.__name__, attempt + 1, ','.join(fields),
+                                       ','.join(sorted({item['type'] for item in error.errors()})))
                         payload['format_correction'] = [{'field': '.'.join(map(str, item['loc'])),
                             'type': item['type'], 'rule': item['msg']} for item in error.errors()[:8]]
+                        if attempt:
+                            return await self._structured_backup(system, payload, schema, images, context,
+                                AIProviderError('invalid_response', stage='structured_output'))
         except TimeoutError as error:
             raise AIProviderError('provider_timeout', stage='structured_deadline') from error
+
+    async def _structured_backup(self, system, payload, schema, images, context, original_error):
+        """One configured repair, with the same evidence checks and turn deadline."""
+        parts = image_parts(images or [])
+        if (self.response_provider != self.provider or not self.backup or not self.backup.available
+                or not self.backup.supports(len(parts)) or self.remaining_seconds() <= 0):
+            raise original_error
+        remaining = min(20, self.remaining_seconds())
+        logger.warning('AI structured repair using configured backup: schema=%s provider=%s images=%s',
+                       schema.__name__, self.backup.provider, len(parts))
+        async with asyncio.timeout(remaining):
+            text = await self.backup.generate(system, payload, parts, schema.model_json_schema(),
+                timeout=remaining, max_tokens=self.advice_max_tokens if payload.get('shop_facts', {}).get('business_advisory') else self.max_tokens)
+        self._response_source.set((self.backup.provider, self.backup.model))
+        try:
+            return schema.model_validate_json(text, context=context)
+        except ValidationError as error:
+            raise AIProviderError('invalid_response', stage='structured_backup') from error
 
     async def _generate(self, system, payload, *, images=None, schema=None):
         started = perf_counter()
@@ -325,6 +356,7 @@ class GeminiClient:
                 'prepare_advice' if 'memory' in payload and 'shop_facts' in payload else
                 'extract_advice' if 'memory' in payload else 'product_edit' if 'current_product' in payload else 'chat')
         actual_provider, actual_model, outcome = None, None, 'error'
+        failure_reason = failure_stage = None
         parts = image_parts(images or [])
         advice = bool(payload.get('shop_facts', {}).get('business_advisory'))
         output_tokens = self.advice_max_tokens if advice else self.max_tokens
@@ -332,6 +364,7 @@ class GeminiClient:
         try:
             if not self.keys.configured:
                 raise AIProviderError('provider_unavailable', stage='api_key_missing')
+            self._response_source.set((self.provider, self.model))
             try:
                 config = {'maxOutputTokens': output_tokens,
                     'thinkingConfig': {'includeThoughts': False,
@@ -345,6 +378,8 @@ class GeminiClient:
                 if data.get('promptFeedback', {}).get('blockReason'):
                     raise AIProviderError('provider_rejected', stage='api_content_blocked')
                 candidates = data.get('candidates')
+                if isinstance(candidates, list) and len(candidates) == 1 and candidates[0].get('finishReason') == 'MAX_TOKENS':
+                    raise AIProviderError('invalid_response', stage='api_output_limit')
                 if not isinstance(candidates, list) or len(candidates) != 1 or candidates[0].get('finishReason') != 'STOP':
                     raise AIProviderError('invalid_response', stage='api_unfinished')
                 output = candidates[0]['content']['parts']
@@ -381,12 +416,16 @@ class GeminiClient:
         except asyncio.CancelledError:
             outcome = 'cancelled'
             raise
+        except AIProviderError as error:
+            failure_reason, failure_stage = error.reason, error.stage
+            raise
         except (ValueError, KeyError, TypeError, AttributeError) as error:
+            failure_reason, failure_stage = 'invalid_response', 'api_protocol'
             raise AIProviderError('invalid_response', stage='api_protocol') from error
         finally:
-            logger.info('AI generation timing: task=%s provider=%s model=%s status=%s total_ms=%s images=%s remaining_ms=%s',
+            logger.info('AI generation timing: task=%s provider=%s model=%s status=%s total_ms=%s images=%s remaining_ms=%s reason=%s stage=%s',
                         task, actual_provider or self.provider, actual_model or self.model, outcome,
-                        round((perf_counter() - started) * 1000), len(parts), round(self.remaining_seconds() * 1000))
+                        round((perf_counter() - started) * 1000), len(parts), round(self.remaining_seconds() * 1000), failure_reason, failure_stage)
 
     async def _gemini_request(self, body, *, can_backup, started):
         tried = set()

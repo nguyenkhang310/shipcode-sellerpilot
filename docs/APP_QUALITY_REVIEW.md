@@ -1,5 +1,29 @@
 # Rà soát app sau khi hợp nhất nhánh Hoàng
 
+## Sửa lỗi gọi AI khi soạn sản phẩm — 21/10/2026
+
+- Nhật ký gần nhất cho thấy `invalid_response` ở tạo nháp, trong khi hỏi doanh
+  số vẫn gọi Gemini thành công. `ai:check` dùng dữ liệu/ảnh tự vẽ qua toàn bộ ca
+  trong 8,4s. Không đổi API key hoặc lấy dữ liệu shop thật để gửi lại lên model.
+- Tái hiện lỗi “đây nè” bị lưu làm tên, câu hỏi thiếu tên hợp lệ bị loại, và
+  “trải nghiệm mới” bị coi là khẳng định hàng mới. Sửa nhận biết tham chiếu,
+  chia sẻ validator giữa provider/service và giữ bằng chứng thương mại.
+  Tiêu đề cũ là câu tham chiếu được sửa khi tiếp tục hội thoại.
+- Model được sửa định dạng/nội dung một lần; chỉ còn một lượt Groq đã cấu hình
+  nếu đủ deadline/hạn mức/khả năng nhận cả bộ ảnh. JSON bị cắt không được dùng
+  dở; câu hỏi còn thiếu vẫn tiếp tục tự nhiên. Chặn nội dung/công cụ không được
+  chuyển sang model khác để vượt chặn. Toàn lượt vẫn chung 60s.
+- Lỗi tạo nháp có stage trong log và `facts.ai_failure`; UI không quy phản hồi
+  không hợp lệ thành mất kết nối. Không log prompt, ảnh hoặc key. Tách kiểm tra
+  lời kêu gọi mua ở cuối caption với câu lệnh thao tác sản phẩm.
+- 705 test backend qua. Benchmark API với provider thật: 10/10 ca qua, không
+  fallback; các lượt Gemini 1,4–2,4s, câu đọc trực tiếp 6–30ms. Đây là lần đo
+  trên dữ liệu tạm, không phải SLA. Có 5 test bảo vệ benchmark không đọc đường
+  DB/static/uploads ra ngoài thư mục tạm.
+
+API đang mở cần được khởi động lại để nạp mã mới. Không dừng dịch vụ của người
+dùng, sửa `.env`, xuất bản sản phẩm hay chỉnh database shop trong đợt kiểm tra.
+
 ## Đăng nhập, Face ID và giao diện — 21/10/2026
 
 - App đăng nhập bằng tài khoản thành viên Kênh Người Bán local. Token opaque

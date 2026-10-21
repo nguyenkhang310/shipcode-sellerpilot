@@ -72,6 +72,91 @@ def test_requested_product_rewrite_cannot_silently_return_empty_fields():
     assert result.name=='Nova K75 màu trắng'
 
 
+def test_listing_semantic_validation_is_corrected_before_the_service_rejects_it():
+    calls = []
+    def handler(request):
+        body = json.loads(request.content)
+        payload = json.loads(body['contents'][0]['parts'][0]['text'])
+        calls.append(payload)
+        if len(calls) == 2:
+            assert 'listing_category' in calls[-1]['format_correction'][0]['rule']
+        return httpx.Response(200, json=completed(json.dumps({'name':'Bàn phím màu đen',
+            'description':'Bàn phím màu đen cho góc làm việc.', 'category_id':9999 if len(calls)==1 else 4})))
+    result = run_call(handler, lambda p:p.compose_listing(facts={'current_message':'Bàn phím màu đen',
+        'allowed_categories':[{'id':4,'name':'Máy Tính & Laptop'}]}, history=[], images=[]))
+    assert json.loads(result)['category_id'] == 4 and len(calls) == 2
+
+
+def test_listing_allows_clarifying_question_without_fabricating_missing_product_data():
+    result = run_call(lambda _:httpx.Response(200,json=completed(json.dumps({
+        'next_question':'Bạn muốn bán mặt hàng nào?', 'next_question_fields':['name']}))),
+        lambda p:p.compose_listing(facts={'current_message':'Giúp mình đăng sản phẩm', 'missing_fields':['name','description','price_vnd','stock']},history=[],images=[]))
+    assert json.loads(result)['name'] is None
+    assert json.loads(result)['next_question_fields'] == ['name']
+
+
+def test_structured_listing_can_use_one_validated_backup_after_primary_correction_fails():
+    calls = []
+    def handler(request):
+        calls.append(request.url.host)
+        if request.url.host == 'generativelanguage.googleapis.com':
+            return httpx.Response(200,json=completed('{"name":"đây nè"}'))
+        return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'content':json.dumps({
+            'name':'Bàn phím màu đen', 'description':'Bàn phím màu đen theo ảnh của shop.', 'category_id':4})}}]})
+    async def call(p):
+        result = await p.compose_listing(facts={'current_message':'đây nè', 'allowed_categories':[{'id':4}]},history=[],images=[image()])
+        assert json.loads(result)['name'] == 'Bàn phím màu đen'
+        assert p.response_provider == 'groq'
+    run_call(handler,call,backup=True)
+    assert calls == ['generativelanguage.googleapis.com']*2 + ['api.groq.com']
+
+
+def test_backup_repairs_cannot_invent_condition_or_skip_any_gallery_image():
+    for count in (1,6):
+        calls = []
+        def handler(request):
+            calls.append(request.url.host)
+            if request.url.host == 'generativelanguage.googleapis.com':
+                return httpx.Response(200,json=completed('{"name":"đây nè"}'))
+            return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'content':json.dumps({
+                'name':'Bàn phím mới chính hãng', 'description':'Hàng bảo hành 12 tháng.', 'category_id':4})}}]})
+        async def call(p):
+            with pytest.raises(AIProviderError,match='invalid_response'):
+                await p.compose_listing(facts={'current_message':'đây nè'},history=[],images=[image()]*count)
+        run_call(handler,call,backup=True)
+        assert calls.count('api.groq.com') == (1 if count==1 else 0)
+
+
+def test_truncated_structured_output_is_retried_once_without_accepting_partial_json():
+    calls = []
+    def handler(request):
+        calls.append(json.loads(request.content))
+        if len(calls)==1:
+            return httpx.Response(200,json={'candidates':[{'finishReason':'MAX_TOKENS','content':{'parts':[{'text':'{"name":'}]}}]})
+        payload=json.loads(calls[-1]['contents'][0]['parts'][0]['text'])
+        assert payload['format_correction'][0]['type']=='output_limit'
+        return httpx.Response(200,json=completed('{"clarification":"Bạn muốn bán mặt hàng nào?"}'))
+    result = run_call(handler,lambda p:p.compose_listing(facts={},history=[],images=[]))
+    assert len(calls)==2 and json.loads(result)['name'] is None
+
+
+def test_structured_backup_shares_the_original_deadline_and_does_not_extend_it():
+    async def run():
+        calls = []
+        async def handler(request):
+            calls.append(request.url.host)
+            if request.url.host == 'api.groq.com':
+                await asyncio.sleep(1)
+            return httpx.Response(200,json=completed('{"name":"đây nè"}'))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            provider = GeminiClient(http,'synthetic-key',timeout=.15,backup=GroqBackup(http,'synthetic-backup-key'))
+            with pytest.raises(AIProviderError) as caught:
+                await provider.compose_listing(facts={},history=[],images=[])
+            assert caught.value.reason == 'provider_timeout' and caught.value.stage == 'structured_deadline'
+            assert calls == ['generativelanguage.googleapis.com']*2 + ['api.groq.com']
+    asyncio.run(run())
+
+
 def test_settings_keep_api_keys_out_of_repr():
     settings = Settings(_env_file=None, gemini_api_key='synthetic-secret-one', groq_api_key='synthetic-secret-two')
     assert 'synthetic-secret' not in repr(settings)

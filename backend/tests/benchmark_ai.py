@@ -21,6 +21,18 @@ from app.ai.factory import create_provider
 from app.core.config import Settings
 from app.scripts.check_ai import synthetic_keyboard_png
 from test_product_drafts import make_client
+from sqlalchemy.engine import make_url
+
+
+def verify_disposable_fixture(settings, directory):
+    """Fail closed before loading any provider if a path points outside QA."""
+    root = Path(directory).resolve()
+    url = make_url(settings.database_url)
+    if url.get_backend_name() != 'sqlite' or not url.database:
+        raise RuntimeError('Benchmark requires a disposable SQLite ledger')
+    paths = [settings.shop_database_path, url.database, settings.shop_static_dir, settings.shop_product_upload_dir]
+    if any(not Path(value).resolve().is_relative_to(root) for value in paths):
+        raise RuntimeError('Benchmark refused a non-disposable database or image path')
 
 
 async def main():
@@ -36,6 +48,8 @@ async def main():
     with tempfile.TemporaryDirectory(prefix='sellerpilot-ai-benchmark-') as directory:
         fixture, _, _ = make_client(Path(directory))
         app = fixture.app
+        verify_disposable_fixture(app.state.settings, directory)
+        print('QA verified: all databases/static/uploads live under TemporaryDirectory; only seeded fixture and drawn image are used.', flush=True)
         async with app.router.lifespan_context(app), create_provider(settings) as provider:
             provider.http.event_hooks['request'].append(count_request)
             app.state.ai_provider = provider
@@ -56,7 +70,8 @@ async def main():
                     row = {'case': label, 'ok': ok, 'elapsed_ms': elapsed, 'http_status': response.status_code,
                            'provider': data.get('provider'), 'model': data.get('model'),
                            'fallback_reason': data.get('fallback_reason'), 'inference_calls': dict(calls),
-                           'answer_chars': len(data.get('answer', ''))}
+                           'answer_chars': len(data.get('answer', '')),
+                           'fallback_stage': data.get('facts', {}).get('ai_failure', {}).get('stage')}
                     results.append(row)
                     print(json.dumps(row, ensure_ascii=False), flush=True)
                 for label, message in [
@@ -68,12 +83,14 @@ async def main():
                     await measure(label, message, quick=True)
                 await measure('advice', 'Dựa trên số liệu shop, gợi ý 2 việc cần ưu tiên hôm nay. Trả lời ngắn gọn, không cần kế hoạch dài.')
                 await measure('pricing', 'Giá vốn 5 xị, đóng gói 20k mỗi đơn, phí sàn 10%. Nếu bán 1 củ thì còn lời bao nhiêu?')
+                await measure('listing_start_without_product', 'Đăng sản phẩm mới lên shop, giúp mình soạn tiêu đề và mô tả.')
                 upload = await api.post('/api/v1/product-drafts/images-data', json={
                     'images_base64': [base64.b64encode(synthetic_keyboard_png()).decode()]})
                 if upload.status_code != 201:
                     raise RuntimeError('Không tạo được ảnh QA; dừng thay vì dùng ảnh của shop.')
                 await measure('image_listing', 'Bán sản phẩm trong ảnh giá 5 xị, kho 8 chiếc. Tự viết tên và mô tả theo hình, không bịa thông số.',
                               upload.json()['data']['conversation_id'], listing=True)
+                await measure('image_followup_here_it_is', 'đây nè', upload.json()['data']['conversation_id'], listing=True)
     report = {'tested_at': datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')).isoformat(),
               'timeout_seconds': settings.gemini_generation_timeout_seconds, 'cases': results}
     output = Path(__file__).resolve().parents[2] / 'docs/evaluations/ai-latency'

@@ -190,6 +190,42 @@ Lệnh tạo database tạm và ảnh bàn phím tự vẽ, không đọc shop �
 có ca thất bại/fallback. Các ca: chào hỏi, tổng quan, đơn, kho, SKU, tư vấn,
 tính lời và bản nháp từ ảnh. Test này cần dependency `pytest` từ nhóm dev.
 
+### Phản hồi “chưa gọi được AI” khi soạn hàng — 21/10/2026
+
+Các lượt đọc số liệu vẫn gọi Gemini thành công trong khi nhật ký tạo nháp ghi
+`invalid_response`. Đây là lỗi nội dung/contract, không phải bằng chứng key hết
+quota hoặc mất mạng. Luồng tạo nháp đã sửa các trường hợp:
+
+- “đây nè”, “nó nè”, “hình này”, “ảnh đây” được hiểu theo ảnh/lịch sử; không
+  ghi nguyên câu thành tiêu đề. Bản nháp cũ có tiêu đề dạng này tự được sửa ở
+  lượt chat kế tiếp, giữ ảnh/giá/tồn. Không chỉnh trực tiếp database của shop.
+- Phản hồi chỉ hỏi thêm một trường còn thiếu vẫn hợp lệ. JSON rỗng hoặc hỏi
+  lại trường đã đủ không được coi là nội dung hoàn chỉnh.
+- Kiểm tra ngành hàng, tiêu đề/mô tả có nghĩa và bằng chứng nằm trong contract
+  dùng chung, nên model được yêu cầu tự sửa trước khi service bỏ phản hồi.
+  CTA cuối caption và “trải nghiệm mới” không bị nhầm thành câu lệnh hoặc lời
+  khẳng định hàng mới; tuyên bố hàng mới/bảo hành vẫn phải có dữ kiện.
+- JSON bị cắt vì `MAX_TOKENS` được thử lại một lần với yêu cầu ngắn gọn. Sau
+  hai phản hồi cấu trúc không hợp lệ, có thể dùng đúng **một** lượt Groq đã cấu
+  hình nếu còn thời gian/hạn mức và model nhận đủ gallery. Dùng nguyên validator
+  cho mọi provider; không bỏ ảnh, chấp nhận JSON dở hoặc tự điền giá/tồn.
+- Mọi bước giữ deadline chung 60 giây. Nội dung bị chặn hoặc chứa yêu cầu công
+  cụ không được dùng cơ chế sửa schema để vượt qua chặn.
+
+Log `Listing used grounded fallback` có `reason` và `stage`; facts của lượt lỗi
+giữ `ai_failure` để đối chiếu mà không log prompt, ảnh hoặc key. UI phân biệt
+AI đã trả nội dung không hợp lệ với lỗi gọi dịch vụ. `ai:check` cũng giải thích
+`invalid_response` riêng, không mặc định quy lỗi cho API key.
+
+Benchmark được chặn nếu **bất kỳ** đường database/static/uploads nào trỏ ra
+ngoài thư mục tạm. Hai ca mới kiểm tra khởi đầu đăng hàng chưa rõ sản phẩm và
+câu nối tiếp “đây nè”. Ngày 21/10 sau sửa: 10/10 ca qua, đọc trực tiếp 6–30ms,
+các lượt Gemini 1,4–2,4s, không fallback. Các lần đo độc lập có thể khác nhau;
+gói miễn phí vẫn chịu quota của nhà cung cấp.
+
+Sau khi nhận code, khởi động lại phiên `npm run demo` đang chạy để API nạp mã
+mới; không cần đổi key hoặc tạo lại database chỉ vì `invalid_response`.
+
 Lần đo ngày 21/10: năm câu đơn giản 5–30ms trong backend, không gọi AI; tư vấn
 32,9s, tính lời 20,5s (một lượt trích dữ kiện), tạo bản nháp ảnh 16,5s. Tất cả
 qua kiểm tra nội dung và không fallback. Đây là số đo một lần trên máy phát triển,

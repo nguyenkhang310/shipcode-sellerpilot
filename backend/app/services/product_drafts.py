@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import os
 import re
 import secrets
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from app.ai.contracts import AIProviderError
+from app.ai.listing_text import _is_generic_product_command, _wants_ai_description
 from app.ai.quantities import quantity_value, EMPTY_STOCK_PHRASES
 from app.ai.listing_evidence import commercial_context as _commercial_context
 from app.ai.listing_contracts import ListingCopy, listing_validation_context, contextual_product_reference
@@ -29,11 +31,8 @@ from app.services.conversation_state import ensure_conversation_open
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_PRODUCT_IMAGES = 6
 ACTIVE_STATUSES = ("collecting", "ready")
-AI_DESCRIPTION_PHRASES = {
-    "ai viết", "ai viet", "viết giúp", "viet giup", "tự viết", "tu viet",
-    "sellerpilot viết", "sellerpilot viet",
-}
 LISTING_PROMPT = (Path(__file__).resolve().parents[1] / 'ai' / 'prompts' / 'listing.md').read_text(encoding='utf-8')
+logger = logging.getLogger(__name__)
 
 
 class ProductDraftError(ValueError):
@@ -249,6 +248,7 @@ async def advance_product_draft(
     pending_fields = json.loads(previous.facts_json).get('pending_fields', []) if previous else []
     used_model = False
     fallback_reason = None
+    fallback_stage = None
     categories = shop.product_categories()
     repaired = _repair_command_content(draft)
     was_ready = draft.status == 'ready'
@@ -337,6 +337,8 @@ async def advance_product_draft(
                 validation_error = None
             except AIProviderError as error:
                 fallback_reason = error.reason
+                fallback_stage = error.stage or 'listing_validation'
+                logger.warning('Listing used grounded fallback: draft_id=%s reason=%s stage=%s', draft.id, fallback_reason, fallback_stage)
                 # Keep supplied facts and ask only for what remains. Never pass
                 # a paragraph/instruction off as a product title when AI is offline.
                 if error.reason == 'free_tier_restricted':
@@ -348,6 +350,9 @@ async def advance_product_draft(
                     )
                 elif was_ready:
                     clarification = 'Mình chưa xử lý được yêu cầu sửa lúc này. Thông tin bản nháp vẫn được giữ; bạn thử lại giúp mình nhé.'
+                elif error.reason == 'invalid_response':
+                    clarification = ('AI đã phản hồi nhưng nội dung bản nháp chưa hợp lệ nên mình chưa áp dụng. '
+                                     'Ảnh và thông tin bạn gửi vẫn được giữ. Bạn nhắn **soạn lại bản nháp** để mình thử lại nhé.')
                 elif draft.name and not draft.description:
                     clarification = (
                         "Mình chưa gọi được AI để soạn nội dung lúc này. Bản nháp và ảnh vẫn được giữ. "
@@ -394,7 +399,7 @@ async def advance_product_draft(
         draft.updated_at = datetime.utcnow()
 
     return _save_draft_turn(session, draft, message, answer, used_model, fallback_reason,
-                            ai_provider=ai_provider, pending_fields=pending_fields)
+                            ai_provider=ai_provider, pending_fields=pending_fields, fallback_stage=fallback_stage)
 
 
 def publish_product_draft(session: Session, shop: UTEMallRepository, draft_id: int) -> ProductDraft:
@@ -454,12 +459,13 @@ def _owned_draft(session, shop, draft_id):
     return draft
 
 
-def _save_draft_turn(session, draft, message, answer, used_model, fallback_reason, tool=None, ai_provider=None, pending_fields=None):
+def _save_draft_turn(session, draft, message, answer, used_model, fallback_reason, tool=None, ai_provider=None, pending_fields=None, fallback_stage=None):
     tool = tool or ("prepare_product_publish" if draft.status == "ready" else "update_product_draft")
     run = _record_run(
         session, draft, message=message, answer=answer, tool=tool,
         facts={"draft_id": draft.id, "image_count": len(draft_stored_images(draft)),
-               "missing_fields": missing_fields(draft), 'pending_fields': pending_fields or []},
+               "missing_fields": missing_fields(draft), 'pending_fields': pending_fields or [],
+               **({'ai_failure': {'reason': fallback_reason, 'stage': fallback_stage}} if fallback_reason else {})},
         provider=getattr(ai_provider, 'response_provider', getattr(ai_provider, "provider", "unknown")) if used_model else "deterministic_parser",
         model=getattr(ai_provider, 'response_model', getattr(ai_provider, "model", None)) if used_model else None,
         fallback_reason=fallback_reason,
@@ -529,17 +535,7 @@ async def _compose_product_copy(session, ai_provider, draft, categories, upload_
         raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip(), flags=re.I)
         result = ListingCopy.model_validate_json(raw, context=listing_validation_context(facts, history))
     except (ValidationError, ValueError, TypeError, AttributeError) as error:
-        raise AIProviderError('invalid_response') from error
-    if result.category_id is not None and result.category_id not in {item['id'] for item in categories}:
-        raise AIProviderError('invalid_response')
-    if result.name is not None and (len(result.name.strip()) < 5
-            or _is_generic_product_command(result.name) or _wants_ai_description(result.name)):
-        raise AIProviderError('invalid_response')
-    if result.description is not None and (len(result.description.strip()) < 10
-            or _is_generic_product_command(result.description) or _wants_ai_description(result.description)):
-        raise AIProviderError('invalid_response')
-    if not any((result.name, result.description, result.price_vnd, result.stock is not None, result.category_id, result.clarification)):
-        raise AIProviderError('invalid_response')
+        raise AIProviderError('invalid_response', stage='listing_validation') from error
     return result
 
 
@@ -645,22 +641,6 @@ def _extract_labeled_value(message: str, labels: str) -> str | None:
     return value.strip(" \t\r\n\"'") or None
 
 
-def _is_generic_product_command(message: str) -> bool:
-    text = _plain(message).strip(" .!?")
-    if re.search(r'\b(?:dang|dua|tao|them)\b', text) and re.search(
-        r'\b(?:san pham nay|mat hang nay|anh nay|cai nay|len san|len shop)\b', text
-    ):
-        return True
-    if re.match(r"^(?:(?:hay|vui long|lam on|ban)\s+)?(?:dang|tao|them|dua)\s+"
-                r"(?:san pham|mat hang)\s+(?:nay|do|nay len|tu anh|trong anh)\b", text):
-        return True
-    return bool(re.fullmatch(
-        r"(?:(?:hay|vui long|lam on)\s+)?(?:dang|tao|them|dua)\s+"
-        r"(?:san pham|mat hang)(?:\s+(?:nay|moi|tu anh|trong anh))?"
-        r"(?:\s+(?:len(?:\s+(?:san|shop))?|vao(?:\s+(?:san|shop))?|"
-        r"giup(?:\s+(?:minh|toi|em))?|cho\s+(?:minh|toi|em)|duoc|khong|di|nhe|nha))*",
-        text,
-    ))
 
 
 def _is_publish_command(message: str) -> bool:
@@ -672,18 +652,6 @@ def _is_publish_command(message: str) -> bool:
     ))
 
 
-def _wants_ai_description(message: str) -> bool:
-    text = _plain(message).strip(" .!?")
-    return bool(
-        text in {_plain(item) for item in AI_DESCRIPTION_PHRASES}
-        or re.search(r"\b(?:ai|sellerpilot)\b.{0,25}\b(?:viet|soan|tao)\b", text)
-        or re.search(r"\b(?:viet|soan|tao)\b.{0,25}\b(?:mo ta|bang ai)\b", text)
-        or re.search(r"\b(?:viet|soan|tao|toi uu|sua)\b.{0,40}\b(?:caption|tieu de|noi dung)\b", text)
-        or re.search(r"\btu\s+(?:viet|soan)\b", text)
-        or re.search(r"\b(?:caption|tieu de|noi dung)\b.{0,35}\b(?:viet|soan|sua|hay hon)\b", text)
-        or re.search(r"\b(?:hay|giup)\b.{0,70}\bmo ta(?: san pham)?\b", text)
-        or re.search(r"\bdua vao (?:hinh|anh)\b.{0,45}\bmo ta(?: san pham)?\b", text)
-    )
 
 
 def _command_product_name(message: str) -> str | None:

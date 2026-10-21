@@ -280,7 +280,7 @@ def test_listing_uses_dedicated_agent_and_attaches_images_only_when_supported(vi
         if request.url.path == '/session/ses_listing/message':
             body = json.loads(request.content)
             sent.append(body)
-            return httpx.Response(200, json=completed_payload('{"name":null}'))
+            return httpx.Response(200, json=completed_payload('{"clarification":"Bạn muốn bán mặt hàng nào?"}'))
         if request.url.path in ('/session/ses_listing/abort', '/session/ses_listing'):
             return httpx.Response(200, json=True)
         raise AssertionError(request.url.path)
@@ -289,6 +289,7 @@ def test_listing_uses_dedicated_agent_and_attaches_images_only_when_supported(vi
         async with httpx.AsyncClient(base_url='http://opencode.test', transport=httpx.MockTransport(respond)) as http:
             return await OpenCodeClient(http).compose_listing(facts={'name': None}, history=[], images=[image])
     asyncio.run(run())
+    assert len(sent) == 1
     assert sent[0]['agent'] == 'sellerpilot-listing'
     assert sent[0]['parts'][1:] == ([image] if vision else [])
     assert json.loads(sent[0]['parts'][0]['text'])['images_attached'] is vision
