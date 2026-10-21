@@ -130,24 +130,26 @@ def orders(shop: UTEMallRepository, status="all", query="", limit=20, offset=0):
         raise ShopDatabaseError("Cannot read orders") from error
 
 
-def dashboard(shop: UTEMallRepository, days=7):
+def dashboard(shop: UTEMallRepository, days=7, selected_date=None):
     """One tenant, VN calendar days, no orders dated in the future."""
     now = datetime.now(timezone.utc)
     today = now.astimezone(shop.timezone).date()
-    start_day = today - timedelta(days=days - 1)
+    end_day = selected_date or today
+    start_day = end_day - timedelta(days=days - 1)
     start = datetime.combine(start_day, time.min, tzinfo=shop.timezone).astimezone(timezone.utc)
+    end = min(now, datetime.combine(end_day + timedelta(days=1), time.min, tzinfo=shop.timezone).astimezone(timezone.utc))
     previous_start = start - timedelta(days=days)
-    previous_end = previous_start + (now - start)
+    previous_end = previous_start + (end - start)
     try:
         with shop._connect() as connection:
             connection.execute("BEGIN")  # consistent read across dashboard counters
             scope, params = _scope(connection, shop, "order")
             rows = connection.execute(
-                f'SELECT total_amount, status, created_at FROM "order" WHERE {scope} AND created_at>=? AND created_at<=?',
-                [*params, previous_start.replace(tzinfo=None).isoformat(sep=" "), now.replace(tzinfo=None).isoformat(sep=" ")],
+                f'SELECT total_amount, status, created_at FROM "order" WHERE {scope} AND created_at>=? AND created_at<?',
+                [*params, previous_start.replace(tzinfo=None).isoformat(sep=" "), end.replace(tzinfo=None).isoformat(sep=" ")],
             ).fetchall()
             values = {(start_day + timedelta(days=i)).isoformat(): 0 for i in range(days)}
-            hourly = {f"{today.isoformat()}T{hour:02d}:00": 0 for hour in range(now.astimezone(shop.timezone).hour + 1)}
+            hourly = {f"{end_day.isoformat()}T{hour:02d}:00": 0 for hour in range(now.astimezone(shop.timezone).hour + 1 if end_day == today else 24)}
             count = cancelled = delivered = previous = 0
             period_status_counts = {status: 0 for status in ("pending", "paid", "shipped", "delivered", "cancelled", "returned")}
             for row in rows:
@@ -161,13 +163,13 @@ def dashboard(shop: UTEMallRepository, days=7):
                     if valid:
                         count += 1
                         values[local_date] += amount
-                        if local_date == today.isoformat():
+                        if local_date == end_day.isoformat():
                             hourly[local_time.strftime('%Y-%m-%dT%H:00')] += amount
                         if row["status"] == "delivered":
                             delivered += amount
                     else:
                         cancelled += 1
-                elif valid and created <= previous_end:
+                elif valid and created < previous_end:
                     previous += amount
             counts = {row["status"]: row["n"] for row in connection.execute(
                 f'SELECT status, COUNT(*) n FROM "order" WHERE {scope} GROUP BY status', params,
@@ -195,7 +197,8 @@ def dashboard(shop: UTEMallRepository, days=7):
                 "shop": {"name": info.get("name", "UTech Official"), "slug": shop.seller_shop_slug or "utech-official",
                          "rating": info.get("rating", 0), "followers": info.get("follower_count", 0),
                          "location": info.get("location", ""), "vacation_mode": bool(info.get("vacation_mode", False))},
-                "days": days, "from_date": start_day.isoformat(), "to_date": today.isoformat(),
+                "days": days, "from_date": start_day.isoformat(), "to_date": end_day.isoformat(),
+                "selected_date": selected_date.isoformat() if selected_date else None,
                 "updated_at": now.isoformat(), "timezone": shop.timezone_name,
                 "order_value_vnd": total, "order_count": count, "delivered_value_vnd": delivered,
                 "average_order_vnd": round(total / count) if count else 0,

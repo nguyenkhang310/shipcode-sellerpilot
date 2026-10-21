@@ -1,5 +1,35 @@
 # Rà soát app sau khi hợp nhất nhánh Hoàng
 
+## Xem từng ngày và sửa thủ công trong app — 21/10/2026
+
+- Dashboard nhận `date=YYYY-MM-DD`, ngày lịch sử đủ 24 giờ Việt Nam, hôm nay chỉ
+  đến hiện tại; so sánh cùng thời lượng ngày trước. Kiểm tra ranh giới 17:00 UTC,
+  ngày rỗng, năm nhuận, ngày tương lai, tổng series và trạng thái đơn bằng fixture.
+- Bộ chọn kỳ trượt 210ms, không animate lại khi xoay màn hình, tắt chuyển động
+  theo tùy chọn hệ thống. Lịch cuộn được ở màn hình thấp, nút xem luôn ở cuối;
+  hỗ trợ chuyển ngày trước/sau. Cache tách từng ngày, hủy/loại phản hồi muộn,
+  không gắn số ngày cũ lên ngày mới, không lẫn lựa chọn mốc biểu đồ giữa hai ngày.
+- Form sửa sản phẩm ở ngay app: tên/mô tả/giá/tồn, phân loại cụ thể, review,
+  xác nhận bỏ thay đổi, retry giữ UUID và tải lại khi 409. Backend scope seller,
+  version toàn sản phẩm/phân loại, transaction và receipt trong shop; cập nhật
+  giá thấp nhất/tổng tồn từ phân loại khả dụng. Chỉ validate trường đang sửa;
+  không tự đánh dấu thay đổi vì khoảng trắng trong nội dung cũ.
+- Đồng bộ tiêu đề, nhịp khoảng cách và màu chọn giữa các tab; nút thẻ sản phẩm
+  gọn trên màn hình 320px, metadata xuống dòng thay vì đẩy badge ra ngoài. Ô
+  nhập dài giới hạn chiều cao, cuộn nội bộ; footer lưu nằm ngoài vùng cuộn.
+- Modal sản phẩm và đơn hàng theo VisualViewport riêng trên web (không chỉ root
+  app), nên footer vẫn nhìn thấy khi bàn phím bật. Native tiếp tục dùng
+  KeyboardAvoidingView. Vùng cuộn đưa ô đang nhập lên trên footer khi focus hoặc
+  bàn phím làm co màn hình; bước review trở lại đầu nội dung. Test web kiểm tra
+  cả nút lưu và toàn bộ ô đang nhập nằm trong vùng nhìn thấy.
+- 631 test backend, 4 test state dashboard, 12 test transport/message, native SVG
+  parser và 21 test extension qua. Browser audit năm tab, đổi kỳ, đổi theme,
+  chat motion và form sửa dùng shop QA tạm; không gọi/sửa shop người dùng.
+
+Phạm vi: sửa thủ công hỗ trợ gian hàng local, không thay quyền Open API Shopee.
+Ảnh/SKU/ngành hàng/trạng thái sản phẩm chưa thuộc form sửa này. Chưa kiểm tra lại
+bàn phím, Dynamic Type, safe area và hiệu ứng trên thiết bị iPhone/Android thật.
+
 ## Cập nhật 21/10/2026
 
 - Sửa cảnh báo native SVG `".55" is not a valid number or percentage string`:

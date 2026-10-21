@@ -10,6 +10,7 @@ import { ManagementData, StoreProduct } from '../../api/types';
 import { useTheme } from '../../theme/ThemeProvider';
 import { ManagementRoute, money, count } from './DashboardScreen';
 import { OrdersPanel } from './OrdersPanel';
+import { ProductEditor } from './ProductEditor';
 
 const labels: Record<string, string> = { pending: 'Chờ xác nhận', paid: 'Chờ lấy hàng', shipped: 'Đang giao', delivered: 'Đã giao', cancelled: 'Đã hủy', returned: 'Đã hoàn hàng', active: 'Đang bán', draft: 'Bản nháp', archived: 'Đã ẩn' };
 export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, darkMode, onDarkMode, onRefresh, embedded = false, active = true, connectionError = '', refreshing = false }: {
@@ -21,6 +22,7 @@ export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, 
   const { ui, IOS, BRAND, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [items, setItems] = useState<StoreProduct[]>([]);
   const [total, setTotal] = useState(0), [loading, setLoading] = useState(false), [error, setError] = useState('');
   const [retry, setRetry] = useState(0), [connectionOpen, setConnectionOpen] = useState(false);
@@ -53,8 +55,8 @@ export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, 
           {error ? <View style={ui.errorCard}><Text style={ui.error}>{error}</Text><Pressable accessibilityRole="button" style={ui.secondaryButton} onPress={() => setRetry(value => value + 1)}><Text style={ui.secondaryText}>Thử lại</Text></Pressable></View> : null}
           {isList ? <><Text style={[ui.caption, { marginBottom: 14 }]}>{loading && !items.length ? 'Đang tải dữ liệu…' : total + ' sản phẩm'}</Text>{items.map(item => <View key={item.id} style={ui.listCard}>
             <View style={ui.row}><ProductThumbnail uri={item.image_url} size={68} radius={14} label={'Ảnh ' + item.name} /><View style={ui.grow}><Text numberOfLines={2} style={ui.productName}>{item.name}</Text><Text style={ui.productPrice}>{money(item.price_vnd)}</Text></View></View>
-            <Text selectable style={[ui.productMeta, { fontSize: 12, letterSpacing: .25 }]}>SKU {item.sku}</Text><View style={ui.between}><Text style={[ui.caption, item.stock <= 5 && { color: isDark ? '#EAC88E' : '#976323' }]}>{item.stock <= 5 ? 'Kho thấp · ' : 'Kho '}{count(item.stock)} · {count(item.sold_count)} đã bán</Text><View style={[ui.pill, item.status === 'active' && { backgroundColor: isDark ? '#1D362C' : '#ECF6EF' }]}><Text style={[ui.pillText, item.status === 'active' && { color: isDark ? '#99D3AD' : '#32784C' }]}>{labels[item.status] || item.status}</Text></View></View>
-            <View style={[ui.row, { gap: 9 }]}><Pressable accessibilityRole="button" accessibilityLabel={'Soạn bản chỉnh sửa cho ' + item.name} onPress={() => { onClose(); onAsk('Tối ưu tiêu đề và mô tả SKU ' + item.sku + ' cho rõ ràng hơn. Giữ nguyên thông số, không thêm tính năng chưa có.'); }} style={[ui.secondaryButton, { flex: 1 }]}><Ionicons name="document-text-outline" size={16} color={BRAND.navy} /><Text style={ui.secondaryText}>Tối ưu nội dung</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={'Chỉnh sửa thủ công ' + item.name} onPress={() => onStore('/seller/products/' + item.id + '/edit')} style={ui.secondaryButton}><Ionicons name="create-outline" size={20} color={BRAND.navy} /></Pressable></View>
+            <Text selectable style={[ui.productMeta, { fontSize: 12, letterSpacing: .25 }]}>SKU {item.sku}</Text><View style={[ui.between, { flexWrap: 'wrap', gap: 8 }]}><Text style={[ui.caption, { flexShrink: 1 }, item.stock <= 5 && { color: isDark ? '#EAC88E' : '#976323' }]}>{item.stock <= 5 ? 'Kho thấp · ' : 'Kho '}{count(item.stock)} · {count(item.sold_count)} đã bán</Text><View style={[ui.pill, item.status === 'active' && { backgroundColor: isDark ? '#1D362C' : '#ECF6EF' }]}><Text style={[ui.pillText, item.status === 'active' && { color: isDark ? '#99D3AD' : '#32784C' }]}>{labels[item.status] || item.status}</Text></View></View>
+            <View style={[ui.row, { gap: 9 }]}><Pressable accessibilityRole="button" accessibilityLabel={'Soạn bản chỉnh sửa cho ' + item.name} onPress={() => { onClose(); onAsk('Tối ưu tiêu đề và mô tả SKU ' + item.sku + ' cho rõ ràng hơn. Giữ nguyên thông số, không thêm tính năng chưa có.'); }} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={[ui.secondaryText, { fontSize: 13 }]}>Gợi ý nội dung</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={'Chỉnh sửa thủ công ' + item.name} onPress={() => setEditingId(item.id)} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8, gap: 5, backgroundColor: BRAND.orangeSoft }]}><Ionicons name="create-outline" size={18} color={BRAND.orangeInk} /><Text style={[ui.secondaryText, { color: BRAND.orangeInk, fontSize: 13 }]}>Chỉnh sửa</Text></Pressable></View>
           </View>)}
             {loading ? <ActivityIndicator color={BRAND.navy} style={{ margin: 20 }} /> : !items.length && !error ? <Text style={[ui.loadingText, { paddingVertical: 40 }]}>Không tìm thấy kết quả</Text> : null}
             {!loading && items.length < total ? <Pressable accessibilityRole="button" onPress={() => void load(items.length)} style={ui.secondaryButton}><Text style={ui.secondaryText}>Xem thêm</Text></Pressable> : null}
@@ -68,7 +70,7 @@ export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, 
           ] as const).map(([label, value, action]) => <Pressable key={label} accessibilityRole="button" onPress={action} style={[ui.listCard, ui.between]}><Text style={[ui.productName, ui.grow]}>{label}</Text><Text style={ui.taskCount}>{value ?? '—'}</Text><Ionicons name="chevron-forward" size={17} color={IOS.tertiary} /></Pressable>)}</> : null}
           {route?.kind === 'settings' ? <>
             <View style={ui.listCard}><Text style={ui.listTitle}>{data?.shop.name || 'Chưa kết nối shop'}</Text><View style={ui.row}><View style={[ui.dot, (!data || Boolean(connectionError)) && { backgroundColor: IOS.tertiary }]} /><Text style={ui.caption}>{connectionError ? 'Chưa đồng bộ được dữ liệu mới' : refreshing ? 'Đang đồng bộ…' : data ? 'Đã kết nối Shopee' : 'Chưa kết nối'}</Text></View><Text style={ui.caption}>{data?.shop.location || 'SellerPilot · by ShipCode'}</Text><Pressable accessibilityRole="button" onPress={() => onStore('/shop/' + (data?.shop.slug || 'utech-official'))} style={ui.secondaryButton}><Text style={ui.secondaryText}>Mở gian hàng</Text><Ionicons name="open-outline" size={16} color={BRAND.navy} /></Pressable></View>
-            <View style={[ui.listCard, ui.between]}><View style={ui.row}><Ionicons name="moon-outline" size={21} color={BRAND.navy} /><Text style={ui.productName}>Giao diện tối</Text></View><Switch accessibilityLabel="Giao diện tối" value={darkMode} onValueChange={onDarkMode} trackColor={{ true: '#C69329', false: '#D2D8E1' }} /></View>
+            <View style={[ui.listCard, ui.between]}><View style={ui.row}><Ionicons name="moon-outline" size={21} color={BRAND.navy} /><Text style={ui.productName}>Giao diện tối</Text></View><Switch accessibilityLabel="Giao diện tối" value={darkMode} onValueChange={onDarkMode} trackColor={{ true: BRAND.orange, false: isDark ? '#454A54' : '#D2D8E1' }} /></View>
             <View style={ui.grouped}>{([
               ['storefront-outline', 'Kênh người bán', '/seller'],
               ['chatbubble-ellipses-outline', 'Tin nhắn khách hàng', '/seller/inbox'],
@@ -82,6 +84,7 @@ export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, 
 
           </> : null}
         </ScrollView>}
+        <ProductEditor id={editingId} onClose={() => setEditingId(null)} onUpdated={() => { setRetry(value => value + 1); onRefresh(); }} />
       </View>;
   return embedded ? content : <Modal visible={Boolean(route)} transparent animationType="slide" onRequestClose={onClose}><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={ui.modalOverlay}><Pressable accessibilityRole="button" accessibilityLabel="Đóng bảng quản lý" style={{ position: 'absolute', inset: 0 }} onPress={onClose} />{content}</KeyboardAvoidingView></Modal>;
 }

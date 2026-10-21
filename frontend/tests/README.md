@@ -42,6 +42,7 @@ Với Playwright/Chrome đã cài, terminal khác từ root:
 node frontend/tests/app-audit.cjs
 node frontend/tests/dashboard-periods.cjs
 node frontend/tests/dock-themes.cjs
+node frontend/tests/management-editing.cjs
 node frontend/tests/chat-reliability.cjs
 node frontend/tests/chat-scroll.cjs
 node frontend/tests/chat-history.cjs
@@ -54,6 +55,7 @@ Nếu Playwright không nằm trong dependency cục bộ, đặt `PLAYWRIGHT_MO
 - `app-audit`: năm tab ở 320/375/430 px, ảnh sản phẩm, tìm kiếm, đơn, input co giãn, keyboard viewport, biểu đồ rỗng, lỗi đồng bộ và giao diện tối.
 - `dashboard-periods`: đổi Hôm nay/7/30 ngày khi API chậm, bấm liên tục, phản hồi về trễ, cache 60 giây, khung không co giật, đồng bộ lỗi và phản hồi sai kỳ.
 - `dock-themes`: 16 lần đổi sáng/tối ở 320/390/430/520px; kiểm tra material theo đúng theme, độ mờ, viền, backdrop, tab hiện tại, bản nháp chat và theme lưu sau reload. Chụp cả phần hiệu suất và thanh điều hướng. API bị chặn hoàn toàn bằng fixture, không cần 8123.
+- `management-editing`: chọn ngày, chuyển nhanh trước/sau, phản hồi muộn, lỗi ngày và phục hồi; lịch ở 320/390/520px; form sửa tên/mô tả/giá/tồn, nhập tiền có phân cách, tồn 0, review, retry cùng UUID sau khi server đã lưu, bỏ thay đổi và 409. Xác minh `/qa/identity` trước khi chạy và chỉ ghi shop tạm tại 8123. Chạy **sau app-audit**; chạy lại cần khởi động lại đúng server QA để có dữ liệu gốc.
 - `chat-reliability`: Dừng, gửi tiếp sau Dừng, mất phản hồi sau commit, tải lại app và khôi phục upload mà không tạo bản nháp trùng.
 - `chat-scroll`: hiệu ứng ba chấm đang gõ, câu trả lời dài tự cuộn, giữ vị trí khi đang đọc tin cũ, nút về cuối và composer co giãn.
 - `chat-history`: vuốt trái thực tế, ghim/bỏ ghim, lưu qua reload, hủy/xác nhận xóa hội thoại đang mở và vùng chạm ở 320px.

@@ -125,9 +125,13 @@ test('explicit local mode forwards only the fixed local API allowlist', async ()
   await api.handleApi('/management/orders/12', 'PATCH', '{"note":"Gọi trước"}');
   assert.equal(calls[1].url, 'http://127.0.0.1:8000/api/v1/management/orders/12');
   assert.equal(calls[2].options.method, 'PATCH');
+  await api.handleApi('/management/products/12', 'GET', null);
+  await api.handleApi('/management/products/12', 'PATCH', '{"stock":0}');
+  assert.equal(calls[3].url, 'http://127.0.0.1:8000/api/v1/management/products/12');
+  assert.equal(calls[4].options.method, 'PATCH');
   await assert.rejects(api.handleApi('https://evil.example/collect', 'POST', '{}'), /không được phép/);
   await assert.rejects(api.handleApi('/../../private', 'GET', null), /không được phép/);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 5);
 });
 
 test('image uploads require the selected account to still match the live tab', async () => {

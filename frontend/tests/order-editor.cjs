@@ -40,6 +40,13 @@ let browser;
  }
  checks.push('Order details fit 320/390/520px; close and footer remain reachable');
  await page.setViewportSize({width:390,height:844});
+ await name.focus();
+ await page.evaluate(()=>{Object.defineProperty(window.visualViewport,'height',{configurable:true,get:()=>window.innerHeight-320});window.visualViewport.dispatchEvent(new Event('resize'));});
+ await page.waitForFunction(()=>{const e=[...document.querySelectorAll('[role="button"]')].find(e=>e.textContent==='Xem thay đổi');return e&&e.getBoundingClientRect().bottom<=window.visualViewport.height;});
+ await page.waitForFunction(()=>{const input=document.querySelector('[aria-label="Người nhận"]'),button=[...document.querySelectorAll('[role="button"]')].find(e=>e.textContent==='Xem thay đổi');return input&&button&&input.getBoundingClientRect().y>80&&input.getBoundingClientRect().bottom<button.getBoundingClientRect().top;});
+ await page.screenshot({path:path.join(output,'order-keyboard.png')});
+ await page.evaluate(()=>{delete window.visualViewport.height;window.visualViewport.dispatchEvent(new Event('resize'));});
+ checks.push('Order save action stays above the emulated web keyboard');
  await name.fill('Khách đã sửa');
  const phone=page.getByRole('textbox',{name:'Số điện thoại',exact:true});await phone.fill('123');
  await page.getByRole('button',{name:'Xem thay đổi',exact:true}).click();

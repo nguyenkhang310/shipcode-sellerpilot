@@ -22,10 +22,15 @@ async function mount(live = false) {
   class ApiError extends Error {}
   const modules = {
     react: React, 'react-native': { AppState: app }, '../../api/client': { ApiError },
-    '../../api/sellerPilot': { getManagement: (days, signal) => new Promise((resolve, reject) => {
-      calls.push({ days, signal, resolve, reject });
+    '../../api/sellerPilot': { getManagement: (days, signal, date) => new Promise((resolve, reject) => {
+      calls.push({ days, signal, date, resolve, reject });
     }) },
   };
+  const datesFile = path.resolve(__dirname, '../src/features/dashboard/dates.ts');
+  const datesCode = ts.transpileModule(fs.readFileSync(datesFile, 'utf8'), {compilerOptions: {module: ts.ModuleKind.CommonJS}}).outputText;
+  const datesModule = {exports: {}};
+  vm.runInNewContext('(function(module,exports){'+datesCode+'\n})', {Date})(datesModule, datesModule.exports);
+  modules['./dates'] = datesModule.exports;
   const loaded = { exports: {} };
   vm.runInNewContext('(function(require,module,exports){' + code + '\n})', {
     AbortController, Date, Map, JSON, Error,
@@ -102,4 +107,32 @@ test('background reads preserve unchanged render, recover errors and release req
   await h.poll(); await h.reply(3, { order_count: 13 });
   assert.equal(h.state.data.order_count, 13); assert.equal(h.state.error, '');
   await h.poll(); await h.close(); assert.equal(h.calls[4].signal.aborted, true);
+});
+
+test('individual dates have distinct cache keys, ignore stale replies and reject wrong-day data', async () => {
+  const h = await mount();
+  try {
+    await h.reply(0);
+    await h.do(s => s.onDate('2026-01-10'));
+    assert.equal(h.state.selectedDate, '2026-01-10');
+    assert.equal(h.state.refreshing, false);
+    await h.do(s => s.onDate('2026-01-09'));
+    assert.equal(h.calls[1].signal.aborted, true);
+    await h.reply(2, {from_date: '2026-01-09', to_date: '2026-01-09', selected_date: '2026-01-09', order_count: 9});
+    await h.reply(1, {from_date: '2026-01-10', to_date: '2026-01-10', selected_date: '2026-01-10', order_count: 10});
+    assert.equal(h.state.data.order_count, 9);
+    await h.do(s => s.onDays(1));
+    assert.equal(h.state.selectedDate, null);
+    assert.equal(h.state.data.selected_date, undefined);
+    const calls = h.calls.length;
+    await h.do(s => s.onDate('2026-01-09'));
+    assert.equal(h.calls.length, calls, 'Cached custom day must not collide with today');
+    assert.equal(h.state.data.order_count, 9);
+    await h.do(s => s.onDate('2026-01-08'));
+    await h.reply(3, {from_date: '2026-01-09', to_date: '2026-01-09'});
+    assert.match(h.state.error, /không khớp/);
+    assert.equal(h.state.selectedDate, '2026-01-08');
+    await h.do(s => s.refresh());
+    assert.equal(h.calls[4].date, '2026-01-08');
+  } finally { await h.close(); }
 });

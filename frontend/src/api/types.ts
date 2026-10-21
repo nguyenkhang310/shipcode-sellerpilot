@@ -79,6 +79,11 @@ export type StoreProduct = {
   id: number; name: string; sku: string; price_vnd: number; stock: number;
   status: string; image_url: string | null; sold_count: number; rating: number;
 };
+export type ProductDetail = Pick<StoreProduct, 'id' | 'name' | 'sku' | 'price_vnd' | 'stock' | 'status' | 'image_url'> & {
+  description: string | null; version: string; editable_fields: string[]; replayed?: boolean;
+  variants: { id: number; sku: string; title: string; price_vnd: number; stock: number; is_active: boolean }[];
+};
+export type ProductChanges = Partial<Pick<ProductDetail, 'name' | 'description' | 'price_vnd' | 'stock'>>;
 export type StoreOrder = {
   id: number; customer_name: string; total_vnd: number; status: string;
   created_at: string; item_count: number; quantity: number;
@@ -99,6 +104,7 @@ export type StorePage<T> = { items: T[]; total: number; limit: number; offset: n
 export type ManagementData = {
   shop: { name: string; slug: string; rating: number; followers: number; location: string; vacation_mode: boolean };
   days: number; from_date: string; to_date: string; updated_at: string; timezone: string;
+  selected_date?: string | null;
   order_value_vnd: number; order_count: number; delivered_value_vnd: number;
   average_order_vnd: number; cancelled_count: number; previous_value_vnd: number;
   change_percent: number | null; series: { date: string; value: number }[];

@@ -58,4 +58,7 @@ if __name__ == '__main__':
                 connection.execute('INSERT INTO order_item (order_id, product_id, quantity, price) VALUES (?,1,1,1000000)', (number,))
             connection.execute("UPDATE \"order\" SET shipping_phone='0901234567', shipping_address='123 Đường Kiểm Thử', note='', payment_method='COD', payment_status='unpaid'")
         application = app.main.create_app(settings)
+        @application.get('/qa/identity')
+        def qa_identity():
+            return {'temporary_shop': True}
         uvicorn.run(application, host='127.0.0.1', port=8123, log_level='warning')

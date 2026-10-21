@@ -15,14 +15,15 @@ function pointLabel(date: string, hourly: boolean) {
   return hourly ? date.slice(11, 16) : date.slice(8, 10) + '/' + date.slice(5, 7);
 }
 
-type ChartProps = { data: ManagementData; days: number; pending: boolean };
+type ChartProps = { data: ManagementData; days: number; pending: boolean; selectedDate?: string | null };
 
-export function SalesTrend({ data, days, pending }: ChartProps) {
+export function SalesTrend({ data, days, pending, selectedDate }: ChartProps) {
   const { ui, IOS, isDark, BRAND } = useTheme();
-  const [selection, setSelection] = useState<{ days: number; index: number } | null>(null);
+  const [selection, setSelection] = useState<{ period: string; index: number } | null>(null);
   const chart = useRef<View>(null);
   const series = pending ? [] : data.series;
-  const selected = selection?.days === days ? selection.index : null;
+  const period = selectedDate || days + ':' + data.from_date;
+  const selected = selection?.period === period ? selection.index : null;
   const index = selected === null ? null : Math.min(selected, series.length - 1);
   const max = Math.max(1, ...series.map(point => point.value));
   const ceiling = max === 1 ? 1 : Math.ceil(max / 10 ** Math.floor(Math.log10(max))) * 10 ** Math.floor(Math.log10(max));
@@ -43,11 +44,11 @@ export function SalesTrend({ data, days, pending }: ChartProps) {
   const picked = index !== null && index >= 0 ? series[index] : null;
   const marks = series.length ? [...new Set([0, Math.floor((series.length - 1) / 2), series.length - 1])].filter(i => i >= 0) : [];
   return <View style={{ marginTop: 16 }}>
-    <View style={[ui.between, { minHeight: 25, marginBottom: 4 }]}><Text style={[ui.caption, { color: captionColor }]}>{picked ? pointLabel(picked.date, days === 1) : days === 1 ? 'Theo giờ · Hôm nay' : 'Theo ngày · ' + days + ' ngày'}</Text><Text style={[ui.caption, { fontWeight: '600', color: valueColor }]}>{picked ? money(picked.value) : pending ? '—' : 'VND'}</Text></View>
+    <View style={[ui.between, { minHeight: 25, marginBottom: 4 }]}><Text style={[ui.caption, { color: captionColor }]}>{picked ? pointLabel(picked.date, days === 1) : days === 1 ? 'Theo giờ · ' + (selectedDate ? selectedDate.slice(8) + '/' + selectedDate.slice(5, 7) : 'Hôm nay') : 'Theo ngày · ' + days + ' ngày'}</Text><Text style={[ui.caption, { fontWeight: '600', color: valueColor }]}>{picked ? money(picked.value) : pending ? '—' : 'VND'}</Text></View>
     <Pressable disabled={pending || !series.length} ref={chart} testID="sales-chart" accessibilityRole="adjustable" accessibilityState={{ disabled: pending || !series.length }} accessibilityLabel="Biểu đồ giá trị đơn hàng" aria-valuemin={0} aria-valuemax={Math.max(0, series.length - 1)} aria-valuenow={index ?? 0} aria-valuetext={pending ? 'Chưa có số liệu kỳ này' : picked ? pointLabel(picked.date, days === 1) + ': ' + money(picked.value) : 'Chọn mốc để xem giá trị đơn hàng'} accessibilityActions={[{ name: 'increment', label: 'Mốc tiếp theo' }, { name: 'decrement', label: 'Mốc trước' }]}
       onAccessibilityAction={event => {
         if (pending || !series.length) return;
-        setSelection({ days, index: Math.max(0, Math.min(series.length - 1, (selected ?? 0) + (event.nativeEvent.actionName === 'increment' ? 1 : -1))) });
+        setSelection({ period, index: Math.max(0, Math.min(series.length - 1, (selected ?? 0) + (event.nativeEvent.actionName === 'increment' ? 1 : -1))) });
       }}
       onPress={event => {
         const pageX = event.nativeEvent.pageX;
@@ -55,7 +56,7 @@ export function SalesTrend({ data, days, pending }: ChartProps) {
         // so taps resolve to the same time slot on iOS and web.
         chart.current?.measureInWindow((left, _top, width) => {
           if (!width || !Number.isFinite(pageX)) return;
-          setSelection({ days, index: Math.max(0, Math.min(series.length - 1, Math.round(((pageX - left) / width * 324 - 44) / 270 * (series.length - 1)))) });
+          setSelection({ period, index: Math.max(0, Math.min(series.length - 1, Math.round(((pageX - left) / width * 324 - 44) / 270 * (series.length - 1)))) });
         });
       }}>
       <Svg width="100%" height={170} viewBox="0 0 324 170">
@@ -72,7 +73,7 @@ function ViewlessGrid({ y, label, dark }: { y: number; label: string; dark: bool
   return <><Line x1={44} x2={314} y1={y} y2={y} stroke={dark ? '#344052' : '#E7ECF2'} strokeDasharray="3 5" /><SvgText x={0} y={y + 3} fontSize={11} fill={dark ? '#A5ADBA' : '#748091'}>{label}</SvgText></>;
 }
 
-export function OrderDistribution({ data, days, pending }: ChartProps) {
+export function OrderDistribution({ data, days, pending, selectedDate }: ChartProps) {
   const { ui, isDark } = useTheme();
   const counts = pending ? {} : data.order_status_counts || {};
   const groups = [
@@ -83,7 +84,7 @@ export function OrderDistribution({ data, days, pending }: ChartProps) {
   ];
   const total = groups.reduce((sum, group) => sum + group.value, 0);
   return <View testID="order-distribution" style={[ui.distributionCard, { borderRadius: 24, padding: 19 }]}>
-    <View style={[ui.between, { marginBottom: 14 }]}><Text style={ui.listTitle}>Trạng thái đơn</Text><Text style={ui.caption}>{days === 1 ? 'Hôm nay' : days + ' ngày'}</Text></View>
+    <View style={[ui.between, { marginBottom: 14 }]}><Text style={ui.listTitle}>Trạng thái đơn</Text><Text style={ui.caption}>{selectedDate ? selectedDate.slice(8) + '/' + selectedDate.slice(5, 7) : days === 1 ? 'Hôm nay' : days + ' ngày'}</Text></View>
     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, minHeight: 38 }} accessibilityLabel={pending ? 'Chưa có số liệu kỳ này' : count(total) + ' đơn trong kỳ'}>
       <Text style={[ui.metricValue, { fontSize: 29, marginVertical: 0, letterSpacing: -.8 }]}>{pending ? '—' : count(total)}</Text><Text style={ui.caption}>đơn trong kỳ</Text>
     </View>

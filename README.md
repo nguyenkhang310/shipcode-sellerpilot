@@ -25,7 +25,7 @@ nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
 
 ### Những gì đã hoạt động
 
-- Tổng quan hôm nay/7/30 ngày, biểu đồ giá trị đơn hàng, trạng thái đơn và việc cần xử lý.
+- Tổng quan hôm nay/7/30 ngày hoặc từng ngày lịch sử: chọn lịch, chuyển ngày trước/sau, biểu đồ theo giờ và so sánh với ngày trước theo giờ Việt Nam. Bộ chọn kỳ có hiệu ứng trượt, hỗ trợ Giảm chuyển động.
 - Danh mục có ảnh, tìm theo tên/SKU, hàng sắp hết và chi tiết đơn hàng.
 - Xử lý đơn ngay trên app: sửa thông tin nhận hàng trước khi bàn giao, ghi chú, xác nhận/bàn giao/đã giao/hủy theo trạng thái hợp lệ. Xem lại trước khi lưu; chống ghi đè và hoàn kho trùng. [Phạm vi và cách dùng](docs/ORDER_MANAGEMENT.md).
 - Chat tra toàn bộ danh mục shop theo nhiều từ khóa và khoảng giá đã nêu,
@@ -36,7 +36,7 @@ nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
 - Tính hòa vốn, lợi nhuận, biên lời, giá mục tiêu và tác động của giảm giá từ chi phí chủ shop cung cấp.
 - Kế hoạch kinh doanh theo số liệu trong kỳ, lịch hành động, kịch bản video có cảnh/thoại/caption và hướng dẫn đo hiệu quả. [Cách dùng và giới hạn](docs/BUSINESS_ADVISOR.md).
 - Đổi giá bằng đề xuất → xác nhận → cập nhật shop → nhật ký.
-- Sửa tiêu đề/mô tả/giá/tồn nhiều trường qua chat, xem trước giá trị cũ/mới và xác nhận. [Hướng dẫn sửa sản phẩm](docs/PRODUCT_EDITS.md).
+- Sửa tên/mô tả/giá/tồn thủ công ngay trong tab Sản phẩm hoặc đề xuất qua chat. Chọn SKU phân loại, xem trước thay đổi, xác nhận; chống ghi đè và xử lý trùng khi mất phản hồi. [Hướng dẫn sửa sản phẩm](docs/PRODUCT_EDITS.md).
 - Tạo bản nháp từ tin nhắn hoặc tối đa 6 ảnh; AI soạn tên/mô tả, hiểu câu ngắn theo ngữ cảnh và hỏi phần thiếu. Có thể bổ sung ảnh sau, giữ giá/tồn đã cung cấp; duyệt bản nháp rồi đăng lên gian hàng local.
 - Gửi ảnh kèm đoạn mô tả tự nhiên trong một lượt: AI nhận tên, giá, tồn và ngành hàng cùng lúc; giữ caption đã viết, phân biệt giá vốn/giá bán, nhận chỉnh sửa nhiều trường và chỉ hỏi phần còn thiếu. Tin nhắn hỗ trợ tối đa 4.000 ký tự.
 - Mã yêu cầu chống xử lý trùng; Dừng hủy tác vụ trên backend; khôi phục kết quả sau mất kết nối.
@@ -45,6 +45,12 @@ nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
 - Logo Shopee vector, favicon local và nhận diện đồng bộ trên các trang mua/bán. Mỗi sản phẩm đang bán có 16–32 đánh giá mô phỏng bổ sung theo ngành hàng, phân trang/lọc sao và phản hồi shop. Không tạo đơn hàng hay thay đổi doanh thu/tồn kho khi tạo các bình luận này.
 
 Các kỳ tổng quan đã xem được giữ trong bộ nhớ tối đa 60 giây để chuyển lại nhanh. Sau thời hạn hoặc khi đổi ngày theo giờ Việt Nam, app lấy dữ liệu mới. Kéo làm mới, nút Đồng bộ và thay đổi shop qua AI sẽ xóa cache các kỳ; số liệu của kỳ cũ không được hiển thị dưới kỳ vừa chọn khi đang tải.
+
+Trong **Quản lý**, bấm biểu tượng lịch bên cạnh Hôm nay/7 ngày/30 ngày để chọn
+một ngày từ năm 1970 đến hiện tại. Mũi tên chuyển từng ngày; Hôm nay trở về số
+liệu đang cập nhật. Ngày lịch sử lấy đủ 00:00–24:00 theo giờ Việt Nam, hôm nay
+chỉ lấy đến hiện tại; biểu đồ một ngày chia theo giờ. Việc cần làm và sản phẩm
+bán chạy lũy kế vẫn là thông tin toàn shop, không phải lịch sử tồn kho của ngày đó.
 
 Khi đang xem **Quản lý**, app kiểm tra số liệu mới mỗi 5 giây và cập nhật tại chỗ. Việc kiểm tra tạm dừng khi app chạy nền hoặc chuyển tab; quay về Quản lý sẽ lấy lại dữ liệu. Mất kết nối giữ số liệu đã lấy gần nhất và báo chưa đồng bộ.
 

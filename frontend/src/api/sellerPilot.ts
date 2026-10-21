@@ -1,6 +1,7 @@
 import { apiRequest, API_URL } from './client';
 import { ChatData, PriceProposal, ProductDraft, ProductEditProposal, ManagementData, StorePage, StoreProduct, StoreOrder, OrderDetail, OrderChanges, ConversationSummary, ConversationDetail } from './types';
 import { createMessageId, recoverChatRequest } from './chatRequests';
+import type { ProductDetail, ProductChanges } from './types';
 
 export function decideProductEdit(id: number, decision: 'confirm' | 'reject') {
   return apiRequest<ProductEditProposal>(`/product-edits/${id}/${decision}`, { method: 'POST' });
@@ -23,7 +24,11 @@ export async function sendSellerMessage(message: string, signal?: AbortSignal, c
   });
 }
 
-export const getManagement = (days: number, signal?: AbortSignal) => apiRequest<ManagementData>('/management/dashboard?days=' + days, { signal });
+export const getManagement = (days: number, signal?: AbortSignal, date?: string | null) => apiRequest<ManagementData>('/management/dashboard?' + new URLSearchParams({days: String(days), ...(date ? {date} : {})}), { signal });
+export const getProduct = (id: number, signal?: AbortSignal) => apiRequest<ProductDetail>('/management/products/' + id, {signal});
+export const updateProduct = (id: number, changes: ProductChanges, version: string, requestId: string, variantId: number | null) => apiRequest<ProductDetail>('/management/products/' + id, {
+  method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({...changes, expected_version: version, request_id: requestId, variant_id: variantId}), timeoutMs: 20000,
+});
 export const getProducts = (q = '', low = false, offset = 0, signal?: AbortSignal) => apiRequest<StorePage<StoreProduct>>('/management/products?' + new URLSearchParams({ q, low: String(low), offset: String(offset) }), { signal });
 export const getOrders = (status = 'all', q = '', offset = 0, signal?: AbortSignal) => apiRequest<StorePage<StoreOrder>>('/management/orders?' + new URLSearchParams({ status, q, offset: String(offset) }), { signal });
 export const getOrder = (id: number, signal?: AbortSignal) => apiRequest<OrderDetail>('/management/orders/' + id, {signal});

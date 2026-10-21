@@ -26,9 +26,35 @@ Tối ưu tiêu đề và mô tả SKU A001 cho rõ ràng hơn.
 Giữ nguyên thông số, không thêm tính năng chưa có.
 ```
 
-Tab **Sản phẩm → Chỉnh nội dung qua chat** mở yêu cầu soạn bản sửa. Nút bút bên cạnh
-vẫn mở form chỉnh thủ công trên Kênh Người Bán. Tên sản phẩm duy nhất có thể được
+Tab **Sản phẩm → Gợi ý nội dung** mở yêu cầu soạn bản sửa. **Chỉnh sửa** mở form
+ngay trong app, không chuyển sang trình duyệt. Tên sản phẩm duy nhất có thể được
 tìm qua câu “Tối ưu mô tả cho [tên sản phẩm]”; nhiều kết quả cần chọn SKU chính xác.
+
+## Sửa thủ công trong app
+
+1. Mở Sản phẩm hoặc Hàng sắp hết, bấm **Chỉnh sửa** trên sản phẩm.
+2. Nếu có phân loại, chọn SKU để sửa giá/tồn. Tên và mô tả dùng chung cho tất cả
+   phân loại; không tự ghi giá/tồn sản phẩm cha khi chưa chọn SKU.
+3. Nhập tên (3–200 ký tự), mô tả (tối đa 10.000 ký tự), giá nguyên từ 1.000 đến
+   1.000.000.000 ₫ và tồn nguyên 0–1.000.000. Có thể nhập `500.000` hoặc `500000`;
+   không dùng đơn vị rút gọn như `5 xị` ở ô số thủ công. Chat vẫn hỗ trợ tiếng lóng.
+4. Bấm **Xem thay đổi sản phẩm** để đối chiếu cũ → mới, sau đó **Xác nhận lưu sản phẩm**.
+   Đóng khi đang sửa có bước xác nhận bỏ thay đổi; chưa xác nhận lưu thì không ghi.
+
+API local mới:
+
+- `GET /api/v1/management/products/{id}`: nội dung, phân loại, trường được sửa và
+  `version` của toàn bộ sản phẩm/phân loại hiện tại.
+- `PATCH` cùng URL: gửi `expected_version`, `request_id` UUID, `variant_id` nếu
+  đang sửa phân loại và chỉ các trường thực sự đổi (`name`, `description`,
+  `price_vnd`, `stock`). Không nhận null/giá âm/số lẻ/tên rỗng hoặc trường lạ.
+- Đối chiếu version và ghi trong cùng transaction. Mất phản hồi thì gửi lại
+  đúng UUID/nội dung; receipt trả kết quả hiện tại, không ghi lần nữa. UUID cũ
+  với nội dung khác hoặc version cũ trả 409. App yêu cầu tải lại trước khi sửa tiếp.
+- Giữ nguyên phạm vi seller; không đổi SKU, trạng thái, ngành hàng hoặc ảnh trong
+  form này. Luồng chỉ áp dụng cho gian hàng local của app; không gọi Open API
+  Shopee thật. Không cần migration agent mới; receipt được tạo trong database shop
+  ở lần lưu đầu tiên.
 
 Giá và tồn nhận số mới từ lời người bán, không để model tự chốt. `5 xị` được quy đổi
 500.000đ bằng parser tiền dùng chung. Nếu giá mơ hồ, hỏi lại trước khi tạo đề xuất.

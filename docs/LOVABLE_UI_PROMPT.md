@@ -20,7 +20,7 @@ Thanh dưới có 5 tab: Quản lý, Sản phẩm, Trợ lý (ở giữa bằng 
 
 1. QUẢN LÝ
 - Tên shop, trạng thái kết nối và thời gian cập nhật ngắn gọn.
-- Bộ chọn Hôm nay / 7 ngày / 30 ngày.
+- Bộ chọn Hôm nay / 7 ngày / 30 ngày / lịch chọn ngày cụ thể, nền chọn trượt nhẹ 210ms và tắt khi reduced motion. Có nút ngày trước/sau, không chọn ngày tương lai. Ngày lịch sử lấy đủ 24 giờ Việt Nam; hôm nay đến hiện tại.
 - Thẻ giá trị đơn hàng là số liệu chính; số đơn, giá trị đã giao, giá trị trung bình và chênh lệch kỳ trước là số liệu phụ.
 - Biểu đồ đường đơn giản có thể chạm xem từng mốc; phân bố trạng thái đơn và sản phẩm bán tốt phía dưới.
 - Việc cần xử lý: chờ xác nhận, chờ lấy hàng, đang giao, hàng sắp hết. Chạm vào đi đúng danh sách đã lọc.
@@ -31,6 +31,7 @@ Thanh dưới có 5 tab: Quản lý, Sản phẩm, Trợ lý (ở giữa bằng 
 - Danh sách có ảnh thật, tên hai dòng, giá, SKU, tồn kho, đã bán và trạng thái. Tìm kiếm theo tên/SKU, bộ lọc hàng sắp hết, trạng thái rỗng và lỗi ảnh gọn.
 - Nút thêm sản phẩm chuyển sang hội thoại trợ lý với ý định tạo bản nháp.
 - Chỉnh tiêu đề/mô tả/giá/tồn qua đề xuất cũ → mới; người bán xem lại rồi xác nhận. Không hiển thị như đã lưu khi mới có gợi ý của AI.
+- Nút Chỉnh sửa mở form thủ công ngay trong app, chọn SKU phân loại, giữ tên/mô tả chung. Có xem lại trước khi lưu, xác nhận bỏ thay đổi và khôi phục cùng UUID khi mất phản hồi. 409 yêu cầu tải lại, không tự ghi đè.
 
 3. TRỢ LÝ
 - Hội thoại gọn như ChatGPT/Gemini mobile. Bong bóng người dùng bên phải; trả lời trợ lý bên trái có khoảng trắng và phân cấp nội dung rõ. Markdown vừa đủ: đoạn văn, bullet, chữ đậm; không bảng rộng tràn màn hình, không hiện JSON thô.
@@ -64,9 +65,10 @@ CHẤT LƯỢNG TƯƠNG TÁC
 
 TÍCH HỢP VÀ ĐẦU RA
 Lovable có thể tạo prototype React/TypeScript responsive, nhưng backend hiện có là FastAPI và app chính là Expo React Native. Tách component trình bày, state và API adapter để chuyển thiết kế sang app thuận tiện. Không tự thay backend bằng Supabase, không yêu cầu nhập API key trên giao diện.
-- Thống kê: GET /api/v1/management/dashboard?days=1|7|30.
+- Thống kê: GET /api/v1/management/dashboard?days=1|7|30; một ngày lịch sử dùng ?days=1&date=YYYY-MM-DD. Kiểm tra from_date/to_date trước khi gắn dữ liệu lên ngày đang chọn; cache tách từng ngày.
 - Sản phẩm/đơn: GET /api/v1/management/products và /orders với tìm kiếm, lọc và phân trang.
 - Chi tiết: GET /api/v1/management/orders/{id}.
+- Sản phẩm thủ công: GET/PATCH /api/v1/management/products/{id}; lưu request_id UUID, expected_version, variant_id nếu có và trường thực sự đổi. Dùng editable_fields/variants từ server.
 - Lưu đơn: PATCH cùng URL, gửi request_id UUID, expected_version và các trường thực sự thay đổi. Dùng allowed_statuses/editable_fields từ server.
 - Chat, ảnh, bản nháp, lịch sử và đề xuất dùng API adapter riêng theo các contract đã có trong repo; không phát minh endpoint rồi giả định backend hỗ trợ.
 - Nếu chưa nối được backend, dùng fixture TypeScript tách biệt, dữ liệu nhất quán và có thể chuyển sang API thật. Không hiển thị nhãn kỹ thuật/dữ liệu giả trong thiết kế chính; ghi rõ chế độ fixture trong tài liệu prototype.

@@ -4,17 +4,18 @@ import { ManagementData } from '../../api/types';
 import { useTheme } from '../../theme/ThemeProvider';
 import type { ManagementRoute } from './DashboardScreen';
 import { SalesTrend } from './ManagementCharts';
+import { matchesPeriod } from './dates';
 import { count, money } from './formatters';
 
 type Props = {
-  data: ManagementData; days: number; loading: boolean; refreshing: boolean; error: string;
+  data: ManagementData; days: number; selectedDate: string | null; loading: boolean; refreshing: boolean; error: string;
   onOpen: (route: ManagementRoute) => void;
 };
 
 /** Period-bound values stay inside one stable layout, including pending/error states. */
-export function PerformanceOverview({ data, days, loading, refreshing, error, onOpen }: Props) {
+export function PerformanceOverview({ data, days, selectedDate, loading, refreshing, error, onOpen }: Props) {
   const { IOS, isDark, BRAND } = useTheme();
-  const ready = data.days === days;
+  const ready = matchesPeriod(data, days, selectedDate);
   const muted = isDark ? '#ADB6C3' : '#626D7C';
   const line = isDark ? '#333B47' : '#E0E5EC';
   const accent = BRAND.orangeInk;
@@ -25,7 +26,7 @@ export function PerformanceOverview({ data, days, loading, refreshing, error, on
     { label: 'Đơn hợp lệ', value: shown(data.order_count), testID: 'dashboard-order-count', status: undefined },
     { label: 'Trung bình mỗi đơn', value: shown(data.average_order_vnd, true), testID: undefined, status: undefined },
   ];
-  return <View testID="period-summary" accessibilityLabel={ready ? `Số liệu ${days} ngày` : `${loading ? 'Đang tải' : 'Chưa có'} số liệu ${days} ngày`}>
+  return <View testID="period-summary" accessibilityLabel={ready ? `Số liệu ${selectedDate || days + " ngày"}` : `${loading ? 'Đang tải' : 'Chưa có'} số liệu ${selectedDate || days + " ngày"}`}>
     <View style={s.headline}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><View style={{ width: 4, height: 14, borderRadius: 2, backgroundColor: BRAND.orange }} /><Text style={[s.overline, { color: muted }]}>GIÁ TRỊ ĐƠN HÀNG</Text></View>
       <View style={s.amountRow}>
@@ -45,7 +46,7 @@ export function PerformanceOverview({ data, days, loading, refreshing, error, on
     </Pressable>)}</View>
     <View style={[s.chart, { backgroundColor: IOS.card, borderColor: line }]}>
       <View style={s.chartTitleRow}><View style={{ flex: 1 }}><Text style={[s.chartTitle, { color: IOS.label }]}>Diễn biến đơn hàng</Text><Text style={[s.note, { color: muted, marginTop: 3 }]}>Giá trị theo thời điểm đặt đơn</Text></View></View>
-      <SalesTrend data={data} days={days} pending={!ready} />
+      <SalesTrend data={data} days={days} selectedDate={selectedDate} pending={!ready} />
       <View style={[s.ledger, { borderColor: line }]}>
         <Pressable accessibilityRole="button" onPress={() => onOpen({ kind: 'orders', status: 'delivered' })} style={s.ledgerItem}><View style={s.ledgerLabel}><View style={[s.dot, { backgroundColor: isDark ? '#86B5A0' : '#4C816B' }]} /><Text style={[s.note, { color: muted, flex: 1 }]}>Giá trị đã giao</Text></View><Text numberOfLines={1} adjustsFontSizeToFit style={[s.ledgerValue, { color: IOS.label }]}>{shown(data.delivered_value_vnd, true)}</Text></Pressable>
         <Pressable accessibilityRole="button" onPress={() => onOpen({ kind: 'orders', status: 'cancelled' })} style={[s.ledgerItem, { paddingLeft: 16, borderLeftWidth: StyleSheet.hairlineWidth, borderColor: line }]}><View style={s.ledgerLabel}><View style={[s.dot, { backgroundColor: isDark ? '#B2B8C3' : '#9099A6' }]} /><Text style={[s.note, { color: muted, flex: 1 }]}>Đơn đã hủy</Text></View><Text numberOfLines={1} adjustsFontSizeToFit style={[s.ledgerValue, { color: IOS.label }]}>{shown(data.order_status_counts?.cancelled)}</Text></Pressable>

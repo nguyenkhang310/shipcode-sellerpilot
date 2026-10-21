@@ -9,26 +9,32 @@ import { OrderDistribution } from './ManagementCharts';
 import { count } from './formatters';
 import { ActionQueue } from './ActionQueue';
 import { PerformanceOverview } from './PerformanceOverview';
+import { PeriodPicker } from './PeriodPicker';
+import { matchesPeriod } from './dates';
 
 export { money, count } from './formatters';
 export type ManagementRoute = { kind: 'products' | 'orders' | 'inventory' | 'tasks' | 'settings'; status?: string };
 type Props = {
   data: ManagementData | null; loading: boolean; refreshing: boolean; error: string; days: number;
+  selectedDate: string | null; onDate: (date: string) => void; reduceMotion: boolean;
   onDays: (days: number) => void; onRefresh: () => void; onPullRefresh: () => void;
   onOpen: (route: ManagementRoute) => void; onAsk: (message: string) => void;
   onStore: (path: string) => void;
 };
 
-export function DashboardScreen({ data, loading, refreshing, error, days, onDays, onRefresh, onPullRefresh, onOpen, onAsk, onStore }: Props) {
+export function DashboardScreen({ data, loading, refreshing, error, days, selectedDate, onDate, reduceMotion, onDays, onRefresh, onPullRefresh, onOpen, onAsk, onStore }: Props) {
   const { ui, IOS, BRAND, isDark } = useTheme();
   const insets = useSafeAreaInsets();
-  const ready = data?.days === days;
+  const ready = matchesPeriod(data, days, selectedDate);
   const ink = IOS.label, muted = isDark ? '#A8ADB7' : '#737B88';
   const line = isDark ? '#30343E' : '#E8EBEF', card = isDark ? '#1C1D22' : '#FFFFFF';
   const accent = isDark ? '#C2D6EE' : BRAND.navy;
   const block = { backgroundColor: card, borderColor: line };
   const date = (value: string) => value.slice(8, 10) + '/' + value.slice(5, 7);
-  const range = ready && data ? date(data.from_date) + (data.from_date === data.to_date ? '' : ' – ' + date(data.to_date)) : days === 1 ? 'Hôm nay' : days + ' ngày';
+  const range = selectedDate ? date(selectedDate) : ready && data ? date(data.from_date) + (data.from_date === data.to_date ? '' : ' – ' + date(data.to_date)) : days === 1 ? 'Hôm nay' : days + ' ngày';
+  const analysisMessage = selectedDate && ready && data
+    ? `Phân tích số liệu tôi đang xem ngày ${selectedDate}: giá trị đơn hợp lệ ${data.order_value_vnd} đồng, ${data.order_count} đơn, giá trị đơn đã giao ${data.delivered_value_vnd} đồng, ${data.cancelled_count} đơn hủy/hoàn. Đây là số liệu của ngày đã chọn, không thay bằng số hôm nay. Đề xuất kế hoạch 7 ngày tới và cách đo kết quả; không coi giá trị đơn là lợi nhuận.`
+    : `Phân tích số liệu ${days} ngày qua và lập kế hoạch kinh doanh 7 ngày tới. Chọn sản phẩm ưu tiên, lịch làm và cách đo kết quả.`;
 
   return <ScrollView testID="management-scroll" showsVerticalScrollIndicator={false}
     contentContainerStyle={[ui.scroll, { paddingTop: 10, paddingBottom: dockContentInset(insets.bottom) }]}
@@ -48,16 +54,13 @@ export function DashboardScreen({ data, loading, refreshing, error, days, onDays
     </Pressable>
     {error && !data ? <View style={ui.errorCard}><Text style={ui.error}>{error}</Text><Pressable accessibilityRole="button" onPress={onRefresh} style={ui.secondaryButton}><Text style={ui.secondaryText}>Thử kết nối lại</Text></Pressable></View> : null}
     <View style={[s.section, { marginTop: 24 }]}><Text style={[s.heading, { color: ink }]}>Hiệu quả kinh doanh</Text><Text style={[s.meta, { color: muted, flexShrink: 0 }]}>{range}</Text></View>
-    <View style={[s.period, { borderColor: line }]}>{([[1, 'Hôm nay'], [7, '7 ngày'], [30, '30 ngày']] as const).map(([value, label]) =>
-      <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: days === value }} onPress={() => onDays(value)} style={[s.periodItem, days === value && { backgroundColor: BRAND.orangeSoft, borderColor: isDark ? '#B767374D' : '#EDB48D' }]}>
-        <Text style={[s.periodText, { color: days === value ? BRAND.orangeInk : muted, fontWeight: days === value ? '600' : '400' }]}>{label}</Text>
-      </Pressable>)}</View>
+    <PeriodPicker days={days} date={selectedDate} onDays={onDays} onDate={onDate} reduceMotion={reduceMotion} />
     {data ? <>
-      <PerformanceOverview data={data} days={days} loading={loading} refreshing={refreshing} error={error} onOpen={onOpen} />
+      <PerformanceOverview data={data} days={days} selectedDate={selectedDate} loading={loading} refreshing={refreshing} error={error} onOpen={onOpen} />
       <View style={s.section}><Text style={[s.heading, { color: ink }]}>Việc cần làm</Text><Pressable accessibilityRole="button" onPress={() => onOpen({ kind: 'tasks' })} style={s.link}><Text style={[s.meta, { color: accent, fontWeight: '600' }]}>Xem tất cả</Text><Ionicons name="chevron-forward" size={12} color={accent} /></Pressable></View>
       <ActionQueue data={data} stale={Boolean(error)} onOpen={onOpen} />
       <Text style={[s.meta, { color: muted, marginTop: 7 }]}>Đang chờ xử lý trên toàn shop</Text>
-      <OrderDistribution data={data} days={days} pending={!ready} />
+      <OrderDistribution data={data} days={days} selectedDate={selectedDate} pending={!ready} />
       <View style={s.section}><Text style={[s.heading, { color: ink }]}>Sản phẩm nổi bật</Text><Pressable accessibilityRole="button" onPress={() => onOpen({ kind: 'products' })} style={s.link}><Text style={[s.meta, { color: accent, fontWeight: '600' }]}>Danh mục</Text><Ionicons name="chevron-forward" size={12} color={accent} /></Pressable></View>
       <View style={[s.products, block]}>
         <View style={[ui.between, { padding: 15, borderBottomWidth: data.top_products.length ? 1 : 0, borderColor: line }]}>
@@ -69,7 +72,7 @@ export function DashboardScreen({ data, loading, refreshing, error, days, onDays
           <Ionicons name="chevron-forward" size={13} color={muted} />
         </Pressable>)}
       </View>
-      <Pressable accessibilityRole="button" onPress={() => onAsk(`Phân tích số liệu ${days} ngày qua và lập kế hoạch kinh doanh 7 ngày tới. Chọn sản phẩm ưu tiên, lịch làm và cách đo kết quả.`)} style={[s.advisor, { borderColor: isDark ? '#B767374D' : '#EDB48D', backgroundColor: BRAND.orangeSoft }]}>
+      <Pressable accessibilityRole="button" disabled={!ready || loading || Boolean(error)} onPress={() => onAsk(analysisMessage)} style={[s.advisor, { borderColor: isDark ? '#B767374D' : '#EDB48D', backgroundColor: BRAND.orangeSoft, opacity: !ready || loading || error ? .5 : 1 }]}>
         <Ionicons name="analytics-outline" size={20} color={BRAND.orangeInk} /><Text style={[s.meta, { color: BRAND.orangeInk, fontWeight: '600', flex: 1 }]}>Phân tích & lập kế hoạch</Text><Ionicons name="arrow-forward" size={17} color={BRAND.orangeInk} />
       </Pressable>
       <Text style={[s.meta, { color: muted, textAlign: 'center', marginTop: 17 }]}>{error ? 'Chưa đồng bộ số liệu mới' : 'Cập nhật ' + new Date(data.updated_at).toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' })}</Text>
@@ -84,7 +87,6 @@ const s = StyleSheet.create({
   shopMark: { width: 39, height: 39, borderRadius: 11, alignItems: 'center', justifyContent: 'center' }, shopName: { fontSize: 15, fontWeight: '600' },
   section: { marginTop: 21, marginBottom: 10, minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   heading: { fontSize: 18, fontWeight: '600', letterSpacing: -.3, flexShrink: 1 }, link: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 3 },
-  period: { flexDirection: 'row', padding: 4, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, marginBottom: 10 }, periodItem: { flex: 1, minHeight: 44, borderWidth: 1, borderColor: 'transparent', borderRadius: 9, alignItems: 'center', justifyContent: 'center' }, periodText: { fontSize: 15 },
   revenue: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, padding: 19 },
   products: { borderWidth: 1, borderRadius: 16, overflow: 'hidden' }, product: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 14, paddingHorizontal: 12 }, rank: { fontSize: 11, fontVariant: ['tabular-nums'] },
   advisor: { marginTop: 18, borderWidth: 1, borderRadius: 14, minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 15 },
