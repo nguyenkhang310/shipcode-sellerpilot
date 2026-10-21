@@ -84,6 +84,16 @@ class UTEMallRepository:
         except sqlite3.Error as error:
             raise ShopDatabaseError("Cannot read shop database") from error
 
+    def initialize_order_history(self):
+        from app.integrations.order_history import install_order_history
+        try:
+            with self._connect() as connection:
+                connection.execute('BEGIN IMMEDIATE')
+                install_order_history(connection)
+                connection.commit()
+        except sqlite3.Error as error:
+            raise ShopDatabaseError('Cannot initialize order history') from error
+
     def summary(self, local_day: date, *, as_of: datetime | None = None) -> dict:
         start_local = datetime.combine(local_day, time.min, tzinfo=self.timezone)
         end_local = start_local + timedelta(days=1)

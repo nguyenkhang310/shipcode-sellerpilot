@@ -23,6 +23,8 @@ import { Message, assistantMessage, latestProductCards, restoreMessages } from '
 import { HistoryRow } from './HistoryRow';
 import { MessageEntrance } from './MessageEntrance';
 import { ChatHistoryDrawer } from './ChatHistoryDrawer';
+import { OrderEditor } from '../dashboard/OrderEditor';
+import { OrderChatAction } from './OrderChatAction';
 
 export type AssistantHandle = { newConversation: () => void; openHistory: () => void; ask: (message: string) => void };
 type PendingChat = { id: string; conversationId: string; text: string; phase: 'uploading' | 'sending' | 'cancelling'; uploadId?: string };
@@ -62,6 +64,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   const [error, setError] = useState('');
   const [failedMessage, setFailedMessage] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [orderId, setOrderId] = useState<number | null>(null);
   const [history, setHistory] = useState<ConversationSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
@@ -589,6 +592,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
         ? <MessageEntrance key={message.id} style={ui.userMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion}><View testID="user-message" style={[ui.userBubble, Boolean(message.imageUris?.length) && ui.userBubbleMedia]}>{message.imageUris?.length === 1 ? <Image testID="user-image-single" source={{ uri: message.imageUris[0] }} style={ui.userImageSingle} resizeMode="cover" /> : message.imageUris?.length ? <ScrollView testID="user-image-gallery" horizontal style={ui.userImageScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.userImageRow}>{message.imageUris.map((uri, index) => <Image key={uri + index} source={{ uri }} style={ui.userImageMultiple} resizeMode="cover" />)}</ScrollView> : null}<Text selectable style={[ui.userText, Boolean(message.imageUris?.length) && ui.userTextWithMedia]}>{message.text}</Text></View></MessageEntrance>
         : <MessageEntrance key={message.id} style={ui.assistantMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion}><View style={ui.assistantContent}><View style={[ui.row, { gap: 7, marginBottom: 8 }]}><BrandLogo size={20} /><Text style={ui.assistantName}>SellerPilot</Text></View><View style={ui.assistantBubble}><MessageText text={message.text} /></View>
           {message.response?.product_edit_proposal ? <ProductEditCard proposal={message.response.product_edit_proposal} busy={editBusy !== null} error={editErrors[message.response.product_edit_proposal.id]} onDecide={choice => void decideEdit(message.response!.product_edit_proposal!, choice)} /> : null}
+          {!isShopeeExtension() ? <OrderChatAction action={message.response?.facts.order_action} onOpen={id => { input.current?.blur(); setOrderId(id); }} /> : null}
           {message.response?.proposal ? <View style={ui.proposal}>
             <View style={ui.proposalBody}><Text style={ui.proposalKicker}>{proposalLabel[message.response.proposal.status]}</Text><Text style={ui.listTitle}>{message.response.proposal.product_name}</Text><Text style={ui.caption}>SKU {message.response.proposal.sku}</Text><View style={ui.priceRow}><Text style={ui.oldPrice}>{money(message.response.proposal.old_price_vnd)}</Text><Ionicons name="arrow-forward" size={17} color={IOS.secondary} /><Text style={ui.newPrice}>{money(message.response.proposal.new_price_vnd)}</Text></View>
               {decisionErrors[message.response.proposal.id] ? <Text style={ui.error}>{decisionErrors[message.response.proposal.id]}</Text> : null}</View>
@@ -622,5 +626,6 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
           onOpen={() => void loadConversation(item.id)} onPin={() => void togglePin(item)} onDelete={() => confirmDelete(item)} />
       </View>)}
     </ScrollView></ChatHistoryDrawer>
+    <OrderEditor id={orderId} initialView="tracking" onClose={() => setOrderId(null)} onUpdated={updated => { onShopChanged?.(); onToast?.('Đã cập nhật đơn #' + updated.id); }} />
   </View>;
 });

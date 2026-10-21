@@ -10,6 +10,7 @@ import pytest
 
 from app.integrations import management
 from app.integrations.ute_mall import UTEMallRepository
+from app.integrations.order_management import order_detail
 from test_product_drafts import build_shop
 
 SCRIPT = Path(__file__).resolve().parents[2] / 'simulate_orders.py'
@@ -67,6 +68,11 @@ def test_simulation_updates_today_dashboard_and_reserves_actual_variant_stock(da
         for row in connection.execute('SELECT * FROM "order"'):
             assert row['total_amount'] == connection.execute('SELECT SUM(quantity*price) FROM order_item WHERE order_id=?', (row['id'],)).fetchone()[0]
             assert row['payment_status'] == 'paid' and simulator.MARKER in row['note']
+            recorded = order_detail(shop, row['id'])
+            assert not recorded['unrecorded_status_change']
+            assert len(recorded['events']) == 1
+            assert recorded['events'][0]['kind'] == 'initial'
+            assert recorded['events'][0]['from_status'] == recorded['events'][0]['to_status'] == 'delivered'
     finally:
         connection.close()
 
@@ -82,6 +88,16 @@ def test_failed_line_insert_rolls_back_order_buyer_and_both_stocks(database):
         assert connection.execute('SELECT COUNT(*) FROM user').fetchone()[0] == 0
         assert [row[0] for row in connection.execute('SELECT stock FROM product WHERE shop_id=1 ORDER BY id')] == [8, 6]
         assert [row[0] for row in connection.execute('SELECT stock FROM product_variant ORDER BY id')] == [8, 6]
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize('status', ['pending', 'paid', 'shipped'])
+def test_simulated_cod_is_not_collected_before_delivery(database, status):
+    connection = simulator.connect_shop(database)
+    try:
+        order = simulator.create_order(connection, rng=random.Random(1), status=status)
+        assert connection.execute('SELECT payment_status FROM "order" WHERE id=?', (order['id'],)).fetchone()[0] == 'unpaid'
     finally:
         connection.close()
 

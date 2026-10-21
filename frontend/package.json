@@ -19,6 +19,7 @@
     "@react-native-masked-view/masked-view": "0.3.2",
     "expo": "~57.0.25",
     "expo-blur": "~57.0.3",
+    "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.19",
     "expo-glass-effect": "~57.0.4",
     "expo-haptics": "~57.0.3",

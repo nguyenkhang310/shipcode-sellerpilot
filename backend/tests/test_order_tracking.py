@@ -38,17 +38,51 @@ def test_shipping_edits_are_atomic_and_guarded_by_version(ledger):
     assert len(data['events']) == 2
 
 
-def test_external_changes_never_invent_status_timestamps(ledger):
+def test_external_changes_share_the_transactional_status_journal(ledger):
     client, path = ledger
     assert patch(client, status='paid').status_code == 200
     with sqlite3.connect(path) as db:
         db.execute("UPDATE 'order' SET status='shipped' WHERE id=1")
     data = detail(client)
-    assert data['status'] == 'shipped' and data['unrecorded_status_change']
-    assert len(data['events']) == 1
-    assert data['events'][0]['to_status'] == 'paid'
+    assert data['status'] == 'shipped' and not data['unrecorded_status_change']
+    assert len(data['events']) == 2
+    assert data['events'][0]['to_status'] == 'shipped'
+    assert data['events'][0]['kind'] == 'status'
     assert patch(client, note='Ghi chú sau bàn giao').status_code == 200
-    assert detail(client)['unrecorded_status_change']
+    assert not detail(client)['unrecorded_status_change']
+
+
+def test_legacy_missing_history_never_invents_timestamps(ledger):
+    client, path = ledger
+    with sqlite3.connect(path) as db:
+        db.execute('DROP TRIGGER sellerpilot_order_status_history')
+        db.execute("UPDATE 'order' SET status='delivered' WHERE id=1")
+    data = detail(client)
+    assert data['status'] == 'delivered' and data['unrecorded_status_change']
+    assert data['events'] == []
+
+
+def test_external_noop_and_rollback_do_not_append_history(ledger):
+    client, path = ledger
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE 'order' SET status=status WHERE id=1")
+        db.execute("UPDATE 'order' SET status='paid' WHERE id=1")
+        db.rollback()
+    assert detail(client)['events'] == []
+    assert detail(client)['status'] == 'pending'
+
+
+def test_deleting_order_cleans_history_and_waybill_before_an_id_can_be_reused(ledger):
+    client, path = ledger
+    assert patch(client, shipping_carrier='SPX', tracking_number='VN123').status_code == 200
+    with sqlite3.connect(path) as db:
+        db.execute('DELETE FROM order_item WHERE order_id=1')
+        db.execute('DELETE FROM "order" WHERE id=1')
+        db.execute('INSERT INTO "order"(id,shop_id,total_amount,status,created_at) VALUES(1,1,100000,\'pending\',\'2026-10-21\')')
+    data = detail(client)
+    assert data['events'] == [] and data['tracking_number'] == ''
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT COUNT(*) FROM sellerpilot_order_receipt WHERE order_id=1').fetchone()[0] == 0
 
 
 def test_tracking_and_event_rows_are_seller_scoped(ledger):
@@ -74,7 +108,7 @@ def test_filter_counts_are_for_current_query_and_never_another_seller(ledger):
 
 
 @pytest.mark.parametrize('changes', [{'tracking_number': 'a'}, {'tracking_number': 'VN 123'},
-    {'tracking_number': '\x00'}, {'tracking_number': None}, {'shipping_carrier': None}, {'shipping_carrier': 'x' * 81}])
+    {'tracking_number': '\x00'}, {'tracking_number': None}, {'shipping_carrier': None}, {'shipping_carrier': 'x' * 81}, {'shipping_carrier': 'SPX\nExpress'}])
 def test_invalid_tracking_is_rejected_before_any_write(ledger, changes):
     client, _ = ledger
     before = detail(client)

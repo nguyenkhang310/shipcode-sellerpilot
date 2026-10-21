@@ -44,6 +44,7 @@ node frontend/tests/dashboard-periods.cjs
 node frontend/tests/dock-themes.cjs
 node frontend/tests/management-editing.cjs
 node frontend/tests/order-tracking.cjs
+node frontend/tests/order-chat.cjs
 node frontend/tests/chat-reliability.cjs
 node frontend/tests/chat-scroll.cjs
 node frontend/tests/chat-history.cjs
@@ -57,7 +58,8 @@ Nếu Playwright không nằm trong dependency cục bộ, đặt `PLAYWRIGHT_MO
 - `dashboard-periods`: đổi Hôm nay/7/30 ngày khi API chậm, bấm liên tục, phản hồi về trễ, cache 60 giây, khung không co giật, đồng bộ lỗi và phản hồi sai kỳ.
 - `dock-themes`: 16 lần đổi sáng/tối ở 320/390/430/520px; kiểm tra material theo đúng theme, độ mờ, viền, backdrop, tab hiện tại, bản nháp chat và theme lưu sau reload. Chụp cả phần hiệu suất và thanh điều hướng. API bị chặn hoàn toàn bằng fixture, không cần 8123.
 - `management-editing`: chọn ngày, chuyển nhanh trước/sau, phản hồi muộn, lỗi ngày và phục hồi; lịch ở 320/390/520px; form sửa tên/mô tả/giá/tồn, nhập tiền có phân cách, tồn 0, review, retry cùng UUID sau khi server đã lưu, bỏ thay đổi và 409. Xác minh `/qa/identity` trước khi chạy và chỉ ghi shop tạm tại 8123. Chạy **sau app-audit**; chạy lại cần khởi động lại đúng server QA để có dữ liệu gốc.
-- `order-tracking`: thao tác đơn QA #10 ngay trong app, review trước khi ghi, vận đơn, timeline, cập nhật trạng thái từ phiên khác, giữ bản đang nhập và xử lý 409; không mở tab web. Có ảnh 320/390/520px, dark và reduced motion. Cần API QA sạch; có thể chạy sau `order-editor` (bài đó dùng đơn #5), nhưng không chạy hai bài đồng thời.
+- `order-tracking`: thao tác đơn QA #10 ngay trong app, review trước khi ghi, chọn hãng, vận đơn, sao chép mã, timeline, cập nhật trạng thái từ phiên khác, giữ bản đang nhập và xử lý 409; không mở tab web. Có ảnh 320/390/520px, dark và reduced motion. Cần API QA sạch; có thể chạy sau `order-editor` (bài đó dùng đơn #5), nhưng không chạy hai bài đồng thời.
+- `order-chat`: tra đơn #3 từ chat, mở chi tiết ngay trong app, hỏi tiếp bằng câu ngắn; đơn đã giao cũ có trạng thái khớp lịch sử mà không dựng giờ giao. Kiểm tra 320/390/520px và không có lệnh ghi hay popup.
 - `chat-reliability`: Dừng, gửi tiếp sau Dừng, mất phản hồi sau commit, tải lại app và khôi phục upload mà không tạo bản nháp trùng.
 - `chat-scroll`: hiệu ứng ba chấm đang gõ, câu trả lời dài tự cuộn, giữ vị trí khi đang đọc tin cũ, nút về cuối và composer co giãn.
 - `chat-history`: vuốt trái thực tế, ghim/bỏ ghim, lưu qua reload, hủy/xác nhận xóa hội thoại đang mở và vùng chạm ở 320px.

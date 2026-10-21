@@ -97,7 +97,8 @@ export type OrderDetail = {
   payment_status: string | null; payment_method: string | null; shipping_fee: number | null; discount_amount: number | null;
   allowed_statuses: string[]; editable_fields: string[]; items: StoreOrder['items']; replayed?: boolean;
   shipping_carrier: string; tracking_number: string;
-  events: { id: number; from_status: string; to_status: string; changed_fields: string[]; created_at: string }[];
+  shipping_carriers?: string[];
+  events: { id: number; from_status: string; to_status: string; changed_fields: string[]; created_at: string; kind?: 'initial' | 'status' | 'edit' }[];
   unrecorded_status_change: boolean;
 };
 export type OrderChanges = Partial<Pick<OrderDetail, 'shipping_name' | 'shipping_phone' | 'shipping_address' | 'note'>> & {

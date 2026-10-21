@@ -1,0 +1,40 @@
+<section class="panel public-card order-journal" aria-label="Theo dõi đơn hàng">
+  <style>
+    .order-journal{margin:18px 0;padding:22px;background:#fff;border:1px solid #e8e8e8;border-radius:8px}
+    .order-journal h2{font-size:17px;margin:0 0 16px;font-weight:600}
+    .order-journal .waybill{display:flex;gap:10px;flex-wrap:wrap;padding:13px 16px;background:#fff7f3;border-radius:6px;font-size:13px;overflow-wrap:anywhere}
+    .order-journal ol{list-style:none;margin:20px 0 0;padding:0 0 0 9px}
+    .order-journal li{position:relative;border-left:1px solid #ddd;padding:0 0 20px 21px;font-size:13px}
+    .order-journal li:last-child{border:0;padding-bottom:0}
+    .order-journal li:before{content:"";position:absolute;left:-4px;top:5px;width:7px;height:7px;border-radius:50%;background:#aaa}
+    .order-journal li:first-child:before{background:#ee4d2d}
+    .order-journal time,.order-journal small{display:block;color:#777;font-size:12px;margin-top:5px;line-height:1.6}
+  </style>
+  <h2>Theo dõi đơn hàng</h2>
+  {% if tracking.shipping and tracking.shipping.tracking_number %}
+    <div class="waybill"><span>{{ tracking.shipping.carrier }}</span><strong>{{ tracking.shipping.tracking_number }}</strong></div>
+  {% else %}<p style="font-size:13px;color:#777">Chưa có mã vận đơn.</p>{% endif %}
+  <ol>{% for event in tracking.events %}<li><strong>{{ event.title }}</strong>
+    {% if event.created_at %}<time>{{ event.created_at|vn_time }}</time>{% endif %}
+    {% if event.detail %}<small>{{ event.detail }}</small>{% endif %}
+  </li>{% endfor %}</ol>
+  {% if request.endpoint == 'seller.order_detail' and order.status in ['pending','paid'] %}
+  <details style="margin-top:20px">
+    <summary style="cursor:pointer;color:#ee4d2d;font-size:13px;padding:10px 0">Cập nhật vận đơn</summary>
+    <form method="post" data-confirm="Lưu thông tin vận chuyển cho đơn #{{ order.id }}?" style="display:grid;gap:12px;margin-top:10px;max-width:480px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="waybill">
+      <input type="hidden" name="expected_carrier" value="{{ tracking.shipping.carrier if tracking.shipping else '' }}">
+      <input type="hidden" name="expected_number" value="{{ tracking.shipping.tracking_number if tracking.shipping else '' }}">
+      <label style="font-size:13px">Đơn vị vận chuyển
+        <input name="shipping_carrier" list="order-carriers" maxlength="80" value="{{ tracking.shipping.carrier if tracking.shipping else '' }}" style="display:block;width:100%;margin-top:6px;padding:12px;border:1px solid #ddd;border-radius:6px;font:inherit">
+        <datalist id="order-carriers">{% for carrier in tracking.carriers %}<option value="{{ carrier }}">{% endfor %}</datalist>
+      </label>
+      <label style="font-size:13px">Mã vận đơn
+        <input name="tracking_number" maxlength="80" value="{{ tracking.shipping.tracking_number if tracking.shipping else '' }}" style="display:block;width:100%;margin-top:6px;padding:12px;border:1px solid #ddd;border-radius:6px;font:inherit" autocomplete="off">
+      </label>
+      <button class="btn primary" type="submit">Lưu vận đơn</button>
+    </form>
+  </details>
+  {% endif %}
+</section>

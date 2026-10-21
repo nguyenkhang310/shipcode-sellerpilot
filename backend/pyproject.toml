@@ -25,6 +25,9 @@ dev = ["pytest>=8,<10"]
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+[tool.setuptools.package-data]
+"app.integrations" = ["*.sql", "*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

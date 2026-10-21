@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import * as Clipboard from 'expo-clipboard';
 import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useReducedMotion } from '../../components/layout/useReducedMotion';
 import { OrderDetail } from '../../api/types';
@@ -15,6 +16,15 @@ const descriptions: Record<string, string> = {
 
 export function OrderTracking({ order, onAction, refreshing, onRefresh }: { order: OrderDetail; onAction: (status: string) => void; refreshing: boolean; onRefresh: () => void }) {
   const { IOS, BRAND, ui, isDark } = useTheme();
+  const [copiedCode, setCopiedCode] = useState(''), [copyError, setCopyError] = useState('');
+  useEffect(() => { setCopyError(''); }, [order.tracking_number]);
+  const copyWaybill = async () => {
+    setCopyError('');
+    try {
+      if (!await Clipboard.setStringAsync(order.tracking_number)) throw new Error('clipboard_unavailable');
+      setCopiedCode(order.tracking_number);
+    } catch { setCopyError('Chưa sao chép được. Bạn có thể nhấn giữ mã vận đơn để sao chép.'); }
+  };
   const reduced = useReducedMotion(), appear = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     appear.setValue(reduced ? 1 : 0);
@@ -25,7 +35,9 @@ export function OrderTracking({ order, onAction, refreshing, onRefresh }: { orde
   const color = state ? isDark ? state.darkColor : state.color : IOS.secondary;
   const stages = ORDER_STATES.slice(0, 4), current = stages.findIndex(item => item.key === order.status);
   const events = order.events || [];
-  const title = (event: OrderDetail['events'][number]) => event.from_status !== event.to_status
+  const title = (event: OrderDetail['events'][number]) => event.kind === 'initial'
+    ? (ORDER_STATES.find(item => item.key === event.to_status)?.label || event.to_status) + ' · ghi nhận ban đầu'
+    : event.from_status !== event.to_status
     ? ORDER_STATES.find(item => item.key === event.to_status)?.label || 'Cập nhật trạng thái'
     : event.changed_fields.some(field => field === 'tracking_number' || field === 'shipping_carrier') ? 'Cập nhật vận đơn'
       : event.changed_fields.every(field => field === 'note') ? 'Cập nhật ghi chú' : 'Cập nhật thông tin nhận hàng';
@@ -39,15 +51,18 @@ export function OrderTracking({ order, onAction, refreshing, onRefresh }: { orde
       <View style={[s.circle, { backgroundColor: index <= current ? BRAND.orangeSoft : IOS.card, borderColor: index <= current ? BRAND.orange : IOS.separator }]}><Ionicons name={index < current ? 'checkmark' : stage.icon} size={17} color={index <= current ? BRAND.orangeInk : IOS.secondary} /></View>
       <Text style={[s.stageLabel, { color: index === current ? IOS.label : IOS.secondary, fontWeight: index === current ? '600' : '400' }]}>{['Đặt hàng', 'Chuẩn bị', 'Đang giao', 'Hoàn tất'][index]}</Text>
     </View>)}</View> : null}
-    <View style={[s.shipping, { borderColor: IOS.separator }]}><Text style={ui.listTitle}>Thông tin vận chuyển</Text>
-      {order.tracking_number ? <><Text style={ui.caption}>{order.shipping_carrier}</Text><Text selectable style={[ui.productName, { fontVariant: ['tabular-nums'], letterSpacing: .5 }]}>{order.tracking_number}</Text></> : <Text style={ui.caption}>Chưa có mã vận đơn. Có thể bổ sung đơn vị vận chuyển và mã khi chuẩn bị hàng.</Text>}
+    <View style={[s.shipping, { borderColor: IOS.separator }]}><View style={ui.between}><Text style={[ui.listTitle, { flex: 1 }]}>Thông tin vận chuyển</Text>{order.tracking_number ? <Pressable accessibilityRole="button" accessibilityLabel="Sao chép mã vận đơn" onPress={() => void copyWaybill()} style={{ minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' }}><Ionicons name={copiedCode === order.tracking_number ? 'checkmark' : 'copy-outline'} size={19} color={BRAND.orangeInk} /></Pressable> : null}</View>
+      {order.tracking_number ? <><Text style={ui.caption}>{order.shipping_carrier}</Text><Text selectable style={[ui.productName, { fontVariant: ['tabular-nums'], letterSpacing: .5 }]}>{order.tracking_number}</Text></> : <Text style={ui.caption}>{order.editable_fields.includes('tracking_number') ? 'Chưa có mã vận đơn. Có thể bổ sung đơn vị vận chuyển và mã khi chuẩn bị hàng.' : 'Đơn chưa có mã vận đơn được lưu trong hệ thống.'}</Text>}
       <Text style={[ui.caption, { fontSize: 12 }]}>Trạng thái do shop cập nhật.</Text>
+      {copiedCode && copiedCode === order.tracking_number ? <Text accessibilityLiveRegion="polite" style={[ui.caption, { color: BRAND.orangeInk }]}>Đã sao chép mã vận đơn</Text> : null}
+      {copyError ? <Text accessibilityRole="alert" style={ui.error}>{copyError}</Text> : null}
     </View>
     <View><View style={[ui.between, { marginBottom: 15 }]}><Text style={ui.listTitle}>Lịch sử cập nhật</Text><Pressable accessibilityRole="button" accessibilityLabel="Cập nhật theo dõi đơn" disabled={refreshing} onPress={onRefresh} style={s.refresh}><Ionicons name="refresh-outline" size={17} color={BRAND.orangeInk} /><Text style={{ color: BRAND.orangeInk, fontSize: 12 }}>{refreshing ? 'Đang tải…' : 'Làm mới'}</Text></Pressable></View>
-      {order.unrecorded_status_change ? <Text style={[ui.caption, { marginBottom: 15 }]}>Chưa có thời gian ghi nhận cho trạng thái hiện tại.</Text> : null}
-      {[...events.map(event => ({ key: String(event.id), title: title(event), date: event.created_at })), { key: 'created', title: 'Đơn được tạo', date: order.created_at }].map((event, index, all) => <View key={event.key} style={s.event}>
+      {[...(order.unrecorded_status_change ? [{ key: 'current', title: state?.label || order.status, date: '', detail: 'Trạng thái hiện tại. Chưa có thời điểm cập nhật.' }] : []),
+        ...events.map(event => ({ key: String(event.id), title: title(event), date: event.created_at, detail: event.kind === 'initial' ? 'Thời điểm ghi nhận trạng thái ban đầu của đơn.' : '' })),
+        { key: 'created', title: 'Đơn được tạo', date: order.created_at, detail: '' }].map((event, index, all) => <View key={event.key} style={s.event}>
         <View style={s.rail}>{index < all.length - 1 ? <View style={[s.eventLine, { backgroundColor: IOS.separator }]} /> : null}<View style={[s.eventDot, { backgroundColor: index === 0 ? BRAND.orange : IOS.tertiary }]} /></View>
-        <View style={{ flex: 1, paddingBottom: 20 }}><Text style={[ui.productName, { fontSize: 14 }]}>{event.title}</Text><Text style={[ui.caption, { fontSize: 12, marginTop: 3 }]}>{orderDate(event.date)}</Text></View>
+        <View style={{ flex: 1, paddingBottom: 20 }}><Text style={[ui.productName, { fontSize: 14 }]}>{event.title}</Text>{event.date ? <Text style={[ui.caption, { fontSize: 12, marginTop: 3 }]}>{orderDate(event.date)}</Text> : null}{event.detail ? <Text style={[ui.caption, { fontSize: 12, marginTop: 5 }]}>{event.detail}</Text> : null}</View>
       </View>)}
     </View>
     {order.allowed_statuses.length ? <View style={{ gap: 9 }}><Text style={ui.listTitle}>Thao tác tiếp theo</Text>{order.allowed_statuses.map(next => <Pressable key={next} accessibilityRole="button" accessibilityLabel={'Thực hiện ' + ORDER_ACTIONS[next]} onPress={() => onAction(next)} style={[next === 'cancelled' ? ui.secondaryButton : ui.primaryButton, next !== 'cancelled' && { backgroundColor: BRAND.orangeInk }]}><Ionicons name={next === 'cancelled' ? 'close-circle-outline' : 'arrow-forward'} size={18} color={next === 'cancelled' ? IOS.red : '#FFF'} /><Text style={next === 'cancelled' ? [ui.secondaryText, { color: IOS.red }] : ui.primaryText}>{ORDER_ACTIONS[next]}</Text></Pressable>)}</View> : null}

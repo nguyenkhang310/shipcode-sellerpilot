@@ -96,6 +96,11 @@ async function main() {
     if (!existsSync(file)) throw new Error(`Thiếu ${path.relative(root, file)}. Cài môi trường theo README trước.`);
   }
   if (!existsSync(path.join(root, 'UTE MALL/.env'))) throw new Error('Chưa cấu hình Shopee Demo. Chạy bootstrap_demo.py theo README trước.');
+  await new Promise((resolve, reject) => {
+    const check = spawn(python('backend'), ['-m', 'app.scripts.check_store'], {cwd: path.join(root, 'backend'), env: process.env, stdio: 'inherit'});
+    check.on('error', reject);
+    check.on('exit', code => code === 0 ? resolve() : reject(new Error('Chưa khởi động vì nguồn dữ liệu app và Kênh Người Bán không khớp.')));
+  });
   // An external STORE_DATABASE_PATH is supported; the store/API startup validates it.
   for (const port of [5011, 8000, 8081]) await portAvailable(port);
   if (process.argv.includes('--check')) { console.log('Môi trường và cổng 5011/8000/8081 sẵn sàng.'); return; }

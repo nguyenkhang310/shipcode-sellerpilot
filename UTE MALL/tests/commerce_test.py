@@ -8,6 +8,8 @@ import tempfile
 import secrets
 import unittest
 import uuid
+import subprocess
+import json
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
@@ -43,6 +45,29 @@ class Links(HTMLParser):
 
 
 class CommerceTests(unittest.TestCase):
+    def app_order(self, order_id, changes=None):
+        """A separate process avoids Flask app.py/backend app package collisions."""
+        script = '''
+import json,sys
+from pathlib import Path
+from uuid import uuid4
+from app.integrations.ute_mall import UTEMallRepository
+from app.integrations.order_management import order_detail,update_order
+from app.integrations.management import dashboard
+from app.schemas.order_management import OrderUpdate
+shop=UTEMallRepository(Path(sys.argv[1]),'Asia/Ho_Chi_Minh','utech-official')
+row=order_detail(shop,int(sys.argv[2]))
+changes=json.loads(sys.argv[3])
+if changes:
+    row=update_order(shop,row['id'],OrderUpdate(request_id=uuid4(),expected_version=row['version'],**changes))
+print(json.dumps({'order':row,'stats':{str(days):dashboard(shop,days) for days in (1,7,30)}},default=str))
+'''
+        api_python=ROOT.parent/'backend/.venv'/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+        result = subprocess.run([str(api_python), '-c', script, str(DB), str(order_id), json.dumps(changes or {})],
+            cwd=ROOT.parent/'backend', capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
     def setUp(self):
         self.seller=app.test_client()
         response=self.seller.post('/login?next=/seller',data={'login_id':'utech','password':TEST_SELLER_PASSWORD})
@@ -141,6 +166,46 @@ class CommerceTests(unittest.TestCase):
             self.assertEqual(db.session.get(Order,oid).status,'returned')
             self.assertEqual(db.session.get(Product,pid).stock,12)
             self.assertEqual(db.session.get(Product,pid).sold_count,0)
+
+    def test_app_seller_buyer_share_history_waybill_totals_and_late_payment(self):
+        from seller import chart_data
+        from app import _mark_order_paid
+        pid,vid,_=self.listing();self.add(pid,vid);oid=self.checkout()
+        self.seller.post('/seller/orders/'+str(oid),data={'status':'paid'})
+        data=self.app_order(oid,{'shipping_carrier':'SPX Express','tracking_number':'VN-SYNC-123'})
+        self.assertEqual(data['order']['status'],'paid')
+        for client,url in [(self.seller,'/seller/orders/'+str(oid)),(self.buyer,'/order/'+str(oid))]:
+            page=client.get(url).data.decode()
+            self.assertIn('VN-SYNC-123',page)
+            self.assertIn('Cập nhật vận đơn',page)
+        shipping={'action':'waybill','shipping_carrier':'GHN','tracking_number':'GHN-SYNC-456',
+                  'expected_carrier':'SPX Express','expected_number':'VN-SYNC-123'}
+        self.seller.post('/seller/orders/'+str(oid),data=shipping)
+        self.assertEqual(self.app_order(oid)['order']['tracking_number'],'GHN-SYNC-456')
+        # A stale web form cannot overwrite the waybill saved by another session.
+        self.seller.post('/seller/orders/'+str(oid),data={**shipping,'tracking_number':'STALE-999'})
+        self.assertEqual(self.app_order(oid)['order']['tracking_number'],'GHN-SYNC-456')
+        # App -> seller web; buyer -> app, all on the same SQLite copy.
+        self.app_order(oid,{'status':'shipped'})
+        self.seller.post('/seller/orders/'+str(oid),data={**shipping,'expected_carrier':'GHN','expected_number':'GHN-SYNC-456','tracking_number':'LATE-999'})
+        self.assertEqual(self.app_order(oid)['order']['tracking_number'],'GHN-SYNC-456')
+        self.assertIn('Đang giao',self.seller.get('/seller/orders/'+str(oid)).data.decode())
+        self.buyer.post('/order/'+str(oid)+'/received')
+        result=self.app_order(oid);order=result['order']
+        self.assertEqual(order['status'],'delivered')
+        self.assertFalse(order['unrecorded_status_change'])
+        self.assertEqual([e['to_status'] for e in order['events'] if e['kind']=='status'],['delivered','shipped','paid'])
+        with app.app_context():
+            saved=db.session.get(Order,oid)
+            _mark_order_paid(saved,'repeated-callback')
+            self.assertEqual(saved.status,'delivered')
+            self.assertEqual(db.session.get(Product,pid).sold_count,1)
+            self.assertEqual(db.session.get(Product,pid).stock,11)
+            for days in (1,7,30):
+                web=chart_data(self.shop_id,days);api=result['stats'][str(days)]
+                self.assertEqual(web['orders'],api['order_count'])
+                self.assertEqual(web['total'],api['order_value_vnd'])
+        self.assertEqual(len(self.app_order(oid)['order']['events']),len(order['events']))
 
     def test_cancel_is_safe_and_inventory_validation(self):
         pid,vid,_=self.listing(stock=4);self.add(pid,vid);oid=self.checkout()

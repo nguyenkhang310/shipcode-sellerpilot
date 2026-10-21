@@ -11,6 +11,7 @@ import urllib.parse
 from urllib.parse import urlparse, urljoin
 import unicodedata
 import re
+from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -244,6 +245,12 @@ def ensure_order_schema():
     if 'shop_id' not in cols:
         cursor.execute("ALTER TABLE 'order' ADD COLUMN shop_id INTEGER")
     cursor.execute("CREATE INDEX IF NOT EXISTS ix_order_shop_id ON 'order'(shop_id)")
+
+    # Same database triggers as the app and simulator. Install after committing
+    # the schema above: executescript commits its pending transaction first.
+    conn.commit()
+    journal = Path(__file__).resolve().parents[1] / 'backend/app/integrations/order_history.sql'
+    conn.executescript('BEGIN IMMEDIATE;\n' + journal.read_text(encoding='utf-8') + '\nCOMMIT;')
 
     cursor.execute("PRAGMA table_info(cart_item);")
     cart_item_cols = {row[1] for row in cursor.fetchall()}
@@ -1244,7 +1251,8 @@ def order_detail(order_id):
         return redirect(url_for('index'))
     bank_info = app.config.get('BANK_TRANSFER_INFO', '')
     related_orders=Order.query.filter_by(checkout_reference=order.checkout_reference,user_id=current_user.id).all() if order.checkout_reference else []
-    return render_template('order-detail.html', order=order, bank_info=bank_info, related_orders=related_orders)
+    from commerce import order_tracking
+    return render_template('order-detail.html', order=order, bank_info=bank_info, related_orders=related_orders, tracking=order_tracking(order))
 
 
 @app.route('/order/lookup', methods=['GET', 'POST'])
@@ -1287,8 +1295,11 @@ def order_lookup():
 
 
 def _mark_order_paid(order: Order, payment_ref: Optional[str] = None):
+    # A late/replayed payment must never move a shipped/delivered order backwards.
+    if order.status == 'pending':
+        from commerce import change_order_status
+        change_order_status(order, 'paid')
     order.payment_status = 'paid'
-    order.status = 'paid'
     if payment_ref:
         order.payment_ref = payment_ref
     db.session.commit()
@@ -2193,18 +2204,14 @@ def admin_update_order_status(order_id):
         return redirect(url_for('index'))
     order = Order.query.get_or_404(order_id)
     new_status = request.form.get('status')
-    if new_status in ['pending', 'paid', 'shipped', 'delivered', 'cancelled']:
-        if order.status == 'cancelled' and new_status != 'cancelled':
-            flash('Đơn đã hủy không thể mở lại vì tồn kho đã được hoàn.', 'error')
-            return redirect(url_for('admin_dashboard') + '?tab=orders')
-        if new_status == 'cancelled' and order.status != 'cancelled':
-            for item in order.items:
-                item.product.stock = int(item.product.stock or 0) + int(item.quantity)
-                if item.variant:
-                    item.variant.stock = int(item.variant.stock or 0) + int(item.quantity)
-        order.status = new_status
+    try:
+        from commerce import change_order_status
+        change_order_status(order, new_status)
         db.session.commit()
         flash(f'Đã cập nhật trạng thái đơn hàng #{order_id}.', 'success')
+    except ValueError as error:
+        db.session.rollback()
+        flash(str(error), 'error')
     return redirect(url_for('admin_dashboard') + '?tab=orders')
 
 

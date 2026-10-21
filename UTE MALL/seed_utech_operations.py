@@ -83,7 +83,7 @@ def main():
                 shipping_address=f'{12 + index%180} Đường Demo, {cities[index % len(cities)]}',
                 note=f'{SEED_NOTE} dữ liệu mô phỏng, không chứa PII thật',
                 payment_method=payment,
-                payment_status='paid' if status in {'paid','shipped','delivered'} else ('cancelled' if status=='cancelled' else 'unpaid'),
+                payment_status='paid' if status=='delivered' or (payment!='COD' and status in {'paid','shipped'}) else ('cancelled' if status=='cancelled' else 'unpaid'),
             )
             db.session.add(order); db.session.flush()
             for product, variant, qty, unit_price in lines:

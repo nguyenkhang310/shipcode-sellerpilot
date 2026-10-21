@@ -18,7 +18,7 @@ from extensions import db
 from models import (Shop, ShopMember, ShopFollow, Product, ProductVariant, Category,
                     Order, OrderItem, Coupon, Review, Conversation, Message,
                     ReturnRequest, SellerActivity)
-from commerce import STATUS_LABELS, change_order_status, approve_return
+from commerce import STATUS_LABELS, change_order_status, approve_return, order_tracking, update_order_waybill
 
 bp = Blueprint('seller', __name__)
 NAV = [
@@ -73,7 +73,15 @@ def vnd(value): return '{:,.0f}₫'.format(float(value or 0)).replace(',','.')
 
 
 @bp.app_template_filter('vn_time')
-def vn_time(value): return (value+timedelta(hours=7)).strftime('%d/%m/%Y %H:%M') if value else '—'
+def vn_time(value):
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+    if not value: return '—'
+    if isinstance(value, str):
+        try: value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except ValueError: return '—'
+    if value.tzinfo is None: value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).strftime('%d/%m/%Y %H:%M')
 
 
 def log(action):
@@ -327,12 +335,16 @@ def order_detail(order_id):
     order=owned_order(order_id)
     if request.method=='POST':
         try:
-            change_order_status(order,request.form.get('status'))
-            log('Cập nhật đơn #'+str(order.id)+' → '+STATUS_LABELS.get(order.status,order.status))
+            if request.form.get('action') == 'waybill':
+                update_order_waybill(order,request.form.get('shipping_carrier',''),request.form.get('tracking_number',''),request.form.get('expected_carrier',''),request.form.get('expected_number',''))
+                log('Cập nhật vận đơn #'+str(order.id))
+            else:
+                change_order_status(order,request.form.get('status'))
+                log('Cập nhật đơn #'+str(order.id)+' → '+STATUS_LABELS.get(order.status,order.status))
             db.session.commit(); flash('Đã cập nhật trạng thái đơn hàng.','success')
         except ValueError as e: db.session.rollback(); flash(str(e),'error')
         return redirect(url_for('seller.order_detail',order_id=order.id))
-    return render_template('seller/order.html',title='Chi tiết đơn #'+str(order.id),order=order)
+    return render_template('seller/order.html',title='Chi tiết đơn #'+str(order.id),order=order,tracking=order_tracking(order))
 
 
 @bp.route('/seller/orders/bulk',methods=['POST'])

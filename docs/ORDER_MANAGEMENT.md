@@ -12,6 +12,17 @@ không sửa tùy ý. Mã cho phép chữ/số và `. _ / -`, 3–80 ký tự. T
 ghi nhận của shop local; chưa kết nối hãng vận chuyển, không có vị trí xe, ETA
 hoặc quét hành trình tự động. Không tự tạo mã hay thời gian cho các mốc chưa có.
 
+App có lựa chọn nhanh SPX Express, GHN, GHTK, Viettel Post, J&T Express và VNPost;
+vẫn nhập được hãng khác. Mã đã lưu có nút sao chép. Kênh Người Bán local cũng sửa
+được vận đơn trước bàn giao; form cũ bị từ chối nếu vận đơn đã thay đổi ở phiên
+khác. Trang người mua đọc cùng thông tin đã lưu. Danh sách hãng là lựa chọn nhập
+liệu, không phải xác nhận đã ký hợp đồng hay kết nối API với các hãng đó.
+
+Trong chat, hỏi `đơn #123 sao rồi?` hoặc `mã vận đơn` để tra cứu. Sau một lượt
+chọn đơn, có thể hỏi ngắn `còn đơn đó?` hoặc `còn mã vận đơn?`; server đọc lại
+trạng thái hiện tại. Nút dưới câu trả lời mở chi tiết ngay trong app. Yêu cầu hủy
+bằng lời dẫn tới form để xem lại/xác nhận, không tự thực thi từ câu chat.
+
 Chi tiết sạch tự kiểm tra cập nhật mỗi 8 giây khi app đang hoạt động. Đang sửa,
 review hoặc lưu thì tạm dừng, giữ nội dung đang nhập; version vẫn được kiểm tra
 khi ghi. Danh sách kiểm tra mỗi 10 giây ở đầu trang; tạm ngừng khi đang đọc phía
@@ -42,10 +53,21 @@ Bảng biên nhận `sellerpilot_order_receipt` được tạo tự động tron
 
 `sellerpilot_order_shipping` lưu thông tin vận đơn theo shop/đơn;
 `sellerpilot_order_event` lưu trạng thái trước/sau và tên trường đã đổi trong cùng
-transaction với đơn và receipt. Lưu lặp không tạo mốc thứ hai. GET không tự tạo
-lịch sử; đơn cũ hoặc đổi qua website chỉ có trạng thái hiện tại, app ghi rõ chưa
-có thời gian xác minh thay vì suy ra các mốc trước. Các bảng phụ được tạo trong
-shop ở lần ghi đầu, không cần thêm cột vào bảng order hay reset dữ liệu.
+transaction với đơn và receipt. Lưu lặp không tạo mốc thứ hai. Schema dùng chung
+ở `backend/app/integrations/order_history.sql`, được cài khi API/web/script mô phỏng
+khởi động. SQLite trigger ghi đổi trạng thái từ mọi nguồn trong cùng transaction;
+app gắn operation ID lên sự kiện đã có để không ghi trùng. Xóa đơn dọn các bảng
+phụ để một ID được tái sử dụng không mang vận đơn/lịch sử của đơn trước.
+
+GET không dựng mốc mới. Đơn cũ thiếu nhật ký hiển thị trạng thái hiện tại cùng
+ghi chú chưa có thời điểm cập nhật. Đơn nhập vào ở trạng thái đã xử lý có mốc
+**Ghi nhận ban đầu**, không giả giờ xác nhận/bàn giao/giao hàng. Ngày ở header
+được ghi rõ là ngày đặt. Không cần reset database.
+
+`npm run demo` kiểm tra API và web trỏ chung database trước khi mở dịch vụ. Nếu
+dùng đường dẫn riêng, cấu hình `SHOP_DATABASE_PATH` của API và `STORE_DATABASE_PATH`
+của web thành cùng đường dẫn tuyệt đối. Kiểm tra riêng bằng
+`cd backend && .venv/bin/python -m app.scripts.check_store`.
 
 Hiệu ứng chỉ dùng fade/translate ngắn cho phần theo dõi và thông báo thành công;
 không báo thành công trước khi API xác nhận. Hỗ trợ Giảm chuyển động, không animate

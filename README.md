@@ -29,6 +29,7 @@ nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
 - Danh mục có ảnh, tìm theo tên/SKU, hàng sắp hết và chi tiết đơn hàng.
 - Xử lý đơn ngay trên app: sửa thông tin nhận hàng trước khi bàn giao, ghi chú, xác nhận/bàn giao/đã giao/hủy theo trạng thái hợp lệ. Xem lại trước khi lưu; chống ghi đè và hoàn kho trùng. [Phạm vi và cách dùng](docs/ORDER_MANAGEMENT.md).
 - Theo dõi đơn ngay trên từng thẻ: tiến trình, lịch sử cập nhật, đơn vị vận chuyển/mã vận đơn và cập nhật nền. Không mở trang mua hàng; trạng thái và mã vận đơn do shop local ghi nhận, chưa tra cứu hãng vận chuyển thật.
+- App, Kênh Người Bán và trang đơn của người mua dùng chung nhật ký/vận đơn; chọn hãng, lưu mã và sao chép ngay trong app. Chat tra trạng thái mới nhất theo mã đơn, hiểu câu hỏi tiếp và mở form xử lý trực tiếp.
 - Chat tra toàn bộ danh mục shop theo nhiều từ khóa và khoảng giá đã nêu,
   ví dụ `Shop có chuột máy tính dưới 1tr không?`; đếm kết quả trước khi phân trang,
   không suy loại hàng shop có từ vài sản phẩm mẫu. Áp dụng cho database shop local;
@@ -268,7 +269,7 @@ Sau khi đã cài môi trường và bootstrap ở các bước trên, từ root
 npm run demo
 ```
 
-Lệnh này kiểm tra cổng, chạy migration, mở UTE MALL + API + Expo và in QR/địa chỉ cho iPhone. **Ctrl+C một lần** sẽ dừng cả ba và OpenCode do backend tạo. Không tự cài package, seed lại shop hoặc kill tiến trình đang chiếm cổng. Muốn chỉ kiểm tra môi trường: `npm run demo -- --check`.
+Lệnh này kiểm tra app và web dùng chung database, kiểm tra cổng, chạy migration, mở UTE MALL + API + Expo và in QR/địa chỉ cho iPhone. Nếu dùng file dữ liệu riêng, đặt `SHOP_DATABASE_PATH` (API) và `STORE_DATABASE_PATH` (web) cùng đường dẫn tuyệt đối; lệnh dừng sớm nếu hai bên khác nguồn. **Ctrl+C một lần** sẽ dừng cả ba và OpenCode do backend tạo. Không tự cài package, seed lại shop hoặc kill tiến trình đang chiếm cổng. Muốn chỉ kiểm tra môi trường: `npm run demo -- --check`.
 
 Launcher tự dùng IP LAN hiện tại để tránh cấu hình IP cũ trong `frontend/.env`. Nếu muốn dùng URL riêng, khai báo `EXPO_PUBLIC_API_URL` / `EXPO_PUBLIC_STORE_URL` trong môi trường terminal trước khi chạy. iPhone cần cùng Wi-Fi với máy; lần gọi Qwen đầu tiên vẫn có thể chậm vì nạp model từ HDD.
 

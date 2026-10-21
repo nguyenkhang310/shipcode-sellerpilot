@@ -1,5 +1,43 @@
 # Rà soát app sau khi hợp nhất nhánh Hoàng
 
+## Đồng bộ đơn, vận chuyển và trợ lý — 21/10/2026
+
+- App, web người bán/người mua và script tạo đơn dùng chung nhật ký SQLite.
+  Trigger ghi trạng thái trong cùng transaction; retry từ app gắn lên đúng
+  sự kiện, không nhân đôi. Xóa đơn dọn dữ liệu phụ để ID được dùng lại không
+  mang lịch sử/vận đơn cũ. Đơn cũ thiếu mốc hiện trạng thái đúng cùng thông báo
+  chưa có thời điểm; dữ liệu nhập ở trạng thái đã xử lý chỉ ghi nhận ban đầu.
+- Kênh quản trị dùng cùng luật chuyển trạng thái với app/seller; callback thanh
+  toán đến muộn không kéo đơn đã giao về chờ lấy hàng. COD giả lập chưa giao
+  không tự được ghi nhận đã thu tiền chỉ vì xác nhận/bàn giao.
+- Vận đơn có bộ chọn hãng và mã nhập tay, review/xác nhận ở app, sao chép bằng
+  Clipboard; web cũng sửa trước bàn giao, so sánh giá trị cũ trong transaction.
+  Chi tiết web người mua và app đọc cùng vận đơn. Không phát hành mã hãng giả,
+  không tự dựng vị trí bưu kiện/ETA. Giao diện ghi rõ ngày đặt ở header.
+- Chat đọc lại đơn từ server, hiểu mã đơn/câu hỏi tiếp/bổ sung mã sau câu hỏi
+  làm rõ, đối chiếu tối đa 5 mã và không lộ đơn khác shop. Có nút mở xử lý ngay
+  trong chat; yêu cầu hủy bằng lời chưa thực thi. Câu đọc đơn không gọi model;
+  câu tư vấn theo đơn có chi tiết mới nhất và một lần sinh câu trả lời.
+- `npm run demo` dừng sớm nếu API và web được cấu hình hai database khác nhau.
+  Cấu hình hiện tại đã qua kiểm tra cùng nguồn. Đối chiếu chỉ đọc trên shop
+  hiện tại: 0 đơn thiếu dòng hàng, 0 lệch tổng tiền, 0 lệch tổng tồn/phân loại,
+  0 sản phẩm tồn âm. Không ghi hoặc sửa đơn shop trong quá trình audit.
+- 659 test backend và 19 test luồng marketplace qua; ca xuyên app ↔ web ↔
+  người mua đối chiếu trạng thái, vận đơn, số đã bán, tồn và thống kê 1/7/30 ngày.
+  Typecheck, build web/iOS, 12 test transport/message qua. Browser QA xác minh
+  chọn hãng, copy mã, review, bàn phím, retry/409 và đơn cũ ở 320–520px.
+- AI thật qua `ai:check` (chat Việt, tiền Việt, chi phí, ảnh tự vẽ và tham chiếu
+  ngắn). Benchmark shop tạm: đọc đơn giản 6–28ms, tư vấn 2,39s, tính lời 1,71s,
+  đọc ảnh/soạn nháp 1,59s; tám ca qua và không fallback. Không coi đây là SLA.
+- Thêm `expo-clipboard` đúng dải Expo 57. Cập nhật riêng `shell-quote` trong dải
+  tương thích để loại cảnh báo critical. Npm audit còn 24 cảnh báo ở cây phụ
+  thuộc hiện tại (7 moderate, 17 high); chưa nâng breaking Expo/React Native.
+
+Phạm vi: đồng bộ gian hàng local, chưa có Shopee Open Platform hay API hãng vận
+chuyển. Mã vận đơn cần do shop nhập từ phiếu giao thật. Không reset dữ liệu hoặc
+thay `.env`. Chưa kiểm tra lại Clipboard, bàn phím và safe area trên điện thoại
+thật; các bài browser dùng shop tạm riêng và không mở popup.
+
 ## Xem từng ngày và sửa thủ công trong app — 21/10/2026
 
 - Dashboard nhận `date=YYYY-MM-DD`, ngày lịch sử đủ 24 giờ Việt Nam, hôm nay chỉ

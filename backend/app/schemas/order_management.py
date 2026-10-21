@@ -41,6 +41,13 @@ class OrderUpdate(BaseModel):
             raise ValueError('Mã vận đơn cần 3–80 ký tự chữ/số, dấu chấm, gạch, gạch dưới hoặc dấu /.')
         return value
 
+    @field_validator('shipping_carrier')
+    @classmethod
+    def carrier_single_line(cls, value):
+        if value and any(ord(char) < 32 for char in value):
+            raise ValueError('Tên đơn vị vận chuyển phải nằm trên một dòng.')
+        return value
+
     @model_validator(mode='after')
     def changes_required(self):
         changes = self.model_fields_set - {'request_id', 'expected_version'}

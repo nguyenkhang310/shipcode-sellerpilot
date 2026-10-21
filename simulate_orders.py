@@ -34,6 +34,12 @@ def connect_shop(database: Path) -> sqlite3.Connection:
     if not {'shop', 'product', 'product_variant', 'user', 'order', 'order_item'} <= tables:
         connection.close()
         raise ValueError('Database không đúng schema UTE MALL.')
+    schema = ROOT / 'backend/app/integrations/order_history.sql'
+    try:
+        connection.executescript('BEGIN IMMEDIATE;\n' + schema.read_text(encoding='utf-8') + '\nCOMMIT;')
+    except BaseException:
+        connection.close()
+        raise
     return connection
 
 
@@ -85,7 +91,8 @@ def create_order(connection: sqlite3.Connection, *, shop_slug='utech-official', 
         chosen = chosen[:rng.randint(1, min(max_items, len(chosen)))]
         buyer = _buyer(connection)
         state = rng.choices(['pending', 'paid', 'shipped', 'delivered'], [45, 20, 15, 20])[0] if status == 'mixed' else status
-        payment = 'unpaid' if state == 'pending' else 'paid'
+        # Confirmation/hand-over do not collect a COD payment.
+        payment = 'paid' if state == 'delivered' else 'unpaid'
         created = now or datetime.now(timezone.utc)
         if created.tzinfo is None:
             raise ValueError('Thời gian phải có múi giờ.')

@@ -34,6 +34,7 @@ from app.services.seller_tools import (
     proposal_to_dict,
 )
 from app.services.seller_voice import read_reply
+from app.services.order_assistant import order_answer
 from app.services.business_advisor import (attach_business_brief, planning_fallback,
                                           business_reply_issue, business_correction)
 
@@ -116,6 +117,8 @@ async def handle_chat(
     if is_exact_fact_question(message, current_command):
         resolved = message
     history = history_messages(runs)
+    order_read = order_answer(shop, message, runs)
+    order_generation = order_read.pop('_generate', False) if order_read else False
     simple = simple_reply(message, runs)
     classifier_input = resolved
     if history:
@@ -125,7 +128,7 @@ async def handle_chat(
     direct = parse_fallback(resolved, today=today)
     forgetting = is_forget_request(message)
     catalog_read = direct.intent == 'product_search' and catalog_lookup(message) is not None
-    skip_classifier = bool(simple) or catalog_read or callable(getattr(ai_provider, "respond", None)) and (
+    skip_classifier = bool(order_read) or bool(simple) or catalog_read or callable(getattr(ai_provider, "respond", None)) and (
         direct.intent == "sales_advice"
         or natural_responses and direct.intent in (
             "shop_summary", "inventory_query", "product_search"
@@ -154,7 +157,9 @@ async def handle_chat(
 
     if simple:
         command = ParsedCommand(intent="unknown")
-    direct_reply = catalog_read or bool(getattr(ai_provider, 'prefer_direct_facts', False)) and (
+    if order_read:
+        command = ParsedCommand(intent='unknown')
+    direct_reply = bool(order_read and not order_generation) or catalog_read or bool(getattr(ai_provider, 'prefer_direct_facts', False)) and (
         bool(simple) or is_exact_fact_question(message, command)
     )
     if command.intent in ('sales_advice', 'unknown') and not command.days:
@@ -168,7 +173,7 @@ async def handle_chat(
                 days = None
         if days:
             command = command.model_copy(update={'days': days})
-    result = execute_command(session, shop, command)
+    result = ({**order_read, 'proposal': None} if order_read else execute_command(session, shop, command))
     preferences = read_memory(session, shop, 'shop')
     if preferences:
         result['facts']['seller_preferences'] = preferences
@@ -181,7 +186,7 @@ async def handle_chat(
         command = ParsedCommand(intent='unknown')
         result = response('Mình đã xóa bộ nhớ cá nhân hóa và các chi phí đã ghi nhớ của shop. Lịch sử chat vẫn còn; từ giờ mình sẽ hỏi lại thông tin cần thiết.',
                           'forget_assistant_memory', {}, {'seller_preferences': {}})
-    elif callable(getattr(ai_provider, 'respond', None)) and command.intent in ('sales_advice', 'unknown') and not simple and not is_casual_message(message):
+    elif not order_read and callable(getattr(ai_provider, 'respond', None)) and command.intent in ('sales_advice', 'unknown') and not simple and not is_casual_message(message):
         if command.intent == 'unknown':
             result['facts'].pop('supported_intents', None)
             result['facts'].update(shop_context(shop, command.days or 7))
@@ -253,11 +258,13 @@ async def handle_chat(
             except AIProviderError as error:
                 logger.warning('Chat used grounded fallback: reason=%s stage=%s', error.reason, error.stage or 'unknown')
                 mode, provider_name, fallback_reason = "fallback", "deterministic_parser", error.reason
-    if mode == "fallback" and natural_responses and command.intent == "unknown" and not simple and not forgetting:
+    if mode == "fallback" and natural_responses and command.intent == "unknown" and not simple and not forgetting and not order_read:
         result["answer"] = fallback_explanation(fallback_reason)
     if forgetting:
         mode, provider_name, model_name, fallback_reason = 'ai', 'deterministic_parser', None, None
-    result["suggestions"] = suggestions_for(command, result)
+    result["suggestions"] = (["Còn mã vận đơn?", "Còn đơn đó sao rồi?"] if order_read and result['facts'].get('order_action') else suggestions_for(command, result))
+    if order_read and result['facts'].get('order_comparison'):
+        result['suggestions'] = [f"Theo dõi đơn #{item['id']}" for item in result['facts']['order_comparison'] if item.get('found')][:3]
     elapsed_ms = max(0, int(round((perf_counter() - started_at) * 1_000)))
 
     run = AgentRun(

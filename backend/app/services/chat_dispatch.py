@@ -14,6 +14,7 @@ from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.advisor import is_forget_request
 from app.services.business_advisor import planning_request
 from app.services.chat import handle_chat
+from app.services.order_assistant import is_order_question
 from app.services.conversations import recent_runs, history_messages
 from app.services.product_edit_chat import is_product_edit_request, pending_edit, handle_product_edit
 from app.ai.fallback import extract_sku
@@ -39,11 +40,16 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
     try:
         conversation_id = str(payload.conversation_id) if payload.conversation_id else None
         active_draft = get_active_draft(session, shop, conversation_id)
+        previous=recent_runs(session,shop,conversation_id,limit=2)
+        # A current order read must not be mistaken for a draft title or a
+        # product-edit clarification merely because its sentence is short.
+        if is_order_question(payload.message, previous):
+            return ChatResponse(data=await handle_chat(session, shop, provider,
+                message=payload.message, conversation_id=conversation_id))
         if active_draft is None and listing_request(payload.message):
             active_draft = create_text_product_draft(session, shop, conversation_id)
             return ChatResponse(data=await advance_product_draft(session, shop, provider, active_draft,
                 message=payload.message, upload_dir=settings.shop_product_upload_dir))
-        previous=recent_runs(session,shop,conversation_id,limit=2)
         continue_edit=bool(pending_edit(previous) and not planning_request(payload.message)
             and (extract_sku(payload.message.lower()) or re.match(r'\s*(?:tiêu đề|tên sản phẩm|mô tả|giá|tồn)\s*[:=]',payload.message,re.I)
                  or parse_fallback(payload.message,today=datetime.now(shop.timezone).date()).intent=='unknown'))

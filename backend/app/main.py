@@ -12,7 +12,7 @@ from app.api.v1.router import router
 from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.db.session import build_engine
-from app.integrations.ute_mall import UTEMallRepository
+from app.integrations.ute_mall import UTEMallRepository, ShopDatabaseError
 from app.services.chat_requests import ChatRequestManager
 from app.services.browser_connector import BrowserRequests
 
@@ -32,6 +32,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             settings.shop_timezone,
             settings.seller_shop_slug,
         )
+        try:
+            app.state.shop_repository.initialize_order_history()
+        except ShopDatabaseError:
+            logger.warning('Order journal unavailable; check shop database readiness and write access')
         try:
             async with create_provider(settings) as provider:
                 app.state.ai_provider = provider

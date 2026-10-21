@@ -2,15 +2,18 @@
 import hashlib
 import json
 import sqlite3
+from pathlib import Path
 from datetime import datetime
 
 from app.integrations.management import _scope, _columns
+from app.integrations.order_history import install_order_history
 from app.integrations.ute_mall import ShopDatabaseError, ShopItemNotFoundError
 
 TRANSITIONS = {'pending': ['paid', 'cancelled'], 'paid': ['shipped', 'cancelled'],
                'shipped': ['delivered'], 'delivered': [], 'cancelled': [], 'returned': []}
 ADDRESS_FIELDS = {'shipping_name', 'shipping_phone', 'shipping_address'}
 TRACKING_FIELDS = {'shipping_carrier', 'tracking_number'}
+SHIPPING_CARRIERS = json.loads(Path(__file__).with_name('shipping_carriers.json').read_text(encoding='utf-8'))
 
 
 class OrderConflictError(RuntimeError):
@@ -40,14 +43,17 @@ def _read(connection, shop, order_id):
         tracking = dict(shipping) if shipping else None
     events = []
     if 'sellerpilot_order_event' in tables:
-        events = [dict(event) for event in connection.execute('SELECT id,from_status,to_status,changed_fields,created_at FROM sellerpilot_order_event WHERE shop_slug=? AND order_id=? ORDER BY id DESC', (slug, order_id))]
+        events = [dict(event) for event in connection.execute('SELECT id,operation_id,from_status,to_status,changed_fields,created_at FROM sellerpilot_order_event WHERE shop_slug=? AND order_id=? ORDER BY id DESC', (slug, order_id))]
         for event in events:
             event['changed_fields'] = json.loads(event['changed_fields'])
-    last_status = next((event['to_status'] for event in events if event['from_status'] != event['to_status']), 'pending')
+            operation = event.pop('operation_id')
+            event['kind'] = 'initial' if operation.startswith('initial:') else 'status' if event['from_status'] != event['to_status'] else 'edit'
+    last_status = next((event['to_status'] for event in events if event['kind'] in ('initial', 'status')), 'pending')
     version = hashlib.sha256(json.dumps([raw, lines, tracking, events], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     return {'id': raw['id'], 'status': raw['status'], 'total_vnd': raw['total_amount'],
             'created_at': raw['created_at'], 'version': version,
             'shipping_carrier': tracking['carrier'] if tracking else '', 'tracking_number': tracking['tracking_number'] if tracking else '',
+            'shipping_carriers': SHIPPING_CARRIERS,
             'events': events, 'unrecorded_status_change': last_status != raw['status'],
             **{key: raw.get(key) for key in ADDRESS_FIELDS | {'note', 'payment_status', 'payment_method', 'shipping_fee', 'discount_amount'}},
             'allowed_statuses': TRANSITIONS.get(raw['status'], []),
@@ -75,6 +81,7 @@ def update_order(shop, order_id, payload):
     try:
         with shop._connect() as connection:
             connection.execute('BEGIN IMMEDIATE')
+            journal_triggers = install_order_history(connection)
             before = _read(connection, shop, order_id)
             connection.execute('''CREATE TABLE IF NOT EXISTS sellerpilot_order_receipt (
                 operation_id TEXT PRIMARY KEY, request_digest TEXT NOT NULL,
@@ -143,8 +150,17 @@ def update_order(shop, order_id, payload):
                 id INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL UNIQUE,
                 shop_slug TEXT NOT NULL, order_id INTEGER NOT NULL, from_status TEXT NOT NULL,
                 to_status TEXT NOT NULL, changed_fields TEXT NOT NULL, created_at TEXT NOT NULL)''')
-            connection.execute('INSERT INTO sellerpilot_order_event(operation_id,shop_slug,order_id,from_status,to_status,changed_fields,created_at) VALUES(?,?,?,?,?,?,?)',
-                (str(payload.request_id), slug, order_id, before['status'], next_status, json.dumps(sorted(changes.keys() - {'payment_status'})), now))
+            event_fields = json.dumps(sorted(changes.keys() - {'payment_status'}))
+            if journal_triggers and next_status != before['status']:
+                # The UPDATE trigger already recorded this transition. Attach
+                # the operation receipt rather than inserting a second event.
+                connection.execute('''UPDATE sellerpilot_order_event SET operation_id=?,changed_fields=?
+                    WHERE id=(SELECT MAX(id) FROM sellerpilot_order_event
+                    WHERE shop_slug=? AND order_id=? AND operation_id LIKE 'status:%')''',
+                    (str(payload.request_id), event_fields, slug, order_id))
+            else:
+                connection.execute('INSERT INTO sellerpilot_order_event(operation_id,shop_slug,order_id,from_status,to_status,changed_fields,created_at) VALUES(?,?,?,?,?,?,?)',
+                    (str(payload.request_id), slug, order_id, before['status'], next_status, event_fields, now))
             if 'sold_count' in _columns(connection, 'product'):
                 # Match store counters: fulfilled units, plus historical baseline
                 # only for catalogue shops that do not use SellerPilot's ledger.

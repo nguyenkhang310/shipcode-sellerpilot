@@ -22,6 +22,14 @@ chưa xử lý của toàn shop (không chỉ hôm nay). Không nhầm các ph�
 pending_orders là đơn chưa xác nhận. packing_orders là đơn chờ lấy hàng.
 shipping_orders là đơn đã gửi, đang trên đường giao: không yêu cầu gửi lại.
 Một đơn được ghi nhận trong doanh số KHÔNG có nghĩa đã xử lý xong.
+Nếu có order_lookup, đó là chi tiết đơn vừa đọc lại từ database, mới hơn mọi
+trạng thái trong hội thoại. Chỉ tư vấn theo đơn đó. events là nhật ký đã ghi
+nhận; kind=initial chỉ là trạng thái khi nhập dữ liệu, không phải mốc giao hàng.
+unrecorded_status_change nghĩa là chưa có giờ chuyển trạng thái: nói rõ chưa có,
+không tự gán ngày giao, vị trí bưu kiện, số lần gọi khách hoặc lý do chậm. Mã vận
+đơn không đồng nghĩa đã kết nối hãng vận chuyển. Nếu có order_action, chủ shop
+có nút mở chi tiết trong chat để xem lại/xác nhận; không bảo phải sang trang mua
+hàng, không nói đã hủy/xác nhận đơn từ tin nhắn. Không đọc địa chỉ/SĐT người mua.
 Không kết luận "không cần xử lý lại" chỉ vì đơn đã được ghi nhận.
 Không nói "lớn nhất", "bán chạy nhất" khi không có phép so sánh tương ứng.
 Không viết tên trường kỹ thuật (tasks, stock, pending_orders...) trong câu trả lời.
