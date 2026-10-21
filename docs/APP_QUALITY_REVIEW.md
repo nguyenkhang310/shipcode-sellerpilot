@@ -30,6 +30,29 @@ Phạm vi: sửa thủ công hỗ trợ gian hàng local, không thay quyền Op
 Ảnh/SKU/ngành hàng/trạng thái sản phẩm chưa thuộc form sửa này. Chưa kiểm tra lại
 bàn phím, Dynamic Type, safe area và hiệu ứng trên thiết bị iPhone/Android thật.
 
+## Xử lý và theo dõi đơn trong app — 21/10/2026
+
+- Mỗi thẻ đơn có nút Theo dõi và Xử lý đơn. Bottom sheet tách tiến trình,
+  vận đơn, lịch sử khỏi thông tin nhận hàng và form xử lý; không mở trang mua
+  hàng hoặc tab mới. Bộ lọc có số đơn theo trạng thái và từ khóa hiện tại.
+- Chuyển trạng thái đi qua bước xem lại. Nhật ký, thông tin vận chuyển, kho và
+  biên nhận lưu cùng giao dịch; thử lại cùng operation ID không thêm sự kiện
+  hay hoàn kho lần hai. Phiên cũ bị từ chối bằng version/409.
+- Chi tiết tự cập nhật mỗi 8 giây khi đang xem và chưa sửa; danh sách cập nhật
+  10 giây khi ở đầu trang đầu tiên. Dừng đồng bộ form khi có nội dung chưa lưu,
+  review hoặc đang gửi. Đóng form có thay đổi phải chọn tiếp tục hoặc bỏ.
+- Theo dõi có hiệu ứng xuất hiện ngắn, phản hồi thành công sau khi server lưu;
+  tôn trọng Giảm chuyển động. Kiểm tra sáng/tối và chiều rộng 320/390/520px.
+- 642 test backend, 12 test transport/message và native SVG parser qua.
+  Typecheck, build web, export iOS qua. Browser kiểm tra năm tab, form đơn,
+  bàn phím giả lập, xác nhận → vận đơn → bàn giao → hoàn tất, cập nhật từ phiên
+  khác, giữ nội dung đang nhập và xử lý xung đột; không phát sinh popup/page mới.
+
+Phạm vi hiện tại là gian hàng local. Mã vận đơn do shop nhập, trạng thái do shop
+cập nhật; chưa kết nối hãng vận chuyển để lấy các lần quét kiện hàng, GPS hoặc
+ETA. Không tạo mốc thời gian cho trạng thái cũ/cập nhật ngoài app chưa có nhật ký.
+Kiểm thử dùng shop tạm, chưa xác minh lại trên iPhone/Android thật.
+
 ## Cập nhật 21/10/2026
 
 - Sửa cảnh báo native SVG `".55" is not a valid number or percentage string`:

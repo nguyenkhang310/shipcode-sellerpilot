@@ -43,7 +43,7 @@ def test_detail_is_scoped_and_uses_purchased_values(ledger):
     client, _ = ledger
     order = detail(client)
     assert order['allowed_statuses'] == ['paid', 'cancelled']
-    assert set(order['editable_fields']) == {'shipping_name', 'shipping_phone', 'shipping_address', 'note'}
+    assert set(order['editable_fields']) == {'shipping_name', 'shipping_phone', 'shipping_address', 'note', 'shipping_carrier', 'tracking_number'}
     assert order['items'][0]['sku'] == 'PURCHASED-SKU'
     assert order['items'][0]['quantity'] == 2
     assert order['total_vnd'] == 2000000

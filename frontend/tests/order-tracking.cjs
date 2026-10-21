@@ -1,0 +1,82 @@
+// Requires chat_reliability_server.py. Operates only on its disposable order #10.
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const assert=require('node:assert/strict'),path=require('node:path'),fs=require('node:fs'),{randomUUID}=require('node:crypto');
+const {useQaServer,qaFetch}=require('./qa-server.cjs');
+const output=path.resolve(__dirname,'../../docs/evaluations/order-tracking');fs.mkdirSync(output,{recursive:true});
+let browser,page;
+(async()=>{
+ browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_EXECUTABLE||undefined});
+ page=await browser.newPage({viewport:{width:390,height:844}});
+ assert.equal((await (await page.request.get('http://127.0.0.1:8123/qa/identity')).json()).temporary_shop,true);
+ await useQaServer(page);
+ const errors=[],checks=[],patches=[];let popups=0;
+ page.on('pageerror',e=>errors.push(e.message));page.on('popup',()=>popups++);
+ await page.route('**/api/v1/management/orders/10',async route=>{if(route.request().method()==='PATCH')patches.push(route.request().postDataJSON());return route.fulfill({response:await qaFetch(route)});});
+ await page.goto(process.env.QA_APP_URL||'http://127.0.0.1:5174');
+ await page.getByRole('tab',{name:'Đơn hàng',exact:true}).click();
+ await page.getByRole('textbox',{name:'Tìm đơn hàng',exact:true}).fill('#10');
+ await page.getByText('1 đơn hàng',{exact:true}).waitFor();
+ const open=()=>page.getByRole('button',{name:'Theo dõi đơn #10',exact:true}).click();
+ await open();await page.getByTestId('order-tracking').waitFor();
+ assert.equal(patches.length,0);
+ for(const width of [320,390,520]){
+  await page.setViewportSize({width,height:width===320?640:844});
+  await page.waitForFunction(()=>{const e=document.querySelector('[aria-label="Đóng chi tiết đơn hàng"]');return e&&e.getBoundingClientRect().y>=0;});
+  // React Native Web slides the entire modal for 300ms. Capture its settled
+  // layout, including after viewport changes, rather than an animation frame.
+  await page.waitForTimeout(350);
+  const tracking=page.getByTestId('order-tracking');
+  assert.match(await tracking.innerText(),/Chờ xác nhận/);
+  assert.match(await tracking.innerText(),/Đơn được tạo/);
+  assert.equal(await tracking.getByText('Đã giao',{exact:true}).count(),0);
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:path.join(output,`tracking-${width}.png`)});
+ }
+ await page.setViewportSize({width:390,height:844});
+ await page.getByRole('button',{name:'Thực hiện Xác nhận đơn',exact:true}).click();
+ await page.getByRole('heading',{name:'Xem lại thay đổi',exact:true}).waitFor();assert.equal(patches.length,0);
+ await page.getByRole('button',{name:'Xác nhận lưu',exact:true}).click();
+ await page.getByTestId('order-feedback').waitFor();
+ assert.match(await page.getByTestId('order-feedback').innerText(),/Đơn #10.*Chờ lấy hàng/);
+ await open();await page.getByTestId('order-tracking').waitFor();
+ assert.match(await page.getByTestId('order-tracking').innerText(),/Chờ lấy hàng/);
+ await page.getByRole('tab',{name:'Thông tin & xử lý',exact:true}).click();
+ await page.getByRole('textbox',{name:'Đơn vị vận chuyển',exact:true}).fill('SPX Express');
+ await page.getByRole('textbox',{name:'Mã vận đơn',exact:true}).fill('VN-DEMO-12345');
+ await page.getByRole('button',{name:'Xem thay đổi',exact:true}).click();
+ await page.getByRole('button',{name:'Xác nhận lưu',exact:true}).click();
+ await page.getByRole('heading',{name:'Đơn #10',exact:true}).waitFor({state:'hidden'});
+ await open();await page.getByTestId('order-tracking').waitFor();
+ await page.getByText('VN-DEMO-12345',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Thực hiện Bàn giao vận chuyển',exact:true}).click();
+ await page.getByRole('button',{name:'Xác nhận lưu',exact:true}).click();
+ await page.getByRole('heading',{name:'Đơn #10',exact:true}).waitFor({state:'hidden'});
+ await open();await page.getByTestId('order-tracking').waitFor();
+ assert.match(await page.getByTestId('order-tracking').innerText(),/Đang giao/);
+ const directPatch=async changes=>{
+  const detail=(await (await page.request.get('http://127.0.0.1:8123/api/v1/management/orders/10')).json()).data;
+  const response=await page.request.patch('http://127.0.0.1:8123/api/v1/management/orders/10',{data:{...changes,expected_version:detail.version,request_id:randomUUID()}});
+  assert.equal(response.status(),200);return (await response.json()).data;
+ };
+ await directPatch({status:'delivered'});
+ await page.getByTestId('order-tracking').getByText('Đã giao',{exact:true}).first().waitFor({timeout:11000});
+ assert.equal(await page.getByRole('button',{name:'Thực hiện Hủy đơn',exact:true}).count(),0);
+ await page.emulateMedia({colorScheme:'dark',reducedMotion:'reduce'});
+ await page.waitForFunction(()=>{const e=document.querySelector('[data-testid="order-tracking"]');return e&&getComputedStyle(e).opacity==='1';});
+ await page.screenshot({path:path.join(output,'delivered-dark.png')});
+ checks.push('Track, confirm, add waybill, hand over and follow external delivery inside app; review precedes writes and success feedback follows commit');
+ await page.getByRole('tab',{name:'Thông tin & xử lý',exact:true}).click();
+ const note=page.getByRole('textbox',{name:'Ghi chú',exact:true});await note.fill('Bản đang nhập của người bán');
+ await directPatch({note:'Nội dung mới từ phiên khác'});
+ await page.waitForTimeout(8500);
+ assert.equal(await note.inputValue(),'Bản đang nhập của người bán');
+ await page.getByRole('button',{name:'Xem thay đổi',exact:true}).click();
+ await page.getByRole('button',{name:'Xác nhận lưu',exact:true}).click();
+ await page.getByRole('button',{name:'Tải lại chi tiết',exact:true}).click();
+ await page.getByRole('tab',{name:'Thông tin & xử lý',exact:true}).click();
+ await note.waitFor();assert.equal(await note.inputValue(),'Nội dung mới từ phiên khác');
+ checks.push('8s live refresh preserves a dirty form, rejects stale save and recovers by loading current detail');
+ assert.equal(popups,0);assert.equal(browser.contexts()[0].pages().length,1);
+ assert.deepEqual(errors,[]);
+ const report={checks,mutations:patches.length,popups,errors};fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
+})().catch(async error=>{console.error(error);if(page){console.error((await page.locator('body').innerText()).slice(0,3000));await page.screenshot({path:path.join(output,'failure.png')});}process.exitCode=1;}).finally(async()=>browser?.close());

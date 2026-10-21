@@ -87,13 +87,15 @@ def orders(shop: UTEMallRepository, status="all", query="", limit=20, offset=0):
             extra = ", ".join(f"o.{field}" if field in columns else f"NULL AS {field}" for field in
                               ("payment_method", "payment_status", "shipping_fee", "discount_amount"))
             filters = [scope]
-            if status != "all":
-                filters.append("o.status = ?")
-                params.append(status)
             if query:
                 connection.create_function("search_text", 1, _search_text, deterministic=True)
                 filters.append(f"(CAST(o.id AS TEXT) = ? OR search_text({name}) LIKE ? ESCAPE '\\')")
                 params += [query.lstrip("#"), _literal_query(query)]
+            status_counts = {row['status']: row['count'] for row in connection.execute(
+                'SELECT o.status,COUNT(*) AS count FROM "order" o WHERE ' + ' AND '.join(filters) + ' GROUP BY o.status', params)}
+            if status != "all":
+                filters.append("o.status = ?")
+                params.append(status)
             where = " AND ".join(filters)
             total = connection.execute(f'SELECT COUNT(*) FROM "order" o WHERE {where}', params).fetchone()[0]
             rows = connection.execute(
@@ -125,7 +127,7 @@ def orders(shop: UTEMallRepository, status="all", query="", limit=20, offset=0):
                     order = by_id[item["order_id"]]
                     order["items"].append(dict(item))
                     order["quantity"] += item["quantity"]
-            return {"items": result, "total": total, "offset": offset, "limit": limit}
+            return {"items": result, "total": total, "offset": offset, "limit": limit, "status_counts": status_counts}
     except sqlite3.Error as error:
         raise ShopDatabaseError("Cannot read orders") from error
 

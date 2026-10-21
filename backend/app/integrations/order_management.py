@@ -10,6 +10,7 @@ from app.integrations.ute_mall import ShopDatabaseError, ShopItemNotFoundError
 TRANSITIONS = {'pending': ['paid', 'cancelled'], 'paid': ['shipped', 'cancelled'],
                'shipped': ['delivered'], 'delivered': [], 'cancelled': [], 'returned': []}
 ADDRESS_FIELDS = {'shipping_name', 'shipping_phone', 'shipping_address'}
+TRACKING_FIELDS = {'shipping_carrier', 'tracking_number'}
 
 
 class OrderConflictError(RuntimeError):
@@ -31,12 +32,26 @@ def _read(connection, shop, order_id):
         f'SELECT i.*,p.name,{sku} AS display_sku,{image} AS image_url,{variant} AS variant_title '
         f'FROM order_item i LEFT JOIN product p ON p.id=i.product_id AND {product_scope} '
         'WHERE i.order_id=? ORDER BY i.id', [*product_params, order_id])]
-    version = hashlib.sha256(json.dumps([raw, lines], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    tables = {item[0] for item in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    slug = shop.seller_shop_slug or 'local'
+    tracking = None
+    if 'sellerpilot_order_shipping' in tables:
+        shipping = connection.execute('SELECT carrier,tracking_number,updated_at FROM sellerpilot_order_shipping WHERE shop_slug=? AND order_id=?', (slug, order_id)).fetchone()
+        tracking = dict(shipping) if shipping else None
+    events = []
+    if 'sellerpilot_order_event' in tables:
+        events = [dict(event) for event in connection.execute('SELECT id,from_status,to_status,changed_fields,created_at FROM sellerpilot_order_event WHERE shop_slug=? AND order_id=? ORDER BY id DESC', (slug, order_id))]
+        for event in events:
+            event['changed_fields'] = json.loads(event['changed_fields'])
+    last_status = next((event['to_status'] for event in events if event['from_status'] != event['to_status']), 'pending')
+    version = hashlib.sha256(json.dumps([raw, lines, tracking, events], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     return {'id': raw['id'], 'status': raw['status'], 'total_vnd': raw['total_amount'],
             'created_at': raw['created_at'], 'version': version,
+            'shipping_carrier': tracking['carrier'] if tracking else '', 'tracking_number': tracking['tracking_number'] if tracking else '',
+            'events': events, 'unrecorded_status_change': last_status != raw['status'],
             **{key: raw.get(key) for key in ADDRESS_FIELDS | {'note', 'payment_status', 'payment_method', 'shipping_fee', 'discount_amount'}},
             'allowed_statuses': TRANSITIONS.get(raw['status'], []),
-            'editable_fields': sorted((ADDRESS_FIELDS if raw['status'] in ('pending', 'paid') else set()) & raw.keys()
+            'editable_fields': sorted(((ADDRESS_FIELDS & raw.keys()) | TRACKING_FIELDS if raw['status'] in ('pending', 'paid') else set())
                                      | ({'note'} if 'note' in raw else set())),
             'items': [{'id': item['id'], 'name': item['name'], 'sku': item['display_sku'],
                        'variant_title': item['variant_title'], 'image_url': item['image_url'],
@@ -77,6 +92,9 @@ def update_order(shop, order_id, payload):
             next_status = changes.get('status', before['status'])
             if 'status' in changes and next_status not in before['allowed_statuses']:
                 raise OrderConflictError('Không thể chuyển trạng thái đơn theo yêu cầu này.')
+            shipping = {key: changes.get(key, before[key]) for key in TRACKING_FIELDS}
+            if changes.keys() & TRACKING_FIELDS and bool(shipping['shipping_carrier']) != bool(shipping['tracking_number']):
+                raise OrderConflictError('Nhập cả đơn vị vận chuyển và mã vận đơn, hoặc xóa cả hai.')
             changes = {key: value for key, value in changes.items() if value != before.get(key)}
             if not changes:
                 raise OrderConflictError('Không có thay đổi mới để lưu.')
@@ -111,8 +129,22 @@ def update_order(shop, order_id, payload):
                     changes['payment_status'] = 'cancelled'
                 elif next_status == 'delivered':
                     changes['payment_status'] = 'paid'
-            connection.execute('UPDATE "order" SET ' + ','.join(f'{field}=?' for field in changes) + ' WHERE id=?',
-                               [*changes.values(), order_id])
+            order_changes = {key: value for key, value in changes.items() if key not in TRACKING_FIELDS}
+            if order_changes:
+                connection.execute('UPDATE "order" SET ' + ','.join(f'{field}=?' for field in order_changes) + ' WHERE id=?', [*order_changes.values(), order_id])
+            now = datetime.utcnow().isoformat()
+            if changes.keys() & TRACKING_FIELDS:
+                connection.execute('''CREATE TABLE IF NOT EXISTS sellerpilot_order_shipping (
+                    shop_slug TEXT NOT NULL, order_id INTEGER NOT NULL, carrier TEXT NOT NULL,
+                    tracking_number TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(shop_slug,order_id))''')
+                connection.execute('INSERT INTO sellerpilot_order_shipping VALUES(?,?,?,?,?) ON CONFLICT(shop_slug,order_id) DO UPDATE SET carrier=excluded.carrier,tracking_number=excluded.tracking_number,updated_at=excluded.updated_at',
+                    (slug, order_id, shipping['shipping_carrier'], shipping['tracking_number'], now))
+            connection.execute('''CREATE TABLE IF NOT EXISTS sellerpilot_order_event (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL UNIQUE,
+                shop_slug TEXT NOT NULL, order_id INTEGER NOT NULL, from_status TEXT NOT NULL,
+                to_status TEXT NOT NULL, changed_fields TEXT NOT NULL, created_at TEXT NOT NULL)''')
+            connection.execute('INSERT INTO sellerpilot_order_event(operation_id,shop_slug,order_id,from_status,to_status,changed_fields,created_at) VALUES(?,?,?,?,?,?,?)',
+                (str(payload.request_id), slug, order_id, before['status'], next_status, json.dumps(sorted(changes.keys() - {'payment_status'})), now))
             if 'sold_count' in _columns(connection, 'product'):
                 # Match store counters: fulfilled units, plus historical baseline
                 # only for catalogue shops that do not use SellerPilot's ledger.

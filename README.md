@@ -28,6 +28,7 @@ nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
 - Tổng quan hôm nay/7/30 ngày hoặc từng ngày lịch sử: chọn lịch, chuyển ngày trước/sau, biểu đồ theo giờ và so sánh với ngày trước theo giờ Việt Nam. Bộ chọn kỳ có hiệu ứng trượt, hỗ trợ Giảm chuyển động.
 - Danh mục có ảnh, tìm theo tên/SKU, hàng sắp hết và chi tiết đơn hàng.
 - Xử lý đơn ngay trên app: sửa thông tin nhận hàng trước khi bàn giao, ghi chú, xác nhận/bàn giao/đã giao/hủy theo trạng thái hợp lệ. Xem lại trước khi lưu; chống ghi đè và hoàn kho trùng. [Phạm vi và cách dùng](docs/ORDER_MANAGEMENT.md).
+- Theo dõi đơn ngay trên từng thẻ: tiến trình, lịch sử cập nhật, đơn vị vận chuyển/mã vận đơn và cập nhật nền. Không mở trang mua hàng; trạng thái và mã vận đơn do shop local ghi nhận, chưa tra cứu hãng vận chuyển thật.
 - Chat tra toàn bộ danh mục shop theo nhiều từ khóa và khoảng giá đã nêu,
   ví dụ `Shop có chuột máy tính dưới 1tr không?`; đếm kết quả trước khi phân trang,
   không suy loại hàng shop có từ vài sản phẩm mẫu. Áp dụng cho database shop local;

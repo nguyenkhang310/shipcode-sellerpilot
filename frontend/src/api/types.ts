@@ -96,11 +96,15 @@ export type OrderDetail = {
   shipping_name: string | null; shipping_phone: string | null; shipping_address: string | null; note: string | null;
   payment_status: string | null; payment_method: string | null; shipping_fee: number | null; discount_amount: number | null;
   allowed_statuses: string[]; editable_fields: string[]; items: StoreOrder['items']; replayed?: boolean;
+  shipping_carrier: string; tracking_number: string;
+  events: { id: number; from_status: string; to_status: string; changed_fields: string[]; created_at: string }[];
+  unrecorded_status_change: boolean;
 };
 export type OrderChanges = Partial<Pick<OrderDetail, 'shipping_name' | 'shipping_phone' | 'shipping_address' | 'note'>> & {
   status?: 'paid' | 'shipped' | 'delivered' | 'cancelled';
+  shipping_carrier?: string; tracking_number?: string;
 };
-export type StorePage<T> = { items: T[]; total: number; limit: number; offset: number };
+export type StorePage<T> = { items: T[]; total: number; limit: number; offset: number; status_counts?: Record<string, number> };
 export type ManagementData = {
   shop: { name: string; slug: string; rating: number; followers: number; location: string; vacation_mode: boolean };
   days: number; from_date: string; to_date: string; updated_at: string; timezone: string;

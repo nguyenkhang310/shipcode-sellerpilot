@@ -1,7 +1,7 @@
 import { dockContentInset } from '../../components/layout/dockGeometry';
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Keyboard, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, Keyboard, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError } from '../../api/client';
 import { ProductThumbnail } from '../../components/ui/ProductThumbnail';
@@ -11,8 +11,9 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { count, money } from './formatters';
 import { ORDER_STATES, orderDate } from './orderPresentation';
 import { OrderEditor } from './OrderEditor';
+import { OrderFeedback } from './OrderFeedback';
 
-export function OrdersPanel({ initialStatus = 'all', embedded, active = true, onStore, onChanged }: {
+export function OrdersPanel({ initialStatus = 'all', embedded, active = true, onChanged }: {
   initialStatus?: string; embedded: boolean; active?: boolean; onStore: (path: string) => void; onChanged?: () => void;
 }) {
   const { ui, IOS, BRAND, isDark } = useTheme();
@@ -21,6 +22,12 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
   const [items, setItems] = useState<StoreOrder[]>([]), [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(false), [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [detailView, setDetailView] = useState<'tracking' | 'edit'>('edit');
+  const [statusCounts, setStatusCounts] = useState<Record<string, number> | null>(null);
+  const [feedback, setFeedback] = useState('');
+  const scrollPosition = useRef(0);
+  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null), visibleCount = useRef(0);
+  visibleCount.current = items.length;
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState(''), [expanded, setExpanded] = useState<number | null>(null);
   const request = useRef<AbortController | null>(null), failedOffset = useRef(0);
@@ -30,19 +37,18 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
   const cacheKey = useRef(''), loadedAt = useRef(0);
   const pending = useRef(false);
   const key = status + ':' + query.trim();
-  const load = useCallback(async (offset: number, pull = false) => {
+  const load = useCallback(async (offset: number, pull = false, background = false) => {
+    if (background && (pending.current || visibleCount.current > 20 || scrollPosition.current > 60)) return;
     if (offset > 0 && pending.current) return;
     request.current?.abort();
     pending.current = true;
     const controller = new AbortController(); request.current = controller;
-    failedOffset.current = offset; setError('');
-    setLoading(offset === 0); setLoadingMore(offset > 0);
-    setRefreshing(pull);
+    failedOffset.current = offset; if (!background) { setError(''); setLoading(offset === 0); setLoadingMore(offset > 0); setRefreshing(pull); }
     try {
       const { data } = await getOrders(status, query.trim(), offset, controller.signal);
       if (controller.signal.aborted) return;
       setItems(previous => offset ? [...previous, ...data.items.filter(item => !previous.some(old => old.id === item.id))] : data.items);
-      setTotal(data.total); cacheKey.current = key; loadedAt.current = Date.now();
+      setTotal(data.total); setStatusCounts(data.status_counts || null); setError(''); cacheKey.current = key; loadedAt.current = Date.now();
     } catch (e) {
       if (!controller.signal.aborted) setError(e instanceof ApiError ? e.message : 'Chưa tải được đơn hàng. Vui lòng thử lại.');
     } finally {
@@ -53,13 +59,25 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
   useEffect(() => {
     if (!active) { request.current?.abort(); pending.current = false; setLoading(false); setLoadingMore(false); setRefreshing(false); return; }
     if (cacheKey.current !== key) {
-      setItems([]); setTotal(null); setExpanded(null); setError(''); setLoading(true);
+      setItems([]); setTotal(null); setStatusCounts(null); setExpanded(null); setError(''); setLoading(true);
       list.current?.scrollToOffset({ offset: 0, animated: false });
     } else if (Date.now() - loadedAt.current < 60_000) return;
     const timer = setTimeout(() => void load(0), query ? 250 : 0);
     return () => { clearTimeout(timer); request.current?.abort(); };
   }, [active, key, load]);
-  useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => () => { request.current?.abort(); if (feedbackTimer.current) clearTimeout(feedbackTimer.current); }, []);
+  useEffect(() => {
+    if (!active || editingId !== null) return;
+    const poll = () => { if (AppState.currentState !== 'background' && AppState.currentState !== 'inactive') void load(0, false, true); };
+    const timer = setInterval(poll, 10000);
+    const listener = AppState.addEventListener('change', value => { if (value === 'active') poll(); });
+    return () => { clearInterval(timer); listener.remove(); };
+  }, [active, editingId, load]);
+  const showFeedback = (message: string) => {
+    if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    setFeedback(message); feedbackTimer.current = setTimeout(() => setFeedback(''), 2800);
+  };
+  const openDetail = (id: number, view: 'tracking' | 'edit') => { Keyboard.dismiss(); setDetailView(view); setEditingId(id); };
   const chooseStatus = (next: string) => {
     if (next === status) return;
     Keyboard.dismiss(); setStatus(next);
@@ -85,22 +103,26 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
         {Boolean(item.discount_amount) ? <View style={ui.detailLine}><Text style={ui.caption}>Giảm giá</Text><Text style={ui.productName}>−{money(item.discount_amount!)}</Text></View> : null}
         {item.payment_method ? <View style={ui.detailLine}><Text style={ui.caption}>Thanh toán</Text><Text style={ui.productName}>{item.payment_method === 'COD' ? 'Khi nhận hàng' : item.payment_method}</Text></View> : null}
         {item.payment_status ? <View style={ui.detailLine}><Text style={ui.caption}>Trạng thái thanh toán</Text><Text style={ui.productName}>{{ paid: 'Đã thanh toán', unpaid: 'Chưa thanh toán', initiated: 'Đang xử lý', failed: 'Thất bại', cancelled: 'Đã hủy' }[item.payment_status] || item.payment_status}</Text></View> : null}
-        <Pressable accessibilityRole="button" accessibilityLabel={'Quản lý đơn #' + item.id} onPress={() => setEditingId(item.id)} style={[ui.primaryButton, { marginTop: 10 }]}><Text style={ui.primaryText}>Quản lý đơn</Text></Pressable>
-        <Pressable accessibilityRole="button" onPress={() => onStore('/seller/orders/' + item.id)} style={[ui.linkHit, ui.row, { marginTop: 4, justifyContent: 'center', gap: 6 }]}><Text style={ui.textLink}>Mở trên web</Text><Ionicons name="open-outline" size={16} color={BRAND.navy} /></Pressable>
+
       </View> : null}
+      <View style={{ flexDirection: 'row', gap: 9, padding: 13, borderTopWidth: 1, borderColor: IOS.separator }}>
+        <Pressable accessibilityRole="button" accessibilityLabel={'Theo dõi đơn #' + item.id} onPress={() => openDetail(item.id, 'tracking')} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8, paddingVertical: 10 }]}><Ionicons name="navigate-outline" size={17} color={BRAND.orangeInk} /><Text style={[ui.secondaryText, { fontSize: 13 }]}>Theo dõi</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={'Quản lý đơn #' + item.id} onPress={() => openDetail(item.id, 'edit')} style={[ui.primaryButton, { flex: 1.2, minHeight: 44, paddingHorizontal: 8, paddingVertical: 10, backgroundColor: BRAND.orangeInk }]}><Text style={[ui.primaryText, { fontSize: 13 }]}>{['delivered', 'cancelled', 'returned'].includes(item.status) ? 'Thông tin đơn' : 'Xử lý đơn'}</Text></Pressable>
+      </View>
     </View>;
   };
   return <View style={{ flex: 1, minHeight: 0 }}>
     <View style={[ui.search, { marginBottom: 8, flexShrink: 0 }]}><Ionicons name="search" size={19} color={IOS.secondary} /><TextInput accessibilityLabel="Tìm đơn hàng" style={ui.searchInput} value={query} onChangeText={setQuery} placeholder="Mã đơn hoặc tên người mua" placeholderTextColor={IOS.secondary} autoCorrect={false} maxLength={200} returnKeyType="search" onSubmitEditing={Keyboard.dismiss} />{query ? <Pressable accessibilityRole="button" accessibilityLabel="Xóa tìm kiếm đơn hàng" onPress={() => setQuery('')} style={{ minWidth: 36, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="close-circle" size={19} color={IOS.secondary} /></Pressable> : null}</View>
     <View testID="order-filters" style={{ flexShrink: 0, minHeight: 62, paddingBottom: 10 }}><ScrollView ref={filters} horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 22, paddingVertical: 4, gap: 8, alignItems: 'center' }} style={{ flexGrow: 0, flexShrink: 0 }}>
-      {[{ key: 'all', label: 'Tất cả' }, ...ORDER_STATES].map(state => <Pressable key={state.key} accessibilityRole="button" accessibilityLabel={state.label} accessibilityState={{ selected: status === state.key }} onLayout={e => { chipPositions.current[state.key] = e.nativeEvent.layout.x; }} onPress={() => chooseStatus(state.key)} style={[ui.orderChip, state.key === status && { backgroundColor: BRAND.orangeSoft, borderColor: BRAND.orange }]}><Text style={[ui.orderChipText, state.key === status && { color: BRAND.orangeInk }]}>{state.label}</Text></Pressable>)}
+      {[{ key: 'all', label: 'Tất cả' }, ...ORDER_STATES].map(state => <Pressable key={state.key} accessibilityRole="button" accessibilityLabel={state.label} accessibilityState={{ selected: status === state.key }} onLayout={e => { chipPositions.current[state.key] = e.nativeEvent.layout.x; }} onPress={() => chooseStatus(state.key)} style={[ui.orderChip, state.key === status && { backgroundColor: BRAND.orangeSoft, borderColor: BRAND.orange }]}><Text style={[ui.orderChipText, state.key === status && { color: BRAND.orangeInk }]}>{state.label}{statusCounts ? '  ' + count(state.key === 'all' ? Object.values(statusCounts).reduce((sum, value) => sum + value, 0) : statusCounts[state.key] || 0) : ''}</Text></Pressable>)}
     </ScrollView></View>
-    <FlatList ref={list} testID="orders-list" data={items} keyExtractor={item => String(item.id)} renderItem={renderOrder} extraData={expanded} style={{ flex: 1 }} contentContainerStyle={[ui.sheetScroll, { paddingBottom: embedded ? dockContentInset(insets.bottom) : 24 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" initialNumToRender={8} maxToRenderPerBatch={6} windowSize={7}
+    <FlatList onScroll={event => { scrollPosition.current = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={64} ref={list} testID="orders-list" data={items} keyExtractor={item => String(item.id)} renderItem={renderOrder} extraData={expanded} style={{ flex: 1 }} contentContainerStyle={[ui.sheetScroll, { paddingBottom: embedded ? dockContentInset(insets.bottom) : 24 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" initialNumToRender={8} maxToRenderPerBatch={6} windowSize={7}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(0, true)} tintColor={BRAND.navy} />}
       ListHeaderComponent={<Text style={[ui.caption, { marginBottom: 12 }]}>{total === null ? 'Đang tải đơn hàng…' : count(total) + ' đơn hàng'}</Text>}
       ListEmptyComponent={!loading && !error ? <View style={ui.center}><Ionicons name="receipt-outline" size={36} color={IOS.tertiary} /><Text style={ui.loadingText}>Không tìm thấy đơn hàng</Text></View> : null}
       ListFooterComponent={<>{error ? <View style={ui.errorCard}><Text style={ui.error}>{error}</Text><Pressable accessibilityRole="button" onPress={() => void load(failedOffset.current)} style={ui.secondaryButton}><Text style={ui.secondaryText}>Thử lại</Text></Pressable></View> : null}{loading && !items.length || loadingMore ? <ActivityIndicator color={BRAND.navy} style={{ margin: 24 }} /> : !error && total !== null && items.length < total ? <Pressable accessibilityRole="button" onPress={() => void load(items.length)} style={ui.secondaryButton}><Text style={ui.secondaryText}>Xem thêm đơn hàng</Text></Pressable> : null}</>}
     />
-    <OrderEditor id={editingId} onClose={() => setEditingId(null)} onUpdated={() => { loadedAt.current = 0; void load(0); onChanged?.(); }} />
+    <OrderFeedback message={feedback} bottom={embedded ? dockContentInset(insets.bottom) : 12} />
+    <OrderEditor id={editingId} initialView={detailView} onClose={() => setEditingId(null)} onUpdated={updated => { setItems(previous => previous.flatMap(item => item.id !== updated.id ? [item] : status !== 'all' && updated.status !== status ? [] : [{ ...item, status: updated.status, customer_name: updated.shipping_name || item.customer_name, payment_status: updated.payment_status }])); loadedAt.current = 0; void load(0); onChanged?.(); showFeedback('Đơn #' + updated.id + ' · ' + (ORDER_STATES.find(item => item.key === updated.status)?.label || 'Đã lưu')); }} />
   </View>;
 }
