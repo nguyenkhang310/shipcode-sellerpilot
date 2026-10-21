@@ -25,7 +25,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
     void storage.clearCredentials().catch(() => {});
   };
-  const verify = async (value: string | null, version: number) => {
+  const verify = async (value: string, version: number) => {
     if (version !== epoch.current) return;
     setAccessToken(value);
     const result = await apiRequest<SellerIdentity>('/auth/me');
@@ -43,11 +43,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (version !== epoch.current) return;
         setBiometric(enabled);
         if (enabled) { setPhase('locked'); return; }
-        await verify(await storage.savedToken(false), version);
+        const saved = await storage.savedToken(false);
+        if (version !== epoch.current) return;
+        // A new install or an explicit logout has no session to verify.
+        if (!saved) { clearMemory(); setPhase('signed_out'); return; }
+        await verify(saved, version);
       } catch (e) {
         if (version !== epoch.current) return;
+        if (e instanceof ApiError && e.status === 401) {
+          // Do not send the same rejected Keychain token on every reload.
+          // Keep credentials on network/5xx failures so an outage cannot log a
+          // valid seller out permanently.
+          await storage.clearCredentials().catch(() => {});
+          if (version !== epoch.current) return;
+          setError('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        } else setError('Chưa kết nối được SellerPilot. Bạn có thể thử đăng nhập lại.');
         clearMemory(); setPhase('signed_out');
-        if (!(e instanceof ApiError && e.status === 401)) setError('Chưa kết nối được SellerPilot. Bạn có thể thử đăng nhập lại.');
       }
     })();
     const listener = AppState.addEventListener('change', next => {

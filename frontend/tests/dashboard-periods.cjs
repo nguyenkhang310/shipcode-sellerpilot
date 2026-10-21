@@ -1,7 +1,7 @@
 // Synthetic API only; run after npm run build and serve frontend/dist/web.
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
-const { snapshot, mockApi } = require('./management-fixture.cjs');
+const { snapshot, mockApi, enterApp } = require('./management-fixture.cjs');
 const path = require('node:path');
 const fs = require('node:fs');
 const output = process.env.QA_OUTPUT || path.resolve(__dirname, '../../docs/evaluations/dashboard-periods');
@@ -26,6 +26,7 @@ let browser, page;
     } catch (e) { if (!/closed|cancel|abort/i.test(e.message)) throw e; }
   });
   await page.goto(process.env.QA_APP_URL || 'http://127.0.0.1:5174');
+  await enterApp(page);
   const summary = page.getByTestId('period-summary'), scroll = page.getByTestId('management-scroll');
   const ready = days => page.getByTestId('period-summary').and(page.getByLabel(`Số liệu ${days} ngày`, { exact: true })).waitFor();
   const choose = label => page.getByRole('button', { name: label, exact: true }).click();
@@ -110,7 +111,7 @@ let browser, page;
     await page.getByRole('tab', { name: 'Quản lý', exact: true }).click();
   }
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
-  await page.reload(); await ready(1);
+  await page.reload(); await enterApp(page); await ready(1);
   await page.screenshot({ path: path.join(output, 'dark-reduced-motion.png') });
   checks.push('320/390/430 px, dark appearance, reduced motion and management tabs smoke checked');
   assert.deepEqual(errors, []);

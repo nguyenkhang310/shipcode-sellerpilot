@@ -87,6 +87,24 @@ Phục vụ bundle web ở 5174 như trên, rồi chạy:
 QA_API_ORIGIN=http://127.0.0.1:8124 node frontend/tests/auth-login.cjs
 ```
 
+`auth-transition.cjs` dùng cùng server QA 8124: kiểm tra vẽ đủ SHIP CODE trước
+khi hiện ảnh logo, ghi khoảng cách khung hình trên Chrome, chuyển cảnh sau xác
+thực, Giảm chuyển động và `401` xuất hiện ngay giữa chuyển cảnh. Chạy tuần tự
+với `auth-login.cjs`; khởi động lại **server QA** giữa hai bài để làm mới dữ liệu
+và bộ đếm đăng nhập. Không chạy song song vì bài hết hạn phiên ảnh hưởng cả shop QA.
+Ảnh/JSON nằm trong `docs/evaluations/auth-transition/`. Đo Chrome không đại diện
+cho tốc độ khung hình trên iPhone thật.
+
+Kiểm tra vòng đời phiên với React renderer riêng đã cài như hướng dẫn ở dưới:
+
+```sh
+QA_NODE_MODULES=/tmp/sellerpilot-qa/node_modules node --test frontend/tests/auth-session.cjs
+```
+
+Bài này mô phỏng Keychain/API: không token không gọi `/auth/me`, token bị từ chối
+chỉ kiểm tra một lần rồi xóa, mất mạng giữ phiên, chờ Face ID và phản hồi cũ không
+xóa phiên mới. Không đọc Keychain hoặc thông tin đăng nhập thật.
+
 Script xác minh server QA, dùng tài khoản tổng hợp riêng, kiểm tra trước đăng
 nhập không tải dữ liệu shop, sai mật khẩu, đăng xuất/thu hồi, hết hạn và không
 lưu token vào browser storage; ảnh riêng tư yêu cầu Bearer; chụp login cả sáng/tối
@@ -115,6 +133,15 @@ QA_NODE_MODULES=/tmp/sellerpilot-qa/node_modules node --test frontend/tests/dash
 
 React phát cảnh báo `react-test-renderer is deprecated`; bộ chạy này chỉ phục vụ
 QA, không phải dependency của app. Hook test không mô phỏng hiệu ứng cuộn native.
+
+`dashboard-native.cjs` dùng cùng React renderer để kiểm tra số tiền không phụ
+thuộc native auto-fit/khung rộng 0, cùng lớp tint luôn nằm trên GlassView/BlurView
+và nhánh Giảm độ trong suốt. Đây là kiểm tra cây component, không giả lập UIKit.
+`dashboard-visibility.cjs` chặn toàn bộ API bằng fixture, đăng nhập tổng hợp,
+kiểm tra số 0/số tiền dài ở 320/390/430/520px sáng/tối, logo 192px ở Trợ lý và
+sau đăng xuất. Chạy với bundle QA tại 5174; kết quả trong `docs/evaluations/`.
+`dashboard-periods`, `dashboard-live`, `dock-themes` cũng dùng đăng nhập fixture;
+không dùng tài khoản người bán thật.
 
 `app-audit`, `chat-scroll` và `chat-motion` chuyển các yêu cầu API/ảnh qua
 `qa-server.cjs` tới server giả lập 8123, kể cả khi bundle đang chứa địa chỉ API

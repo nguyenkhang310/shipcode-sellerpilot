@@ -1,7 +1,7 @@
 // Synthetic API + intercepted snapshots; no connected seller data is modified.
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
-const { snapshot, mockApi } = require('./management-fixture.cjs');
+const { snapshot, mockApi, enterApp } = require('./management-fixture.cjs');
 let browser, page;
 (async () => {
   browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless: true });
@@ -18,6 +18,7 @@ let browser, page;
     await route.fulfill({ status: 200, headers, json: { data } });
   });
   await page.goto(process.env.QA_APP_URL || 'http://127.0.0.1:5174', { waitUntil: 'networkidle' });
+  await enterApp(page);
   const counter = page.getByTestId('dashboard-order-count'), summary = page.getByTestId('period-summary');
   await counter.filter({ hasText: /^10$/ }).waitFor();
   const before = await summary.boundingBox();

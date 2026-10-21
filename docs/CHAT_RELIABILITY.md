@@ -58,6 +58,12 @@ luồng mới; chỉ sửa file trên đĩa không cập nhật một backend đ
 
 ## Tiếng Việt, bộ nhớ và tính giá
 
+Câu đọc ngắn như “Hôm nay được bao nhiêu đơn vậy?”, “Có món nào sắp hết không?”
+được xử lý trực tiếp. “Tuần này” bắt đầu từ thứ Hai, “tháng này” từ ngày 1,
+đến hiện tại theo giờ Việt Nam; không đồng nhất với 7/30 ngày gần nhất. Câu trả
+lời ghi rõ khoảng ngày. Đang soạn hàng vẫn có thể hỏi số liệu rồi quay lại bản
+nháp. “Khoan đã”, “lưu lại bản nháp” giữ nguyên nội dung; “hủy nháp” mới hủy.
+
 `5 xị` = 500.000đ, `hai củ rưỡi` = 2.500.000đ, `1tr2` = 1.200.000đ. Câu
 `bán 5 xị, còn 20 cái` chứa giá và tồn riêng; giá vốn, giá cũ, SKU và số model
 không được lấy làm giá bán. `5 rưỡi`, `500–600k` cần chốt rõ, không tự chọn

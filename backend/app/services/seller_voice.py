@@ -21,7 +21,10 @@ def read_reply(result, *, today: date, preferences: dict):
     concise = not rejects_brief and any(word in style for word in
         ('ngan gon', 'suc tich', 'that ngan', 'khong dai dong', 'khong can dai dong'))
     if tool == 'get_shop_summary':
-        if facts.get('days', 1) > 1:
+        if facts.get('calendar_period'):
+            label = 'Tuần này' if facts['calendar_period'] == 'week' else 'Tháng này'
+            period = label + ' (' + date.fromisoformat(facts['from_date']).strftime('%d/%m') + '–' + date.fromisoformat(facts['to_date']).strftime('%d/%m') + ')'
+        elif facts.get('days', 1) > 1:
             period = f"Trong {facts['days']} ngày qua"
         else:
             day = date.fromisoformat(str(facts['date']))

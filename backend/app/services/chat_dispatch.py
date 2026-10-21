@@ -59,7 +59,7 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
             return ChatResponse(data=await advance_product_draft(session, shop, provider, active_draft,
                 message=payload.message, upload_dir=settings.shop_product_upload_dir))
         continue_edit=bool(pending_edit(previous) and not planning_request(payload.message)
-            and (extract_sku(payload.message.lower()) or re.match(r'\s*(?:tiêu đề|tên sản phẩm|mô tả|giá|tồn)\s*[:=]',payload.message,re.I)
+            and (extract_sku(payload.message.lower()) or re.match(r'\s*(?:tieu de|ten san pham|mo ta|gia|ton|so luong)\s*[:=]',plain(payload.message))
                  or parse_fallback(payload.message,today=datetime.now(shop.timezone).date()).intent=='unknown'))
         if (is_product_edit_request(payload.message) or continue_edit) and (
                 active_draft is None or extract_sku(payload.message.lower()) or 'đã đăng' in payload.message.lower()):

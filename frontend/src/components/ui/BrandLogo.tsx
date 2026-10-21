@@ -1,6 +1,5 @@
 import { Image, View } from 'react-native';
-
-const LOGO = require('../../../assets/shipcode-logo-transparent.png');
+import { SHIPCODE_MARK } from './brandAssets';
 
 export function BrandLogo({ size = 38 }: { size?: number }) {
 
@@ -13,7 +12,7 @@ export function BrandLogo({ size = 38 }: { size?: number }) {
         justifyContent: 'center',
       }}
     >
-      <Image source={LOGO} style={{ width: size, height: size }} resizeMode="contain" fadeDuration={0} />
+      <Image accessibilityLabel="ShipCode" source={SHIPCODE_MARK} defaultSource={SHIPCODE_MARK} style={{ width: size, height: size }} resizeMode="contain" fadeDuration={0} />
     </View>
   );
 }

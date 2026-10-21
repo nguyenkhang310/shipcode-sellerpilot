@@ -10,8 +10,10 @@ from app.ai.contracts import AIProviderError
 from app.ai.edit_contracts import ProductEditCopy
 from app.ai.fallback import extract_sku
 from app.ai.listing_contracts import ListingCopy
-from app.ai.money import money_mentions, plain
+from app.ai.money import NUMBER, money_mentions, plain
 from app.ai.small_talk import social_reply
+from app.ai.quick_reads import read_text
+from app.ai.quantities import quantity_value
 from app.integrations import management
 from app.integrations.product_edits import editable_product
 from app.integrations.ute_mall import ShopItemNotFoundError
@@ -31,17 +33,17 @@ def is_product_edit_request(message):
     if re.search(r'\b(?:khong|dung|chua)\s+(?:(?:can|muon)\s+)?(?:sua|doi|cap nhat|toi uu|viet lai)\b',text):
         return False
     return bool(re.search(r'\b(?:sua|doi|cap nhat|toi uu|viet lai|soan lai)\b',text)
-        and re.search(r'\b(?:tieu de|ten san pham|doi ten|sua ten|cap nhat ten|mo ta|ton(?: kho)?|so luong ton)\b',text))
+        and re.search(r'\b(?:tieu de|ten san pham|doi ten|sua ten|cap nhat ten|mo ta|ton(?: kho)?|so luong(?: ton)?)\b',text))
 
 
 def _text_value(message,label):
-    match=re.search(label+r'(?:\s+(?:cho|của))?(?:\s+sku\s+[a-z0-9._-]+)?\s*(?:thành|là|[:=])\s*',message,re.I)
+    match=re.search(label+r'(?:\s+(?:cho|của|cua))?(?:\s+sku\s+[a-z0-9._-]+)?\s*(?:thành|thanh|là|la|[:=])\s*',message,re.I)
     if not match:
         return None
     quoted=re.match(r'["“]([\s\S]*?)["”]',message[match.end():])
     if quoted:
         return quoted[1].strip()
-    boundary=r'(?:\n|[,;])\s*(?=(?:(?:giá(?: bán| mới)?|tồn(?: kho)?)\s*(?:(?:[:=]|thành|là|còn)\s*)?\d|(?:mô tả|tiêu đề|tên sản phẩm)\s*(?:[:=]|thành|là)))'
+    boundary=rf'(?:\n|[,;])\s*(?=(?:(?:giá(?: bán| mới)?|gia(?: ban| moi)?|tồn(?: kho)?|ton(?: kho)?|số lượng|so luong)\s*(?:(?:[:=]|thành|thanh|là|la|còn|con)\s*)?{NUMBER}\b|(?:mô tả|mo ta|tiêu đề|tieu de|tên sản phẩm|ten san pham)\s*(?:[:=]|thành|thanh|là|la)))'
     value=re.split(boundary,message[match.end():],maxsplit=1,flags=re.I)[0]
     value=value.strip().strip('"“”')
     return value if value else None
@@ -57,18 +59,21 @@ def _mask_content(message,changes):
 
 def local_changes(message):
     changes={}
-    for field,label in (('name',r'(?:tiêu đề|tên(?: sản phẩm)?|đổi tên)'),('description',r'mô tả')):
+    for field,label in (('name',r'(?:tiêu đề|tieu de|tên(?: sản phẩm)?|ten(?: san pham)?|đổi tên|doi ten)'),('description',r'(?:mô tả|mo ta)')):
         value=_text_value(message,label)
         if value is not None:
             changes[field]=value
     commerce=_mask_content(message,changes)
-    for match in re.finditer(r'giá(?:\s+(?:bán|mới))?(?:\s+sku\s+[a-z0-9._-]+)?\s*(?:(?::|=|thành|là|xuống|lên|còn)\s*)?',commerce,re.I):
+    for match in re.finditer(r'(?:giá|gia)(?:\s+(?:bán|ban|mới|moi))?(?:\s+sku\s+[a-z0-9._-]+)?\s*(?:(?::|=|thành|thanh|là|la|xuống|xuong|lên|len|còn|con)\s*)?',commerce,re.I):
         mentions=money_mentions(commerce[match.end():])
         if mentions and mentions[0].start==0 and mentions[0].value is not None:
             changes['price_vnd']=mentions[0].value
-    stock=re.search(r'(?:tồn(?: kho)?|số lượng tồn)(?:\s+sku\s+[a-z0-9._-]+)?\s*(?:(?::|=|thành|là|còn)\s*)?(\d{1,7})(?![\d.,])',commerce,re.I)
+    stock=re.search(r'(?:tồn(?: kho)?|ton(?: kho)?|số lượng(?: tồn)?|so luong(?: ton)?)(?:\s+sku\s+[a-z0-9._-]+)?\s*(?:(?::|=|thành|thanh|là|la|còn|con)\s*)?',commerce,re.I)
     if stock:
-        changes['stock']=int(stock[1])
+        tail=re.split(r'[\n;]|\s*,\s*(?=[^\W\d_])',commerce[stock.end():],maxsplit=1)[0]
+        value=quantity_value(read_text(tail))
+        if value is not None:
+            changes['stock']=value
     return changes
 
 
@@ -96,6 +101,9 @@ async def handle_product_edit(session,shop,provider,*,message,conversation_id=No
     runs=recent_runs(session,shop,conversation_id)
     history=history_messages(runs)
     original=pending_edit(runs)
+    cancelled=bool(original and re.fullmatch(
+        r'(?:(?:minh|toi|em) )?(?:(?:thoi )?khong sua nua|huy (?:yeu cau sua|chinh sua)|bo chinh sua|'
+        r'(?:dung|chua|khong)(?: can| muon)? (?:sua|doi|cap nhat|toi uu|viet lai)\b.*)',read_text(message)))
     instruction=(original+'\n'+message) if original else message
     bare_sku=extract_sku(message.lower()) if re.fullmatch(r'(?:sku\s*[:#-]?\s*)?[a-z0-9._-]+',message.strip(),re.I) else None
     if original and bare_sku:
@@ -120,7 +128,9 @@ async def handle_product_edit(session,shop,provider,*,message,conversation_id=No
             facts['items']=found['items']
     proposal=None
     mode,source,model,reason='ai','deterministic_parser',None,None
-    if not sku:
+    if cancelled:
+        answer='Mình đã bỏ yêu cầu sửa đang chờ. Sản phẩm trong shop vẫn giữ nguyên.'
+    elif not sku:
         facts.update(missing_fields=['sku'],pending_edit_message=instruction)
         choices='\n'+'\n'.join(f"• {p['name']} — SKU {p['sku']}" for p in facts.get('items',[])) if facts.get('items') else ''
         answer='Bạn muốn sửa sản phẩm nào? Gửi SKU hoặc tên để mình tìm đúng món nhé.'+choices
@@ -135,10 +145,19 @@ async def handle_product_edit(session,shop,provider,*,message,conversation_id=No
         else:
             facts['selected_product']=product
             changes=local_changes(instruction)
+            if original:
+                # The new reply wins over a value in the unfinished request.
+                # A bare count answers stock only when stock is what we asked.
+                changes.update(local_changes(message))
+                last_edit=next((run for run in reversed(runs) if run.intent=='update_product'),None)
+                waiting=json.loads(last_edit.facts_json).get('missing_fields',[]) if last_edit else []
+                count=quantity_value(read_text(message)) if waiting==['stock'] else None
+                if count is not None:
+                    changes['stock']=count
             request_text=plain(_mask_content(instruction,changes)).lower()
             requested={field for field,pattern in (
                 ('name',r'tieu de|ten san pham|doi ten|sua ten|cap nhat ten'),('description',r'mo ta'),
-                ('stock',r'\bton(?: kho)?\b|so luong ton'),('price_vnd',r'gia ban|gia moi|doi gia|sua gia|gia\s*(?:[:=]|thanh|la)')) if re.search(pattern,request_text)}
+                ('stock',r'\bton(?: kho)?\b|so luong(?: ton)?'),('price_vnd',r'gia ban|gia moi|doi gia|sua gia|gia\s*(?:[:=]|thanh|la)')) if re.search(pattern,request_text)}
             rewrite=bool(re.search(r'toi uu|viet lai|soan lai|tu viet|hay hon',plain(instruction).lower()))
             missing=requested-changes.keys()
             if missing & {'name','description'} and callable(getattr(provider,'compose_product_edit',None)):

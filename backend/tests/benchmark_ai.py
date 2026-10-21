@@ -84,6 +84,10 @@ async def main():
                     ('orders', 'Hom nay chot duoc may don?'),
                     ('inventory', 'Bạn ơi, kiểm tra kho giúp mình nhé'),
                     ('sku', 'SKU SEED-PHONE còn mấy cái?'),
+                    ('everyday_order_wording', 'Hôm nay được bao nhiêu đơn vậy?'),
+                    ('everyday_low_stock_wording', 'Có món nào sắp hết không?'),
+                    ('calendar_week', 'Doanh thu tuần này'),
+                    ('calendar_month', 'Doanh thu tháng này'),
                 ]:
                     await measure(label, message, quick=True)
                 await measure('advice', 'Dựa trên số liệu shop, gợi ý 2 việc cần ưu tiên hôm nay. Trả lời ngắn gọn, không cần kế hoạch dài.')

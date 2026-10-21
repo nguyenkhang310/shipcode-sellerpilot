@@ -1,7 +1,7 @@
 // Theme regressions use an isolated browser and intercepted synthetic APIs.
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-const {snapshot,mockApi}=require('./management-fixture.cjs');
+const {snapshot,mockApi,enterApp}=require('./management-fixture.cjs');
 const output=path.resolve(__dirname,'../../docs/evaluations/dock-themes');fs.mkdirSync(output,{recursive:true});
 let browser,page;
 (async()=>{
@@ -10,6 +10,7 @@ let browser,page;
  const errors=[],measurements=[];page.on('pageerror',e=>errors.push(e.message));
  await mockApi(page,(r,d,h)=>r.fulfill({headers:h,json:{data:snapshot(d)}}));
  await page.goto(process.env.QA_APP_URL||'http://127.0.0.1:5174');
+ await enterApp(page);
  await page.getByRole('tab',{name:'SellerPilot',exact:true}).click();
  const input=page.getByRole('textbox',{name:'Nhắn cho SellerPilot',exact:true});await input.fill('Bản nháp giữ qua nhiều lần đổi giao diện');
  for(const width of [320,390,430,520]){
@@ -45,6 +46,7 @@ let browser,page;
  await page.getByRole('tab',{name:'SellerPilot',exact:true}).click();
  assert.equal(await input.inputValue(),'Bản nháp giữ qua nhiều lần đổi giao diện');
  await page.reload();
+ await enterApp(page);
  await page.getByRole('tab',{name:'Shop',exact:true}).click();
  assert.equal(await page.getByRole('switch',{name:'Giao diện tối',exact:true}).isChecked(),true,'Saved appearance must survive reloading');
  assert.deepEqual(errors,[]);const report={checks:['16 light/dark switches at 320/390/430/520px preserve readable frost, visible edge, backdrop and selected tab','Theme changes preserve the unsent chat draft','Saved appearance survives reloading'],measurements,errors};

@@ -30,8 +30,8 @@ lại bootstrap trên dữ liệu đang dùng.
 1. Cài bản native lên iPhone đã thiết lập Face ID và mật mã thiết bị.
 2. Đăng nhập bằng mật khẩu lần đầu.
 3. Vào **Shop → Tài khoản & bảo mật → Mở khóa bằng Face ID**.
-4. Đưa app xuống nền rồi quay lại; chạm **Tiếp tục với Face ID**. Có thể chọn
-   **Dùng mật khẩu** khi hủy xác thực, đổi sinh trắc học hoặc phiên hết hạn.
+4. Đưa app xuống nền rồi quay lại; chạm **Mở khóa bằng Face ID**. Có thể chọn
+   **Dùng mật khẩu tài khoản** khi hủy xác thực, đổi sinh trắc học hoặc phiên hết hạn.
 
 Phiên được lưu trong iOS Keychain với `requireAuthentication` và
 `WHEN_UNLOCKED_THIS_DEVICE_ONLY`. Đọc phiên yêu cầu sinh trắc học do iOS quản
@@ -79,6 +79,9 @@ và mã native `expo-secure-store` đang khóa trong package-lock.
 - Web chỉ giữ token trong bộ nhớ: tải lại/đóng trang cần đăng nhập lại; không
   lưu trong localStorage/sessionStorage. Native dùng SecureStore. Bản nháp
   hội thoại trên thiết bị tách theo API, shop và tài khoản.
+- Khi không có token đã lưu, app mở đăng nhập mà không gọi `/auth/me`. Nếu
+  token đã lưu bị trả `401`, app xóa phiên khỏi SecureStore để reload không
+  gửi lại token bị từ chối. Lỗi mạng/5xx không xóa phiên đã lưu.
 - API trả `Cache-Control: no-store`. Ảnh chat chưa đăng không truy cập được
   qua static công khai; ảnh được gắn vào sản phẩm đã đăng vẫn là ảnh catalog.
 - Đăng nhập giới hạn bền vững trong SQLite: 10 lượt/tài khoản và 60 lượt/IP
@@ -92,6 +95,13 @@ tiết theo từng chức danh hoặc cổng đăng ký nhiều shop. Khi triể
 cần HTTPS cho API/web, CORS đúng origin, bảo vệ máy chủ/database và proxy rate
 limit. Không coi CORS hay Face ID là thay thế cho xác thực server.
 
+Khi khởi động, app vẽ viền logo gồm cả SHIP và CODE, chuyển sang ảnh logo gốc,
+giữ ảnh đầy đủ một nhịp rồi mở form. Chỉ phần nét SVG dùng cập nhật JS; phần
+hiện ảnh và phóng/mờ dùng native driver trên iOS/Android. Không chạy intro lại
+khi đăng xuất. Tùy chọn Giảm chuyển động bỏ qua vẽ/phóng logo và chuyển cảnh.
+Đăng nhập thành công mới hiện dấu tích và chuyển vào Quản lý; hết hạn hoặc
+đăng xuất gỡ nội dung shop ngay, không giữ màn hình riêng tư để chạy hiệu ứng.
+
 ## Kiểm thử
 
 `npm run test:auth` kiểm tra lưu Keychain, lỗi/hủy sinh trắc học, chuyển trạng
@@ -100,6 +110,6 @@ không giả vờ đã chạy camera Face ID. Backend dùng shop tạm để ki�
 băm phiên, thu hồi, hết hạn, đổi mật khẩu, giới hạn đăng nhập và ảnh riêng tư.
 
 Browser thật chạy với server `backend/tests/auth_ui_server.py` ở cổng 8124 và
-`frontend/tests/auth-login.cjs`: xem hướng dẫn frontend/tests/README.md.
+`frontend/tests/auth-login.cjs`, `auth-transition.cjs`: xem hướng dẫn frontend/tests/README.md.
 Trước khi demo trên iPhone thật cần kiểm tra: cho phép/từ chối Face ID, xác thực
 sai/hủy, chuyển nền, khởi động lại app, mất mạng, đăng xuất và đổi sinh trắc học.

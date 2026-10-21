@@ -342,6 +342,9 @@ def enrich_ai_command(
     if command.intent == "shop_summary":
         data["day"] = extract_day(normalized_message, today=today)
         data["days"] = fallback.days or command.days
+        # Calendar meaning comes only from a complete seller read, never a guess
+        # in classifier output. A month can contain 31 days.
+        data['calendar_period'] = fallback.calendar_period
     if fallback.intent == "product_search":
         data["query"] = fallback.query
         data['min_price_vnd'] = fallback.min_price_vnd
@@ -358,15 +361,21 @@ def execute_command(
     command: ParsedCommand,
 ) -> dict[str, Any]:
     if command.intent == "shop_summary":
-        if command.days and command.days > 1:
-            stats = management.dashboard(shop, command.days)
+        if command.calendar_period or command.days and command.days > 1:
+            anchor = command.day or datetime.now(shop.timezone).date()
+            days = (anchor.weekday() + 1 if command.calendar_period == 'week' else anchor.day) if command.calendar_period else command.days
+            stats = management.dashboard(shop, days, selected_date=anchor if command.calendar_period else None)
             facts = {key: stats[key] for key in ("days", "from_date", "to_date", "order_value_vnd", "order_count", "average_order_vnd", "delivered_value_vnd", "change_percent")}
-            answer = (f"Trong **{command.days} ngày qua**, shop có **{stats['order_count']} đơn** hợp lệ.\n\n"
+            label = 'Tuần này' if command.calendar_period == 'week' else 'Tháng này' if command.calendar_period else f'{days} ngày qua'
+            if command.calendar_period:
+                facts['calendar_period'] = command.calendar_period
+                label += f" ({format_day(stats['from_date'])}–{format_day(stats['to_date'])})"
+            answer = (f"**{label}**, shop có **{stats['order_count']} đơn** hợp lệ.\n\n"
                       f"• Giá trị đơn hàng: **{format_vnd(stats['order_value_vnd'])}**\n"
                       f"• Giá trị trung bình: **{format_vnd(stats['average_order_vnd'])}/đơn**\n"
                       f"• Giá trị đơn đã giao: **{format_vnd(stats['delivered_value_vnd'])}**\n\n"
                       "Giá trị đơn hàng chưa phải toàn bộ tiền đã thu; không bao gồm đơn hủy hoặc hoàn.")
-            return response(answer, "get_shop_summary", {"days": command.days}, facts)
+            return response(answer, "get_shop_summary", {"days": days, **({'calendar_period': command.calendar_period} if command.calendar_period else {})}, facts)
         summary_day = command.day or datetime.now(shop.timezone).date()
         summary = shop.summary(summary_day, as_of=datetime.now(shop.timezone) if command.days == 1 else None)
         facts = {

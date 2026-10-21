@@ -67,6 +67,13 @@ phạm vi này. Giá/tồn của sản phẩm có phân loại cần SKU phân l
 thầm đổi tất cả phân loại từ SKU cha. Các trường giống dữ liệu hiện tại không cần
 ghi lại. Mỗi thẻ cho xem toàn bộ nội dung dài và có **Bỏ qua / Xác nhận sửa**.
 
+Lệnh không dấu như `sua tieu de SKU A001 thanh Giay the thao` được nhận diện
+trong cùng luồng. Tồn `2.000` được hiểu là 2.000 sản phẩm, tồn `0` vẫn hợp lệ;
+số lẻ/khoảng như `2,5`, `2 hoặc 3` cần hỏi rõ, không lấy một phần con số. Sau
+câu hỏi chỉ còn thiếu tồn, có thể trả lời ngắn `2.000` hoặc `ton: 2.000`. Khi
+đang hỏi chọn món để sửa, `Thôi không sửa nữa` bỏ yêu cầu đang chờ; không tạo
+đề xuất mới từ câu phủ định. Đề xuất đã tạo vẫn được duyệt/bỏ qua trên thẻ.
+
 ## Đồng bộ và bảo vệ dữ liệu
 
 - Backend đối chiếu lại các trường đang sửa ngay trong transaction của shop.

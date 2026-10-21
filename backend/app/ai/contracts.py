@@ -38,6 +38,7 @@ class ParsedCommand(BaseModel):
     min_price_vnd: int | None = Field(default=None, ge=0, le=1_000_000_001)
     max_price_vnd: int | None = Field(default=None, ge=0, le=1_000_000_000)
     days: int | None = Field(default=None, ge=1, le=30)
+    calendar_period: Literal['week', 'month'] | None = None
 
     @field_validator("sku")
     @classmethod

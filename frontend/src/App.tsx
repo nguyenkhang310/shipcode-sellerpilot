@@ -7,9 +7,11 @@ import { ThemeProvider } from './theme/ThemeProvider';
 import { isShopeeExtension } from './integrations/extension';
 import { ExtensionShell } from './integrations/ExtensionShell';
 import { AuthProvider } from './features/auth/AuthProvider';
-import { AuthGate } from './features/auth/LoginScreen';
+import { AuthGate } from './features/auth/AuthGate';
+import { warmBrandAssets } from './components/ui/brandAssets';
 
 export default function App() {
+  useEffect(() => { void warmBrandAssets(); }, []);
   const systemScheme = useColorScheme();
   const [darkMode, setDarkMode] = useState(systemScheme === 'dark');
   const manualChoice = useRef(false), storedChoice = useRef(false);

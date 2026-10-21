@@ -5,12 +5,14 @@ import { dockAppearance } from './dockAppearance';
 
 export function DockMaterial({ dark, opaque }: { dark: boolean; opaque: boolean }) {
   const material = dockAppearance(dark);
-  if (opaque) return <View style={[StyleSheet.absoluteFill, { backgroundColor: material.solid }]} />;
-  if (Platform.OS === 'ios' && isGlassEffectAPIAvailable() && isLiquidGlassAvailable()) {
-    // Recreate only the native effect when the app theme changes. Keep the
-    // navigation and its gesture/selection state mounted. No opaque overlay:
-    // UIKit owns the tint, contrast, refraction and material appearance.
-    return <GlassView key={dark ? 'dark-glass' : 'light-glass'} glassEffectStyle="regular" colorScheme={dark ? 'dark' : 'light'} tintColor={material.nativeTint} style={StyleSheet.absoluteFill} />;
-  }
-  return <BlurView key={dark ? 'dark-blur' : 'light-blur'} intensity={65} tint={dark ? 'systemUltraThinMaterialDark' : 'systemUltraThinMaterialLight'} style={StyleSheet.absoluteFill} />;
+  if (opaque) return <View testID="dock-material" style={[StyleSheet.absoluteFill, { backgroundColor: material.solid }]} />;
+  const glass = Platform.OS === 'ios' && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
+  return <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+    {glass
+      ? <GlassView key={dark ? 'dark-glass' : 'light-glass'} glassEffectStyle="regular" colorScheme={dark ? 'dark' : 'light'} tintColor={material.nativeTint} style={StyleSheet.absoluteFill} />
+      : <BlurView key={dark ? 'dark-blur' : 'light-blur'} intensity={65} tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'} style={StyleSheet.absoluteFill} />}
+    {/* A shared opacity floor keeps chart labels from showing through when
+        UIKit changes its glass contrast or the effect is inside a mask. */}
+    <View testID="dock-material" style={[StyleSheet.absoluteFill, { backgroundColor: material.frost }]} />
+  </View>;
 }
