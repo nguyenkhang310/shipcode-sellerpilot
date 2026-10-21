@@ -83,6 +83,7 @@ async def main():
                     await measure(label, message, quick=True)
                 await measure('advice', 'Dựa trên số liệu shop, gợi ý 2 việc cần ưu tiên hôm nay. Trả lời ngắn gọn, không cần kế hoạch dài.')
                 await measure('pricing', 'Giá vốn 5 xị, đóng gói 20k mỗi đơn, phí sàn 10%. Nếu bán 1 củ thì còn lời bao nhiêu?')
+                await measure('connection_question', 'Có kết nối được không?')
                 await measure('listing_start_without_product', 'Đăng sản phẩm mới lên shop, giúp mình soạn tiêu đề và mô tả.')
                 upload = await api.post('/api/v1/product-drafts/images-data', json={
                     'images_base64': [base64.b64encode(synthetic_keyboard_png()).decode()]})
@@ -90,6 +91,7 @@ async def main():
                     raise RuntimeError('Không tạo được ảnh QA; dừng thay vì dùng ảnh của shop.')
                 await measure('image_listing', 'Bán sản phẩm trong ảnh giá 5 xị, kho 8 chiếc. Tự viết tên và mô tả theo hình, không bịa thông số.',
                               upload.json()['data']['conversation_id'], listing=True)
+                await measure('listing_acknowledgement', 'cảm ơn nhé', upload.json()['data']['conversation_id'], quick=True)
                 await measure('image_followup_here_it_is', 'đây nè', upload.json()['data']['conversation_id'], listing=True)
     report = {'tested_at': datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')).isoformat(),
               'timeout_seconds': settings.gemini_generation_timeout_seconds, 'cases': results}

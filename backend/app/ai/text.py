@@ -3,6 +3,23 @@ import json
 import re
 
 
+def reply_format_issue(value: str) -> str | None:
+    if not value.strip():
+        return 'empty_answer'
+    candidate = value.strip()
+    fenced = re.fullmatch(r'```(?:json)?\s*([\s\S]*?)\s*```', candidate, re.I)
+    try:
+        envelope = json.loads(fenced.group(1) if fenced else candidate)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(envelope, str) and not envelope.strip():
+        return 'empty_answer'
+    if isinstance(envelope, dict) and set(envelope) == {'answer'}:
+        if not isinstance(envelope['answer'], str) or not envelope['answer'].strip():
+            return 'invalid_answer_envelope'
+    return None
+
+
 def assistant_text(value: str) -> str:
     """Some CLI outputs nest serialized ChatAnswer inside its answer field.
 

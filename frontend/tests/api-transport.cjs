@@ -84,3 +84,15 @@ test('cancel uses an independent request and gallery uploads carry a stable ID',
   await load('./sellerPilot').uploadProductImages([{uri:'local', base64:'abcd'}], 'conversation', undefined, 'upload-id');
   assert.equal(JSON.parse(calls[1][1].body).request_id, 'upload-id');
 });
+
+test('terminal upload/chat failures release pending work; transient errors keep its identity', () => {
+  const {load, ApiError} = loadApi();
+  const {isTerminalChatError} = load('./chatRequests');
+  for (const code of ['chat_cancelled','chat_interrupted','chat_failed','chat_timeout','conversation_deleted']) {
+    assert.equal(isTerminalChatError(new ApiError(409, 'Đã dừng', code)), true);
+  }
+  for (const error of [new TypeError('offline'), new ApiError(408, 'timeout'),
+    new ApiError(409, 'Đang xử lý', 'conversation_busy'), new ApiError(429, 'Đông yêu cầu')]) {
+    assert.equal(isTerminalChatError(error), false);
+  }
+});

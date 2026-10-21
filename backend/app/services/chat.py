@@ -21,7 +21,8 @@ from app.ai.fallback import (
 from app.ai.money import money_mentions, plain
 from app.ai.catalog_query import catalog_lookup
 from app.ai.quick_reads import quick_read, read_text, simple_pricing_read
-from app.ai.text import assistant_text
+from app.ai.text import assistant_text, reply_format_issue
+from app.ai.small_talk import social_reply
 from app.integrations.ute_mall import ShopItemNotFoundError, UTEMallRepository
 from app.integrations import management
 from app.services.conversations import recent_runs, resolve_message, history_messages
@@ -42,6 +43,9 @@ logger = logging.getLogger(__name__)
 
 
 def reply_issue(answer: str, facts: dict | None = None, *, seller_context: str = '') -> str | None:
+    format_issue = reply_format_issue(answer)
+    if format_issue:
+        return format_issue
     if re.search(r'đạt giới hạn số bước|hết bước xử lý|maximum steps reached', answer, re.I):
         return 'internal_agent_message'
     for match in re.finditer(r"\bđã\s+(?:cập nhật|đổi giá|thay đổi giá|đăng bán|đăng sản phẩm|đăng video|lên lịch|chạy quảng cáo|gửi tin|xác nhận đơn|hủy đơn)", answer, re.IGNORECASE):
@@ -159,8 +163,8 @@ async def handle_chat(
         command = ParsedCommand(intent="unknown")
     if order_read:
         command = ParsedCommand(intent='unknown')
-    direct_reply = bool(order_read and not order_generation) or catalog_read or bool(getattr(ai_provider, 'prefer_direct_facts', False)) and (
-        bool(simple) or is_exact_fact_question(message, command)
+    direct_reply = bool(simple) or bool(order_read and not order_generation) or catalog_read or bool(getattr(ai_provider, 'prefer_direct_facts', False)) and (
+        is_exact_fact_question(message, command)
     )
     if command.intent in ('sales_advice', 'unknown') and not command.days:
         days = reporting_days(message)
@@ -553,11 +557,10 @@ def execute_command(
 
 
 def simple_reply(message, runs):
+    social = social_reply(message)
+    if social:
+        return social
     text = read_text(message)
-    if text in {'chao', 'chao ban', 'xin chao', 'xin chao ban', 'hello', 'hi', 'alo', 'helo'}:
-        return "Chào bạn, mình là SellerPilot của ShipCode. Hôm nay bạn muốn mình giúp gì cho shop?"
-    if text in {'cam on', 'cam on ban', 'cam on nhe', 'thanks', 'thank you', 'ok', 'oke', 'okie', 'duoc roi'}:
-        return "Rất sẵn lòng. Khi cần xem số liệu hoặc xử lý việc tiếp theo cho shop, cứ nhắn mình nhé."
     if runs and any(run.proposal_id for run in runs[-3:]) and re.search(r'^(?:(?:minh|toi)\s+)?(?:xac nhan|dong y|confirm)\b', text):
         return "Để tránh thay đổi nhầm, bạn hãy bấm **Xác nhận đổi giá** trên đúng thẻ đề xuất. Tin nhắn này chưa thay đổi dữ liệu."
     return None

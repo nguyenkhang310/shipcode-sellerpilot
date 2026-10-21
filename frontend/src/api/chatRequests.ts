@@ -25,6 +25,9 @@ export const cancelChatRequest = (id: string) =>
     method: 'POST', timeoutMs: 20_000,
   });
 
+export const isTerminalChatError = (error: unknown): error is ApiError =>
+  error instanceof ApiError && ['chat_cancelled', 'chat_interrupted', 'chat_failed', 'chat_timeout', 'conversation_deleted'].includes(error.code || '');
+
 export async function recoverChatRequest(id: string, signal?: AbortSignal) {
   try {
     const { data } = await getChatRequest(id, signal);

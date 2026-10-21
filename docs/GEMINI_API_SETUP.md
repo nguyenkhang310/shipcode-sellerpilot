@@ -98,6 +98,17 @@ lịch sử cũ được làm sạch khi đọc mà không sửa nhật ký gố
 Audit ghi provider/model thực sự tạo câu trả lời, kể cả khi chuyển sang Groq.
 Không ghi key hoặc prompt đầy đủ vào log chẩn đoán provider.
 
+Lời chào/cảm ơn được xử lý trực tiếp, kể cả khi đang soạn sản phẩm; bản nháp và
+yêu cầu sửa đang chờ vẫn được giữ. Câu “có kết nối được không?” đi luồng hội thoại,
+không bị nhận nhầm thành tìm hàng. Có thể bắt đầu đăng sản phẩm bằng chữ rồi gửi
+ảnh sau, không bắt buộc chọn ảnh ngay khi gửi câu lệnh.
+
+Phản hồi model rỗng/bị cắt có một lần sửa trong cùng giới hạn thời gian. Nếu vẫn
+không hợp lệ, backend giữ dữ kiện đã xác nhận và trả phương án tiếp tục rõ ràng;
+không hiển thị bong bóng rỗng hoặc dùng phần JSON đang dở. Lỗi chặn nội dung/công
+cụ không nằm trong nhóm thử sửa này. Tải ảnh bị gián đoạn giữ ảnh để gửi lại;
+phản hồi bị mất nhưng server đã xử lý được khôi phục theo ID cũ.
+
 ## Hạn mức và kiểm thử
 
 Free Tier không có nghĩa là không giới hạn. Xem quota trực tiếp trong project:

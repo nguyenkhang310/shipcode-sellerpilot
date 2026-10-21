@@ -8,7 +8,7 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { forwardRef, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Share, Text, TextInput, useWindowDimensions, View } from 'react-native';
-import { cancelChatRequest, createMessageId, recoverChatRequest } from '../../api/chatRequests';
+import { cancelChatRequest, createMessageId, isTerminalChatError, recoverChatRequest } from '../../api/chatRequests';
 import { API_URL, ApiError } from '../../api/client';
 import { inExtension, isShopeeExtension } from '../../integrations/extension';
 import { decidePriceProposal, decideProductDraft, decideProductEdit, deleteConversation, pinConversation, getConversation, getConversations, productDraftImageUrl, sendSellerMessage, uploadProductImages } from '../../api/sellerPilot';
@@ -267,7 +267,12 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
         }]);
       } catch (e) {
         if (generation.current !== version) return;
-        setError(readableError(e)); setFailedMessage(entry.text); return;
+        if (isTerminalChatError(e)) {
+          await clearPending(entry);
+          setFailedMessage(''); // Retained attachments can now be sent as a fresh upload.
+          if (e.code === 'conversation_deleted') { remember(null); setMessages([]); }
+        } else setFailedMessage(entry.text);
+        setError(readableError(e)); return;
       } finally { if (generation.current === version) { lock.current = false; setBusy(false); } }
       return send(entry.text, true);
     }
@@ -281,14 +286,6 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     }
     if (!text) return;
     if (retry && pendingChat.current?.phase === 'cancelling') { await stop(); return; }
-    const activeProductDraft = [...messages].reverse().find(item =>
-      item.response?.product_draft && ['collecting', 'ready'].includes(item.response.product_draft.status)
-    )?.response?.product_draft;
-    if (!retry && !activeProductDraft && /^(?:đăng|tạo|thêm)(?:\s+một)?\s+sản phẩm(?:\s+mới|\s+từ ảnh)?[.!]?$/i.test(text)) {
-      setDraft('');
-      await pickProductImage();
-      return;
-    }
     lock.current = true; setBusy(true);
     draftHydrated.current = true;
     if (!retry) setDraft('');
@@ -317,7 +314,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       if (e instanceof ApiError && e.code === 'conversation_deleted') {
         await clearPending(entry); remember(null); setMessages([]); setFailedMessage(''); setError(e.message); return;
       }
-      if (e instanceof ApiError && ['chat_cancelled', 'chat_interrupted', 'chat_failed', 'chat_timeout'].includes(e.code || '')) {
+      if (isTerminalChatError(e)) {
         await clearPending(entry);
       }
       setFailedMessage(text); setError(readableError(e));
@@ -517,12 +514,15 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       await clearPending(entry);
     } catch (e) {
       if (version !== generation.current || controller.signal.aborted) return;
+      const terminal = isTerminalChatError(e);
+      if (terminal) await clearPending(entry);
+      if (terminal && e.code === 'conversation_deleted') { remember(null); setMessages([]); }
       if (uploaded) {
         setMessages(items => [...items, assistantMessage(uploaded!)]);
-        setFailedMessage(pendingChat.current?.text || text);
+        setFailedMessage(entry.text);
       } else {
         setPendingImages(preparedAssets);
-        setDraft(text); setFailedMessage(entry.text);
+        setDraft(text); setFailedMessage(terminal ? '' : entry.text);
       }
       setError(readableError(e));
     } finally {

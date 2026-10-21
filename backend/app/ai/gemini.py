@@ -24,7 +24,7 @@ from app.ai.contracts import AIProviderError, ClassificationResult, ModelCommand
 from app.ai.listing_contracts import ListingCopy, listing_validation_context
 from app.ai.key_pool import GeminiKeyPool
 from app.ai.money import money_hints, plain
-from app.ai.text import assistant_text
+from app.ai.text import assistant_text, reply_format_issue
 from app.ai.edit_contracts import ProductEditCopy
 from pathlib import Path
 
@@ -35,6 +35,8 @@ GROQ_URL = 'https://api.groq.com/openai/v1/'
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 18 * 1024 * 1024
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
+# Retry only incomplete/empty transport output, never blocked content or tools.
+REPAIRABLE_OUTPUT_STAGES = {'api_output_limit', 'api_content', 'api_envelope'}
 EDIT_SYSTEM_PROMPT=Path(__file__).with_name('prompts').joinpath('edit.md').read_text(encoding='utf-8')
 
 
@@ -261,12 +263,20 @@ class GeminiClient:
         return ClassificationResult(command=parsed, provider=self.response_provider, model=self.response_model)
 
     async def respond(self, message, *, history, facts):
+        payload = {'current_message': message, 'history': bounded_history(history),
+                   'shop_facts': facts, 'money_interpretations': money_hints(message)}
         try:
             async with self.generation_scope(), asyncio.timeout(self.remaining_seconds()):
-                text = await self._generate(response_prompt(facts), {
-                    'current_message': message, 'history': bounded_history(history),
-                    'shop_facts': facts, 'money_interpretations': money_hints(message)})
-                return assistant_text(text)
+                for attempt in range(2):
+                    try:
+                        text = assistant_text(await self._generate(response_prompt(facts), payload))
+                        if reply_format_issue(text):
+                            raise AIProviderError('invalid_response', stage='api_content')
+                        return text
+                    except AIProviderError as error:
+                        if attempt or error.stage not in REPAIRABLE_OUTPUT_STAGES:
+                            raise
+                        payload['response_correction'] = 'Return a complete, non-empty Vietnamese answer as plain text. Keep it concise and grounded in shop_facts.'
         except TimeoutError as error:
             raise AIProviderError('provider_timeout', stage='api_deadline') from error
 
@@ -312,9 +322,9 @@ class GeminiClient:
                         fenced = re.fullmatch(r'```(?:json)?\s*([\s\S]*?)\s*```', text.strip(), re.I)
                         return schema.model_validate_json(fenced.group(1) if fenced else text, context=context)
                     except AIProviderError as error:
-                        if error.stage != 'api_output_limit':
+                        if error.stage not in REPAIRABLE_OUTPUT_STAGES:
                             raise
-                        payload['format_correction'] = [{'field':'<object>', 'type':'output_limit',
+                        payload['format_correction'] = [{'field':'<object>', 'type':'output_limit' if error.stage == 'api_output_limit' else 'incomplete_output',
                             'rule':'Return one complete compact JSON object. Keep generated copy concise. Do not change seller-provided facts.'}]
                         if attempt:
                             return await self._structured_backup(system, payload, schema, images, context, error)

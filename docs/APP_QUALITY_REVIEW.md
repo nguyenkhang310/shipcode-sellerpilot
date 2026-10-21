@@ -1,5 +1,29 @@
 # Rà soát app sau khi hợp nhất nhánh Hoàng
 
+## Độ ổn định hội thoại và phục hồi lỗi — 21/10/2026
+
+- Tái hiện lời chào/cảm ơn bị đưa vào sửa bản nháp hoặc chọn sản phẩm đang chờ
+  sửa. Tách các câu xã giao hoàn chỉnh khỏi thao tác sản phẩm, giữ bản nháp và
+  yêu cầu sửa qua đoạn hội thoại ngắn; câu có nội dung sửa thật vẫn đi luồng cũ.
+- Sửa câu “có kết nối được không?” bị nhận thành tìm sản phẩm. Parser không còn
+  coi câu hỏi khả năng của trợ lý là tên hàng; vẫn tìm được bộ kết nối Bluetooth.
+- App gửi yêu cầu “đăng sản phẩm mới” tới backend ngay, không tự xóa nội dung rồi
+  ép mở chọn ảnh. Người bán có thể bắt đầu bằng chữ và thêm ảnh sau.
+- Phản hồi rỗng, envelope answer rỗng/null và đầu ra bị cắt được kiểm tra trước
+  hiển thị. Gemini có một lần sửa định dạng trong cùng deadline, không khởi tạo
+  lại 60s; blocked content và tool call không được thử vòng sang provider khác.
+- Yêu cầu tải ảnh đã kết thúc lỗi không kẹt mã cũ. Giữ ảnh/caption để gửi mới;
+  yêu cầu chưa rõ kết quả vẫn dùng cùng ID để phục hồi, không tự tải trùng.
+  Hội thoại đã xóa được bỏ khỏi lựa chọn hiện tại trước lần gửi sau.
+- 728 test backend, 13 test transport/message, TypeScript và export web qua.
+  Browser QA qua 7 tình huống: dừng, gửi tiếp, mất phản hồi, reload, mất phản hồi
+  tải ảnh, bắt đầu đăng bằng chữ, phục hồi ảnh sau lỗi kết thúc; không lỗi JS.
+- Benchmark provider thật qua 12/12 ca, không fallback. Lượt cần AI 1,1–1,8s;
+  đọc trực tiếp/xã giao 6–26ms, không gọi model. Chỉ dùng shop tạm có guard và
+  ảnh tự vẽ, không gửi shop thật. Đây là lần đo, không phải SLA/quota bảo đảm.
+
+Khởi động lại `npm run demo` để backend/app nạp mã sửa; không cần đổi key.
+
 ## Sửa lỗi gọi AI khi soạn sản phẩm — 21/10/2026
 
 - Nhật ký gần nhất cho thấy `invalid_response` ở tạo nháp, trong khi hỏi doanh

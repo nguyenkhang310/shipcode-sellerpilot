@@ -11,6 +11,25 @@ from app.services.conversations import history_messages
 from test_advisor import AdvisorAI, chat
 
 
+@pytest.mark.parametrize('answer', ['', '   ', '{"answer": ""}', '{"answer": null}'])
+def test_empty_answers_are_rejected_before_display(answer):
+    assert reply_issue(answer) in {'empty_answer', 'invalid_answer_envelope'}
+
+
+@pytest.mark.parametrize('message', ['Sao vậy, ko kết nối được à?', 'Có kết nối được không?'])
+def test_empty_answer_is_corrected_with_the_same_shop_facts(client, message):
+    class EmptyFirst(AdvisorAI):
+        async def respond(self, message, *, history, facts):
+            self.answers.append(facts)
+            return ' ' if len(self.answers) == 1 else 'Mình vẫn đọc được số liệu shop.'
+    provider = EmptyFirst([])
+    client.app.state.ai_provider = provider
+    result = chat(client, message)
+    assert len(provider.answers) == 2
+    assert provider.answers[1]['reply_correction']['reason'] == 'empty_answer'
+    assert result['answer'] == 'Mình vẫn đọc được số liệu shop.'
+
+
 def test_history_preserves_information_at_end_of_long_seller_message():
     message = 'Mô tả sản phẩm. ' * 150 + '\nGiá bán 990k, tồn kho 20, màu trắng.'
     runs = [SimpleNamespace(tool_name=None, message=message, answer='Mình đã nhận thông tin.',

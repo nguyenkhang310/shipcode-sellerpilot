@@ -57,6 +57,59 @@ def test_missing_key_never_sends_a_request_or_silently_uses_backup():
     run_call(handler, call, key='', backup=True)
 
 
+@pytest.mark.parametrize('first', [completed(''), completed('{"answer":""}'),
+    {'candidates': [{'finishReason': 'MAX_TOKENS', 'content': {'parts': [{'text': 'partial'}]}}]}])
+def test_empty_or_truncated_chat_gets_one_bounded_correction(first):
+    calls = []
+    def handler(request):
+        payload = json.loads(json.loads(request.content)['contents'][0]['parts'][0]['text'])
+        calls.append(payload)
+        return httpx.Response(200, json=first if len(calls) == 1 else completed('Mình vẫn đang hỗ trợ bạn.'))
+    result = run_call(handler, lambda p: p.respond('Bạn còn ở đó không?', history=[], facts={}))
+    assert result == 'Mình vẫn đang hỗ trợ bạn.'
+    assert len(calls) == 2 and calls[1]['response_correction']
+
+
+def test_empty_structured_transport_response_is_repaired_before_fallback():
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json=completed('' if len(calls) == 1 else json.dumps({
+            'next_question': 'Bạn bán món gì?', 'next_question_fields': ['name']})))
+    result = run_call(handler, lambda p: p.compose_listing(
+        facts={'current_message': 'Đăng sản phẩm', 'missing_fields': ['name']}, history=[], images=[]))
+    assert json.loads(result)['next_question_fields'] == ['name'] and len(calls) == 2
+
+
+def test_repeated_empty_chat_stops_after_two_attempts():
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json=completed(''))
+    async def call(provider):
+        with pytest.raises(AIProviderError, match='invalid_response'):
+            await provider.respond('Bạn còn ở đó không?', history=[], facts={})
+    run_call(handler, call)
+    assert len(calls) == 2
+
+
+def test_chat_correction_cannot_reset_the_turn_deadline():
+    calls = []
+    async def run():
+        async def handler(request):
+            calls.append(request)
+            await asyncio.sleep(.05 if len(calls) == 1 else .2)
+            return httpx.Response(200, json=completed(''))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            provider = GeminiClient(http, 'synthetic-key', timeout=.1)
+            started = asyncio.get_running_loop().time()
+            with pytest.raises(AIProviderError, match='provider_timeout'):
+                await provider.respond('Bạn còn ở đó không?', history=[], facts={})
+            assert asyncio.get_running_loop().time() - started < .2
+    asyncio.run(run())
+    assert len(calls) == 2
+
+
 def test_requested_product_rewrite_cannot_silently_return_empty_fields():
     calls=[]
     def handler(request):
@@ -306,7 +359,9 @@ def test_http_errors_are_mapped_without_exposing_provider_body(code, reason):
     ({'candidates':[{'finishReason':'STOP','content':{'parts':[{'functionCall':{'name':'delete_all'}}]}}]},'tool_not_allowed'),
 ])
 def test_blocked_partial_empty_and_tool_responses_never_reach_seller(payload, reason):
+    calls = []
     def handler(request):
+        calls.append(request)
         assert request.url.host != 'api.groq.com'
         return httpx.Response(200, json=payload)
     async def call(p):
@@ -314,6 +369,9 @@ def test_blocked_partial_empty_and_tool_responses_never_reach_seller(payload, re
             await p.respond('Câu hỏi', history=[], facts={})
         assert caught.value.reason == reason
     run_call(handler, call, backup=True)
+    stage = payload.get('candidates', [{}])
+    repairable = payload == completed('') or bool(stage and stage[0].get('finishReason') == 'MAX_TOKENS')
+    assert len(calls) == (2 if repairable else 1)
 
 
 def test_thought_parts_are_not_displayed():

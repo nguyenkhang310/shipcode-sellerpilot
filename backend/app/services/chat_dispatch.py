@@ -9,6 +9,7 @@ from app.ai.fallback import parse_fallback
 from app.ai.money import money_mentions
 from app.ai.money import plain
 from app.ai.quantities import quantity_value
+from app.ai.small_talk import social_reply
 from app.integrations.ute_mall import ShopDatabaseError, UTEMallRepository
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.advisor import is_forget_request
@@ -40,7 +41,12 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
     try:
         conversation_id = str(payload.conversation_id) if payload.conversation_id else None
         active_draft = get_active_draft(session, shop, conversation_id)
-        previous=recent_runs(session,shop,conversation_id,limit=2)
+        previous=recent_runs(session,shop,conversation_id,limit=24)
+        # Social acknowledgements are not names, captions or edit targets.
+        # Keep work in progress intact so the next factual reply can resume it.
+        if social_reply(payload.message):
+            return ChatResponse(data=await handle_chat(session, shop, provider,
+                message=payload.message, conversation_id=conversation_id))
         # A current order read must not be mistaken for a draft title or a
         # product-edit clarification merely because its sentence is short.
         if is_order_question(payload.message, previous):

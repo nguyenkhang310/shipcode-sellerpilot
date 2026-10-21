@@ -9,6 +9,10 @@ def catalog_lookup(message):
     source = ' '.join(unicodedata.normalize('NFKC', message).lower().split()).strip(' ?.!,')
     text = plain(source)
     original = text
+    # Ability questions are not product availability queries. Restrict this to
+    # initial verbs so a product such as a Bluetooth connector still matches.
+    if re.match(r'^(?:ban\s+)?(?:co\s+)?(?:con\s+)?(?:ket noi|doc(?: duoc)?|xem duoc|hieu|nhan ra|ho tro|giup|lam duoc|tra loi|hoat dong|biet)\b', text):
+        return None
     # These requests need their existing business/write path, not a catalogue read.
     # Preserve accents for ambiguous nouns such as "sữa" versus "sửa".
     if (re.search(r'\b(?:sửa|đổi|xóa|đăng|thêm|tạo|nhập)\b', source)

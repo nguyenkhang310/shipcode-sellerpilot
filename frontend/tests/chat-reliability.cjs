@@ -76,6 +76,46 @@ let browser,page;
  const convo=await (await fetch(API_ORIGIN+'/api/v1/conversations/'+result.data.conversation_id)).json();
  assert.equal(convo.data.turns.filter(t=>t.response.tool==='create_product_draft').length,1);
  checks.push('Lost gallery response recovers one draft and continues AI copy generation');
+ // Starting by text must not hijack the send button to open the photo picker.
+ await page.getByRole('button',{name:'Tạo cuộc trò chuyện mới'}).click();
+ await input.fill('Đăng sản phẩm mới');
+ const textStart=page.waitForRequest(r=>r.url().endsWith('/api/v1/chat')&&r.method()==='POST');
+ await send.click(); const listingStart=(await textStart).postDataJSON();
+ await page.getByRole('button',{name:'Dừng chờ phản hồi'}).waitFor({state:'detached'});
+ result=await (await fetch(API_ORIGIN+'/api/v1/conversations/'+listingStart.conversation_id)).json();
+ assert.equal(result.data.turns.filter(t=>t.message==='Đăng sản phẩm mới').length,1);
+ assert.ok(result.data.turns.at(-1).response.product_draft);
+ checks.push('Text-only listing request reaches the assistant and creates a draft without forcing a picker');
+ // A definitively failed upload can be resent; uncertain uploads still recover
+ // using their old ID (the case above). This failure is injected before commit.
+ await page.getByRole('button',{name:'Tạo cuộc trò chuyện mới'}).click();
+ await page.getByRole('button',{name:'Thêm ảnh hoặc mở gợi ý'}).click();
+ const nextChooser=page.waitForEvent('filechooser');
+ await page.getByRole('button',{name:'Chọn ảnh để đăng sản phẩm'}).click();
+ await (await nextChooser).setFiles([path.resolve(__dirname,'../assets/shipcode-logo-app.png')]);
+ await page.getByTestId('attachment-strip').waitFor();
+ await input.fill('Soạn sản phẩm từ ảnh này');
+ await page.route('**/api/v1/product-drafts/images-data',async route=>{
+   uploadId=route.request().postDataJSON().request_id;
+   await route.abort('failed');
+ });
+ await send.click(); await page.getByRole('button',{name:/Thử lại/}).waitFor();
+ await page.route('**/api/v1/chat/requests/*',async route=>{
+   if(route.request().url().endsWith('/'+uploadId)) return route.fulfill({json:{data:{status:'failed',
+     error:{status:409,detail:{code:'chat_interrupted',message:'Yêu cầu đã gián đoạn.'}}}}});
+   await qaFetch(route);
+ });
+ await page.getByRole('button',{name:/Thử lại/}).click();
+ await page.getByText('Yêu cầu đã gián đoạn.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:/Thử lại/}).waitFor({state:'detached'});
+ await page.getByTestId('attachment-strip').waitFor();
+ await page.unroute('**/api/v1/product-drafts/images-data');
+ await page.unroute('**/api/v1/chat/requests/*');
+ const resend=page.waitForRequest(r=>r.url().endsWith('/api/v1/product-drafts/images-data')&&r.method()==='POST');
+ await send.click(); const resent=(await resend).postDataJSON();
+ assert.notEqual(resent.request_id,uploadId);
+ await page.getByText(/Mình đã soạn tiêu đề và mô tả/).waitFor();
+ checks.push('Interrupted gallery recovery releases the stale ID and resends retained images successfully');
  assert.deepEqual(errors,[]);
  await page.screenshot({path:path.join(OUTPUT,'final.png')});
  fs.writeFileSync(path.join(OUTPUT,'results.json'),JSON.stringify({checks,errors},null,2));

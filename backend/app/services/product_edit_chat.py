@@ -11,6 +11,7 @@ from app.ai.edit_contracts import ProductEditCopy
 from app.ai.fallback import extract_sku
 from app.ai.listing_contracts import ListingCopy
 from app.ai.money import money_mentions, plain
+from app.ai.small_talk import social_reply
 from app.integrations import management
 from app.integrations.product_edits import editable_product
 from app.integrations.ute_mall import ShopItemNotFoundError
@@ -72,10 +73,13 @@ def local_changes(message):
 
 
 def pending_edit(runs):
-    if not runs or runs[-1].intent!='update_product':
-        return None
-    facts=json.loads(runs[-1].facts_json)
-    return facts.get('pending_edit_message')
+    for run in reversed(runs):
+        if run.intent == 'unknown' and run.tool_name is None and social_reply(run.message):
+            continue
+        if run.intent == 'update_product':
+            return json.loads(run.facts_json).get('pending_edit_message')
+        break
+    return None
 
 
 def _target_query(message):
