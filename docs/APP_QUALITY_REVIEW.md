@@ -1,5 +1,38 @@
 # Rà soát app sau khi hợp nhất nhánh Hoàng
 
+## Đăng nhập, Face ID và giao diện — 21/10/2026
+
+- App đăng nhập bằng tài khoản thành viên Kênh Người Bán local. Token opaque
+  ngẫu nhiên, hash trong database, hết hạn 7 ngày; đăng xuất thu hồi, thay mật
+  khẩu/quyền quản lý làm phiên cũ không còn dùng được. Route chat, số liệu,
+  chỉnh sản phẩm/đơn, proposal và ảnh bản nháp yêu cầu phiên. Health công khai.
+- Chặn ảnh chưa đăng tại cả static API và static Flask; ảnh sản phẩm đã đăng
+  vẫn công khai. Private image ở app/web gửi Bearer đúng origin, không lưu
+  token trong Web Storage. Proposal giá kiểm tra đúng sản phẩm/shop trước cả
+  nhánh trả kết quả lặp để không lộ hoặc từ chối nhầm proposal ngoài phạm vi.
+- Face ID dùng SecureStore/Keychain với yêu cầu sinh trắc học; phiên thường
+  được xóa khi bật. Khóa khi xuống nền, che app switcher, có mật khẩu dự phòng,
+  xử lý khóa Keychain mất hiệu lực và ghi đồng thời. Expo Go/web không hiện
+  nút mở khóa sinh trắc học khi chưa hỗ trợ hoặc chưa được người dùng bật.
+- Login dùng logo ShipCode xóa phông do người dùng cung cấp, cân lại logo/form
+  trên mobile/desktop, viền/chữ riêng cho sáng/tối, tắt vòng chuyển động theo
+  Reduce Motion và dọn animation khi unmount. Bỏ regex email/điện thoại sai với
+  contract tài khoản: `utech` đăng nhập bình thường. Trợ giúp, hiện mật khẩu,
+  trạng thái lỗi và submit đều hoạt động thực tế.
+- Thêm `npm run auth:reset`: nhập mật khẩu trực tiếp trong terminal, chỉ đổi
+  hash của owner shop local; kiểm tra lại token cũ bị từ chối và dữ liệu giữ
+  nguyên trên shop tạm. Không sửa mật khẩu shop thật trong quá trình kiểm tra.
+- 682 test backend qua; 19 test marketplace, 11 test adapter xác thực/Keychain,
+  12 test transport/message, 21 test extension và test SVG qua. Migration chạy
+  sạch rồi downgrade/re-upgrade trên database tạm. Typecheck và export web/iOS
+  qua. Browser QA kiểm tra login cả sáng/tối ở 320/390/430/1024px, đăng nhập sai,
+  ảnh riêng tư, thu hồi và hết hạn; hồi quy 5 tab, chat retry/upload, xử lý đơn.
+
+Chưa xác thực Face ID bằng camera iPhone thật. Mac hiện chỉ có Command Line
+Tools, chưa có Xcode đầy đủ; đã kiểm tra cấu hình native chứa quyền Face ID,
+không coi export iOS là cài bản native. Quy trình cài, tài khoản, phiên và phạm
+vi triển khai: [AUTHENTICATION.md](AUTHENTICATION.md).
+
 ## Đồng bộ đơn, vận chuyển và trợ lý — 21/10/2026
 
 - App, web người bán/người mua và script tạo đơn dùng chung nhật ký SQLite.

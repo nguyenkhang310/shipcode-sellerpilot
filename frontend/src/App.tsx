@@ -6,6 +6,8 @@ import { AppShell } from './app/AppShell';
 import { ThemeProvider } from './theme/ThemeProvider';
 import { isShopeeExtension } from './integrations/extension';
 import { ExtensionShell } from './integrations/ExtensionShell';
+import { AuthProvider } from './features/auth/AuthProvider';
+import { AuthGate } from './features/auth/LoginScreen';
 
 export default function App() {
   const systemScheme = useColorScheme();
@@ -35,7 +37,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider><ThemeProvider darkMode={darkMode} desktop={isShopeeExtension()}>
-      {isShopeeExtension() ? <ExtensionShell /> : <AppShell darkMode={darkMode} onDarkModeChange={changeDarkMode} />}
+      {isShopeeExtension() ? <ExtensionShell /> : <AuthProvider><AuthGate><AppShell darkMode={darkMode} onDarkModeChange={changeDarkMode} /></AuthGate></AuthProvider>}
     </ThemeProvider></SafeAreaProvider>
   );
 }

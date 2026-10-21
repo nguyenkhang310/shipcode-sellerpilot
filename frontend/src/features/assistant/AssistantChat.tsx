@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../components/ui/ProtectedImage';
 import { dockContentInset } from '../../components/layout/dockGeometry';
 import { Ionicons } from '@expo/vector-icons';
 import { InterfaceIcon } from '../../components/ui/InterfaceIcon';
@@ -6,7 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { forwardRef, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Platform, Pressable, ScrollView, Share, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Share, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { cancelChatRequest, createMessageId, recoverChatRequest } from '../../api/chatRequests';
 import { API_URL, ApiError } from '../../api/client';
 import { inExtension, isShopeeExtension } from '../../integrations/extension';
@@ -25,6 +26,7 @@ import { MessageEntrance } from './MessageEntrance';
 import { ChatHistoryDrawer } from './ChatHistoryDrawer';
 import { OrderEditor } from '../dashboard/OrderEditor';
 import { OrderChatAction } from './OrderChatAction';
+import { useAuth } from '../auth/AuthProvider';
 
 export type AssistantHandle = { newConversation: () => void; openHistory: () => void; ask: (message: string) => void };
 type PendingChat = { id: string; conversationId: string; text: string; phase: 'uploading' | 'sending' | 'cancelling'; uploadId?: string };
@@ -34,7 +36,7 @@ const INPUT_MIN_HEIGHT = 46;
 const INPUT_MAX_HEIGHT = 128;
 const INPUT_LINE_HEIGHT = 23;
 const INPUT_VERTICAL_PADDING = 21;
-const STORAGE = 'sellerpilot:conversation:' + (inExtension() ? location.origin + ':' + new URLSearchParams(location.search).get('scope') : API_URL);
+const STORAGE_BASE = 'sellerpilot:conversation:' + (inExtension() ? location.origin + ':' + new URLSearchParams(location.search).get('scope') : API_URL);
 const PROMPTS = [
   { icon: 'trend', title: 'Hôm nay shop thế nào?', message: 'Hôm nay shop có bao nhiêu đơn và giá trị đơn hàng bao nhiêu?' },
   { icon: 'inventory', title: 'Kiểm tra hàng sắp hết', message: 'Những sản phẩm nào sắp hết hàng?' },
@@ -51,6 +53,8 @@ const fallbackLabel = (reason: ChatData['fallback_reason']) => reason === 'inval
 
 export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () => void; onToast?: (message: string) => void; keyboardVisible?: boolean; reduceMotion?: boolean }>(function AssistantChat({ onShopChanged, onToast, keyboardVisible = false, reduceMotion = false }, ref) {
   const { ui, IOS, BRAND, desktop } = useTheme();
+  const auth = useAuth();
+  const STORAGE = STORAGE_BASE + (auth?.user ? ':' + auth.user.shop.slug + ':' + auth.user.user.id : '');
   const { height: windowHeight, width: windowWidth, fontScale } = useWindowDimensions();
   const compact = windowHeight < 740 || keyboardVisible;
   const insets = useSafeAreaInsets();
@@ -589,7 +593,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
         {!keyboardVisible ? <View style={[ui.promptGrid, compact && { marginTop: 22 }]}>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" accessibilityLabel={prompt.title} onPress={() => void send(prompt.message)} style={({ pressed }) => [ui.prompt, !desktop && compact && { minHeight: 84, padding: 12, gap: 8 }, pressed && { opacity: .65 }]}><InterfaceIcon name={prompt.icon} size={desktop ? 18 : compact ? 20 : 22} color={BRAND.navy} /><Text style={ui.promptText}>{prompt.title}</Text></Pressable>)}</View> : null}
       </> : null}
       {restoring ? <View style={ui.thinking}><ActivityIndicator color={BRAND.navy} /><Text style={ui.thinkingText}>Đang mở hội thoại…</Text></View> : <View style={ui.thread}>{messages.map(message => message.role === 'user'
-        ? <MessageEntrance key={message.id} style={ui.userMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion}><View testID="user-message" style={[ui.userBubble, Boolean(message.imageUris?.length) && ui.userBubbleMedia]}>{message.imageUris?.length === 1 ? <Image testID="user-image-single" source={{ uri: message.imageUris[0] }} style={ui.userImageSingle} resizeMode="cover" /> : message.imageUris?.length ? <ScrollView testID="user-image-gallery" horizontal style={ui.userImageScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.userImageRow}>{message.imageUris.map((uri, index) => <Image key={uri + index} source={{ uri }} style={ui.userImageMultiple} resizeMode="cover" />)}</ScrollView> : null}<Text selectable style={[ui.userText, Boolean(message.imageUris?.length) && ui.userTextWithMedia]}>{message.text}</Text></View></MessageEntrance>
+        ? <MessageEntrance key={message.id} style={ui.userMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion}><View testID="user-message" style={[ui.userBubble, Boolean(message.imageUris?.length) && ui.userBubbleMedia]}>{message.imageUris?.length === 1 ? <ProtectedImage testID="user-image-single" source={{ uri: message.imageUris[0] }} style={ui.userImageSingle} resizeMode="cover" /> : message.imageUris?.length ? <ScrollView testID="user-image-gallery" horizontal style={ui.userImageScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.userImageRow}>{message.imageUris.map((uri, index) => <ProtectedImage key={uri + index} source={{ uri }} style={ui.userImageMultiple} resizeMode="cover" />)}</ScrollView> : null}<Text selectable style={[ui.userText, Boolean(message.imageUris?.length) && ui.userTextWithMedia]}>{message.text}</Text></View></MessageEntrance>
         : <MessageEntrance key={message.id} style={ui.assistantMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion}><View style={ui.assistantContent}><View style={[ui.row, { gap: 7, marginBottom: 8 }]}><BrandLogo size={20} /><Text style={ui.assistantName}>SellerPilot</Text></View><View style={ui.assistantBubble}><MessageText text={message.text} /></View>
           {message.response?.product_edit_proposal ? <ProductEditCard proposal={message.response.product_edit_proposal} busy={editBusy !== null} error={editErrors[message.response.product_edit_proposal.id]} onDecide={choice => void decideEdit(message.response!.product_edit_proposal!, choice)} /> : null}
           {!isShopeeExtension() ? <OrderChatAction action={message.response?.facts.order_action} onOpen={id => { input.current?.blur(); setOrderId(id); }} /> : null}
@@ -607,7 +611,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     </ScrollView>
     {showLatest && messages.length ? <Pressable accessibilityRole="button" accessibilityLabel="Cuộn đến tin nhắn mới nhất" onPress={goBottom} style={[ui.circleButton, { position: 'absolute', right: 22, bottom: Math.max(12, composerAreaHeight + 12) }]}><Ionicons name="arrow-down" size={20} color={BRAND.navy} /></Pressable> : null}
     <View testID="chat-composer" onLayout={event => { const height = Math.ceil(event.nativeEvent.layout.height); setComposerAreaHeight(current => Math.abs(current - height) > 1 ? height : current); }} style={[ui.composerArea, { paddingBottom: desktop || keyboardVisible ? 8 : dockContentInset(insets.bottom), flexShrink: 0 }]}>
-      {pendingImages.length ? <ScrollView testID="attachment-strip" horizontal style={ui.attachmentScroller} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={ui.attachmentRow}>{pendingImages.map((pendingImage, index) => <View key={pendingImage.uri + index} style={ui.attachmentPreview}><Image source={{ uri: pendingImage.uri }} style={ui.attachmentImage} resizeMode="cover" /><Pressable accessibilityRole="button" accessibilityLabel={`Bỏ ảnh số ${index + 1}`} hitSlop={10} onPress={() => setPendingImages(items => items.filter((_item, itemIndex) => itemIndex !== index))} style={ui.attachmentRemove}><Ionicons name="close" size={17} color="#FFF" /></Pressable></View>)}{pendingImages.length < MAX_PRODUCT_IMAGES ? <Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh sản phẩm" onPress={() => void pickProductImage()} style={ui.attachmentAdd}><Ionicons name="add" size={25} color={BRAND.navy} /><Text style={ui.attachmentCount}>{pendingImages.length}/{MAX_PRODUCT_IMAGES}</Text></Pressable> : null}</ScrollView> : null}
+      {pendingImages.length ? <ScrollView testID="attachment-strip" horizontal style={ui.attachmentScroller} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={ui.attachmentRow}>{pendingImages.map((pendingImage, index) => <View key={pendingImage.uri + index} style={ui.attachmentPreview}><ProtectedImage source={{ uri: pendingImage.uri }} style={ui.attachmentImage} resizeMode="cover" /><Pressable accessibilityRole="button" accessibilityLabel={`Bỏ ảnh số ${index + 1}`} hitSlop={10} onPress={() => setPendingImages(items => items.filter((_item, itemIndex) => itemIndex !== index))} style={ui.attachmentRemove}><Ionicons name="close" size={17} color="#FFF" /></Pressable></View>)}{pendingImages.length < MAX_PRODUCT_IMAGES ? <Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh sản phẩm" onPress={() => void pickProductImage()} style={ui.attachmentAdd}><Ionicons name="add" size={25} color={BRAND.navy} /><Text style={ui.attachmentCount}>{pendingImages.length}/{MAX_PRODUCT_IMAGES}</Text></Pressable> : null}</ScrollView> : null}
       {quickOpen ? <ScrollView testID="quick-actions" keyboardShouldPersistTaps="handled" style={[ui.grouped, { marginBottom: 10, maxHeight: keyboardVisible ? 180 : 290, flexGrow: 0 }]}><Pressable accessibilityRole="button" accessibilityLabel="Chọn ảnh để đăng sản phẩm" onPress={() => void pickProductImage()} style={[ui.task, { minHeight: 52 }]}><Ionicons name="images-outline" size={21} color={BRAND.navy} /><Text style={ui.taskTitle}>Chọn tối đa 6 ảnh sản phẩm</Text></Pressable>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" onPress={() => { setDraft(prompt.message); setQuickOpen(false); input.current?.focus(); }} style={[ui.task, { minHeight: 47 }]}><InterfaceIcon name={prompt.icon} size={19} color={BRAND.navy} /><Text style={ui.taskTitle}>{prompt.title}</Text></Pressable>)}</ScrollView> : null}
       <View style={ui.composer}><Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh hoặc mở gợi ý" accessibilityState={{ expanded: quickOpen }} onPress={() => setQuickOpen(value => !value)} style={ui.composerPlus}><Ionicons name={quickOpen ? 'close' : 'add'} size={27} color={BRAND.navy} /></Pressable>
         <View style={ui.composerInputFrame}><TextInput ref={input} accessibilityLabel="Nhắn cho SellerPilot" placeholder={pendingImages.length ? 'Thêm yêu cầu…' : 'Hỏi SellerPilot…'} placeholderTextColor={IOS.secondary} value={draft} onChangeText={value => { setDraft(value); if (!value) setInputHeight(INPUT_MIN_HEIGHT); }} multiline maxLength={4000} scrollEnabled={inputHeight >= INPUT_MAX_HEIGHT - 1} returnKeyType="default" blurOnSubmit={false} onFocus={() => setTimeout(() => { if (nearBottom.current) scroll.current?.scrollToEnd({ animated: false }); }, 80)} style={[ui.composerInput, { height: inputHeight }]} editable={!restoring} />

@@ -5,6 +5,13 @@ FastAPI này là lớp điều khiển dành cho **chủ shop**. Dữ liệu s�
 `data/sellerpilot.db` lưu proposal, bản nháp đăng sản phẩm, audit, trace từng
 lượt chat và bộ nhớ cá nhân hóa theo shop/SKU. File ảnh không nằm trong SQLite.
 
+Các route dữ liệu local yêu cầu phiên đăng nhập của thành viên shop. Dùng
+`POST /api/v1/auth/login` với tài khoản Kênh Người Bán local, gửi token trả về
+trong header `Authorization: Bearer ...`. `/auth/me` kiểm tra phiên, `/auth/logout`
+thu hồi phiên. Swagger có **Authorize → SellerSession**. Không dùng tài khoản
+Shopee thật hoặc token connector để truy cập API local. [Đăng nhập, quên mật
+khẩu và Face ID](../docs/AUTHENTICATION.md).
+
 Luồng `/api/v1/browser-connector/*` là ngoại lệ tách riêng cho Chrome Extension:
 chỉ nhận snapshot trang Shopee và thực hiện inference; không dùng repository
 shop local, không ghi sản phẩm/đơn thật. Cần `BROWSER_CONNECTOR_TOKEN` do
@@ -60,8 +67,12 @@ Ví dụ chat:
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/chat \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $SELLERPILOT_SESSION" \
   -d '{"message":"Kiểm tra tồn kho SKU 100600680251407"}'
 ```
+
+Ví dụ trên giả định `SELLERPILOT_SESSION` đã được nhập riêng vào shell. Không
+đặt token hoặc mật khẩu vào source, lịch sử lệnh hay báo cáo kiểm thử.
 
 Response ghi `mode=ai` khi provider trả contract hợp lệ, hoặc `mode=fallback` kèm
 `fallback_reason` khi mất kết nối, timeout, model Free không còn sẵn sàng hoặc JSON

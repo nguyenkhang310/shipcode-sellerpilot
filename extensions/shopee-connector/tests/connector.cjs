@@ -132,6 +132,14 @@ test('explicit local mode forwards only the fixed local API allowlist', async ()
   await assert.rejects(api.handleApi('https://evil.example/collect', 'POST', '{}'), /không được phép/);
   await assert.rejects(api.handleApi('/../../private', 'GET', null), /không được phép/);
   assert.equal(calls.length, 5);
+  const token = 'Bearer ' + 's'.repeat(43);
+  await api.handleApi('/auth/login', 'POST', '{"login_id":"qa-seller","password":"synthetic"}');
+  assert.equal(calls[5].options.headers.Authorization, undefined);
+  await api.handleApi('/auth/me', 'GET', null, undefined, token);
+  assert.equal(calls[6].options.headers.Authorization, token);
+  await api.handleApi('/auth/logout', 'POST', '{}', undefined, token);
+  assert.equal(calls[7].options.headers.Authorization, token);
+  assert.equal(JSON.stringify(saved).includes(token), false, 'seller bearer must never be saved in extension storage');
 });
 
 test('image uploads require the selected account to still match the live tab', async () => {

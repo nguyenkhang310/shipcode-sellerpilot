@@ -16,7 +16,8 @@ export async function extensionRequest(path: string, options: RequestInit, signa
     const abort = () => { void extensionCall('cancel', { id }).catch(() => {}); reject(new DOMException('Aborted', 'AbortError')); };
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) { abort(); return; }
-    void extensionCall('api', { id, connection_id: connection.id, path, method: options.method || 'GET', body: options.body || null })
+    void extensionCall('api', { id, connection_id: connection.id, path, method: options.method || 'GET', body: options.body || null,
+      authorization: new Headers(options.headers).get('Authorization') })
       .then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
   });
 }

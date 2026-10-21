@@ -83,13 +83,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       chatKey = value.id + ':' + body.request_id;
       const existing = chatJobs.get(chatKey);
       if (existing) {
+        if (value.mode === 'local' && existing.authorization !== message.authorization) throw Object.assign(Error('Vui lòng đăng nhập lại.'), {status: 401});
         if (existing.body !== message.body) throw Error('Mã tin nhắn đã dùng cho nội dung khác.');
         return existing.promise;
       }
     }
     active.set(message.id, controller);
-    const promise = handleApi(message.path, message.method, message.body, controller.signal);
-    if (chatKey) chatJobs.set(chatKey, {body: message.body, controller, promise});
+    const promise = handleApi(message.path, message.method, message.body, controller.signal, message.authorization);
+    if (chatKey) chatJobs.set(chatKey, {body: message.body, controller, promise, authorization: message.authorization});
     try {return await promise;}
     finally {active.delete(message.id); if (chatKey) chatJobs.delete(chatKey);}
   }).then(data => reply({ok: true, data}), error => reply({ok: false, status: error.status || 503, error: error.message}));

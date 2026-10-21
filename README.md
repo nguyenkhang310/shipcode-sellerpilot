@@ -327,6 +327,15 @@ $env:HOST="0.0.0.0"
 
 Đăng nhập bằng `utech` và mật khẩu đã đặt khi bootstrap. Tài khoản tự đăng ký trên web là **người mua**, không tự nhận quyền quản lý gian hàng.
 
+App SellerPilot cũng yêu cầu tài khoản này trước khi mở dữ liệu shop. Quên mật
+khẩu: chạy `npm run auth:reset` từ root, Enter để chọn `utech`, nhập mật khẩu mới
+ít nhất 12 ký tự hai lần. Không chạy lại bootstrap để đặt mật khẩu.
+
+Trên iPhone, bật Face ID trong **Shop → Tài khoản & bảo mật** sau lần đăng nhập
+đầu. Face ID cần bản native có ký/cài trên máy; Expo Go và web dùng mật khẩu.
+Mac có Xcode đầy đủ có thể chạy `npm run ios:native`. Hướng dẫn tài khoản,
+Keychain, phiên và kiểm thử thiết bị: [Đăng nhập & Face ID](docs/AUTHENTICATION.md).
+
 ### Terminal B — SellerPilot API
 
 macOS/Linux, từ root:
@@ -390,6 +399,7 @@ Từ thư mục gốc:
 ```sh
 npm run typecheck
 npm run test:api
+npm run test:auth
 npm run test:extension
 npm run build
 npm run build:ios
@@ -439,7 +449,7 @@ flowchart LR
 - Doanh số/tồn kho là dữ liệu shop; chi phí và giả định tính lời phải được người bán cung cấp. Không đồng nhất giá trị đơn với tiền thực thu.
 - Chạy **một worker API**. Hàng đợi local và khóa trong bộ nhớ chưa dành cho nhiều process/server dùng chung DB.
 - Không có transaction atomic xuyên hai SQLite và filesystem. Khi crash trong lúc ghi shop, cần đối chiếu bản nháp/nhật ký trước khi gửi lệnh mới.
-- App hiện gắn một shop local; xác thực/phân quyền API cho nhiều chủ shop và triển khai Internet là bước riêng.
+- App có xác thực phiên cho thành viên của shop local đang cấu hình; triển khai nhiều shop, phân quyền theo chức danh và Internet cần triển khai riêng. [Chi tiết bảo mật và Face ID](docs/AUTHENTICATION.md).
 
 [Luồng chat và chống trùng](docs/CHAT_RELIABILITY.md) · [Tư vấn và bộ nhớ](docs/PERSONAL_ADVISOR.md).
 

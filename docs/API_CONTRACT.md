@@ -4,6 +4,12 @@ Base URL local: `http://127.0.0.1:8000/api/v1`. Swagger: `/docs`.
 Success `{data, meta?}`; lỗi HTTP/validation theo FastAPI `{detail}`;
 lỗi không dự kiến `{detail: "Internal server error", code: "internal_error"}`.
 
+Chat và các API dữ liệu shop bên dưới yêu cầu `Authorization: Bearer <token>`.
+Lấy token bằng `POST /auth/login` với JSON `login_id`, `password` của thành viên
+Kênh Người Bán local; `GET /auth/me` kiểm tra, `POST /auth/logout` thu hồi.
+Thiếu/thu hồi/hết hạn phiên trả `401`. Health vẫn công khai; browser connector
+dùng cơ chế riêng. Xem [xác thực và thời hạn phiên](AUTHENTICATION.md).
+
 ## Health
 
 `GET /health` trả 200 nếu DB truy cập được, kể cả khi AI provider chưa sẵn sàng:

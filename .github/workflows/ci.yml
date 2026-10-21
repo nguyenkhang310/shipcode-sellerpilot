@@ -19,6 +19,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:api
+      - run: npm run test:auth
       - run: npm run test:extension
       - run: npm run build
       - run: npm run build:ios

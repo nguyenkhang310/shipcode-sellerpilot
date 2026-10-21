@@ -1,6 +1,7 @@
+import { ProtectedImage } from '../../components/ui/ProtectedImage';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { ProductDraft } from '../../api/types';
 import { productDraftImageUrl } from '../../api/sellerPilot';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -19,8 +20,8 @@ export function ProductDraftCard({ draft, busy, saving, error, browser, onDecide
   const preview = images.includes(selected) ? selected : images[0];
   const longDescription = Boolean(draft.description && (draft.description.length > 160 || draft.description.split('\n').length > 3));
   return <View testID="product-draft-card" style={ui.proposal}>
-    {preview ? <Image testID="draft-main-image" accessibilityLabel="Ảnh sản phẩm đang xem" source={{ uri: productDraftImageUrl(preview) }} style={ui.draftImage} resizeMode="contain" /> : null}
-    {images.length > 1 ? <ScrollView testID="draft-image-gallery" horizontal style={ui.draftGalleryScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.draftGallery}>{images.map((uri, index) => <Pressable key={uri} accessibilityRole="button" accessibilityLabel={`Xem ảnh sản phẩm ${index + 1}`} accessibilityState={{ selected: uri === preview }} onPress={() => setSelected(uri)}><Image source={{ uri: productDraftImageUrl(uri) }} style={[ui.draftThumbnail, { borderWidth: uri === preview ? 2 : 1, borderColor: uri === preview ? BRAND.navy : IOS.separator }]} resizeMode="cover" /></Pressable>)}</ScrollView> : null}
+    {preview ? <ProtectedImage testID="draft-main-image" accessibilityLabel="Ảnh sản phẩm đang xem" source={{ uri: productDraftImageUrl(preview) }} style={ui.draftImage} resizeMode="contain" /> : null}
+    {images.length > 1 ? <ScrollView testID="draft-image-gallery" horizontal style={ui.draftGalleryScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.draftGallery}>{images.map((uri, index) => <Pressable key={uri} accessibilityRole="button" accessibilityLabel={`Xem ảnh sản phẩm ${index + 1}`} accessibilityState={{ selected: uri === preview }} onPress={() => setSelected(uri)}><ProtectedImage source={{ uri: productDraftImageUrl(uri) }} style={[ui.draftThumbnail, { borderWidth: uri === preview ? 2 : 1, borderColor: uri === preview ? BRAND.navy : IOS.separator }]} resizeMode="cover" /></Pressable>)}</ScrollView> : null}
     <View style={ui.proposalBody}>
       <Text style={ui.proposalKicker}>{labels[draft.status]}</Text>
       <Text style={draft.name ? ui.listTitle : ui.caption}>{draft.name || 'Sản phẩm mới'}</Text>

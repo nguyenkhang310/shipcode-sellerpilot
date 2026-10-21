@@ -103,12 +103,15 @@ def make_client(tmp_path):
         database_url=f"sqlite:///{agent_path}",
         shop_database_path=shop_path,
         shop_product_upload_dir=upload_dir,
+        shop_static_dir=tmp_path / 'static',
         seller_shop_slug="utech-official",
     )
     engine = build_engine(settings.database_url)
     Base.metadata.create_all(engine)
     engine.dispose()
     app = create_app(settings)
+    from auth_fixture import authenticated_fixture
+    authenticated_fixture(app)
     return TestClient(app), shop_path, upload_dir
 
 

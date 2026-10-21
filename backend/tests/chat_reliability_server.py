@@ -58,6 +58,8 @@ if __name__ == '__main__':
                 connection.execute('INSERT INTO order_item (order_id, product_id, quantity, price) VALUES (?,1,1,1000000)', (number,))
             connection.execute("UPDATE \"order\" SET shipping_phone='0901234567', shipping_address='123 Đường Kiểm Thử', note='', payment_method='COD', payment_status='unpaid'")
         application = app.main.create_app(settings)
+        from auth_fixture import authenticated_fixture
+        authenticated_fixture(application)
         @application.get('/qa/identity')
         def qa_identity():
             return {'temporary_shop': True}

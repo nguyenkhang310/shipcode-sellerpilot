@@ -29,6 +29,15 @@ export class ApiError extends Error {
   }
 }
 
+// Credentials remain in memory. Native persistence is owned by SecureStore;
+// browser localStorage/sessionStorage must never receive this token.
+let accessToken: string | null = null;
+let unauthorized: (() => void) | undefined;
+export const setAccessToken = (token: string | null) => { accessToken = token; };
+export const onUnauthorized = (handler?: () => void) => { unauthorized = handler; };
+export const privateMediaHeaders = (uri: string): Record<string, string> =>
+  accessToken && uri.startsWith(API_URL + '/product-drafts/') ? { Authorization: 'Bearer ' + accessToken } : {};
+
 export type ApiRequestOptions = RequestInit & {
   /** Local models loaded from an HDD can need considerably longer than normal API calls. */
   timeoutMs?: number;
@@ -47,15 +56,18 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     cancel();
   }, timeoutMs);
   try {
+    const sentToken = accessToken;
     if (inExtension()) {
-      try { return await extensionRequest(path, requestOptions, controller.signal) as ApiResponse<T>; }
+      try { return await extensionRequest(path, { ...requestOptions, headers: sentToken ? { Authorization: 'Bearer ' + sentToken } : undefined }, controller.signal) as ApiResponse<T>; }
       catch (error) {
+        if (error instanceof Error && 'status' in error && error.status === 401 && !path.startsWith('/auth/') && sentToken === accessToken) unauthorized?.();
         if (error instanceof Error && 'status' in error) throw new ApiError(Number(error.status), error.message);
         throw error;
       }
     }
     const headers = new Headers(options.headers);
     headers.set('Accept', 'application/json');
+    if (sentToken) headers.set('Authorization', 'Bearer ' + sentToken);
     const response = await fetch(`${API_URL}${path}`, { ...requestOptions, headers, signal: controller.signal });
     if (!response.ok) {
       let message = `API trả lỗi HTTP ${response.status}`;
@@ -69,6 +81,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
       } catch {
         // Keep the HTTP status message when the server does not return JSON.
       }
+      if (response.status === 401 && !path.startsWith('/auth/') && sentToken === accessToken) unauthorized?.();
       throw new ApiError(response.status, message, code);
     }
     return await response.json() as ApiResponse<T>;

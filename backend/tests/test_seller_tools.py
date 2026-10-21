@@ -130,3 +130,17 @@ def test_invalid_price_and_missing_sku_do_not_create_proposal(client):
     assert client.post("/api/v1/proposals/price-change", json={
         "sku": "UNKNOWN", "new_price_vnd": 100000,
     }).status_code == 404
+
+
+def test_proposal_id_cannot_target_another_product_or_leak_approved_data(client):
+    proposal = client.post('/api/v1/proposals/price-change', json={'sku':'P001','new_price_vnd':99000}).json()['data']
+    for state in ('pending', 'approved', 'rejected'):
+        with client.app.state.session_factory() as session:
+            record = session.get(ActionProposal, proposal['id'])
+            record.product_id = 99999
+            record.status = state
+            session.commit()
+        assert client.post(f"/api/v1/proposals/{proposal['id']}/confirm").status_code == 404
+        assert client.post(f"/api/v1/proposals/{proposal['id']}/reject").status_code == 404
+        with client.app.state.session_factory() as session:
+            assert session.get(ActionProposal, proposal['id']).status == state

@@ -12,6 +12,8 @@
       "backgroundColor": "#FFFFFF"
     },
     "plugins": [
+      ["expo-local-authentication", {"faceIDPermission": "Cho phép SellerPilot dùng Face ID để mở khóa tài khoản của bạn."}],
+      ["expo-secure-store", {"faceIDPermission": "Cho phép SellerPilot dùng Face ID để mở khóa tài khoản của bạn.", "configureAndroidBackup": true}],
       [
         "expo-image-picker",
         {

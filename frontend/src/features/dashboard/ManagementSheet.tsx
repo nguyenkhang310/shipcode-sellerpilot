@@ -11,6 +11,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { ManagementRoute, money, count } from './DashboardScreen';
 import { OrdersPanel } from './OrdersPanel';
 import { ProductEditor } from './ProductEditor';
+import { SecuritySettings } from '../auth/SecuritySettings';
 
 const labels: Record<string, string> = { pending: 'Chờ xác nhận', paid: 'Chờ lấy hàng', shipped: 'Đang giao', delivered: 'Đã giao', cancelled: 'Đã hủy', returned: 'Đã hoàn hàng', active: 'Đang bán', draft: 'Bản nháp', archived: 'Đã ẩn' };
 export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, darkMode, onDarkMode, onRefresh, embedded = false, active = true, connectionError = '', refreshing = false }: {
@@ -69,6 +70,7 @@ export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, 
             ['Đánh giá chưa phản hồi', data?.tasks.unanswered_reviews, () => onStore('/seller/reviews?unanswered=1')],
           ] as const).map(([label, value, action]) => <Pressable key={label} accessibilityRole="button" onPress={action} style={[ui.listCard, ui.between]}><Text style={[ui.productName, ui.grow]}>{label}</Text><Text style={ui.taskCount}>{value ?? '—'}</Text><Ionicons name="chevron-forward" size={17} color={IOS.tertiary} /></Pressable>)}</> : null}
           {route?.kind === 'settings' ? <>
+            <SecuritySettings />
             <View style={ui.listCard}><Text style={ui.listTitle}>{data?.shop.name || 'Chưa kết nối shop'}</Text><View style={ui.row}><View style={[ui.dot, (!data || Boolean(connectionError)) && { backgroundColor: IOS.tertiary }]} /><Text style={ui.caption}>{connectionError ? 'Chưa đồng bộ được dữ liệu mới' : refreshing ? 'Đang đồng bộ…' : data ? 'Đã kết nối Shopee' : 'Chưa kết nối'}</Text></View><Text style={ui.caption}>{data?.shop.location || 'SellerPilot · by ShipCode'}</Text><Pressable accessibilityRole="button" onPress={() => onStore('/shop/' + (data?.shop.slug || 'utech-official'))} style={ui.secondaryButton}><Text style={ui.secondaryText}>Mở gian hàng</Text><Ionicons name="open-outline" size={16} color={BRAND.navy} /></Pressable></View>
             <View style={[ui.listCard, ui.between]}><View style={ui.row}><Ionicons name="moon-outline" size={21} color={BRAND.navy} /><Text style={ui.productName}>Giao diện tối</Text></View><Switch accessibilityLabel="Giao diện tối" value={darkMode} onValueChange={onDarkMode} trackColor={{ true: BRAND.orange, false: isDark ? '#454A54' : '#D2D8E1' }} /></View>
             <View style={ui.grouped}>{([

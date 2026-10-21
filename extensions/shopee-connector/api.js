@@ -108,13 +108,13 @@ async function saveTurn(connectionId, conversationId, message, response) {
     connection.results ||= {};
   });
 }
-export async function handleApi(path, method, raw, signal) {
+export async function handleApi(path, method, raw, signal, authorization) {
   const connection = await state();
   if (connection.mode === 'local') {
     // Full existing app behavior is available only after an explicit source switch.
-    if (!/^\/(?:chat(?:\/requests\/[a-z0-9-]+(?:\/cancel)?)?|conversations(?:\/[a-z0-9-]+)?|management\/(?:dashboard|(?:products|orders)(?:\/[0-9]+)?)|product-drafts(?:\/images-data|\/[0-9]+\/(?:publish|cancel))|product-edits\/[0-9]+\/(?:confirm|reject)|proposals\/[0-9]+\/(?:confirm|reject)|health)(?:\?[^#]*)?$/i.test(path)) fail('Đường dẫn không được phép.', 400);
+    if (!/^\/(?:auth\/(?:login|me|logout)|chat(?:\/requests\/[a-z0-9-]+(?:\/cancel)?)?|conversations(?:\/[a-z0-9-]+)?|management\/(?:dashboard|(?:products|orders)(?:\/[0-9]+)?)|product-drafts(?:\/images-data|\/[0-9]+\/(?:publish|cancel))|product-edits\/[0-9]+\/(?:confirm|reject)|proposals\/[0-9]+\/(?:confirm|reject)|health)(?:\?[^#]*)?$/i.test(path)) fail('Đường dẫn không được phép.', 400);
     const response = await fetch(API + path, {method, body: method === 'GET' ? undefined : raw,
-      headers: {'Content-Type': 'application/json'}, credentials: 'omit', redirect: 'error', signal});
+      headers: {'Content-Type': 'application/json', ...(/^Bearer [a-z0-9_-]{30,128}$/i.test(authorization || '') ? {Authorization: authorization} : {})}, credentials: 'omit', redirect: 'error', signal});
     const result = await response.json();
     if (!response.ok) fail(typeof result.detail === 'string' ? result.detail : result.detail?.message || 'API chưa sẵn sàng.', response.status);
     return result;

@@ -13,7 +13,7 @@ import unicodedata
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, make_response
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, make_response, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from flask_login import login_user, login_required, logout_user, current_user
@@ -2293,6 +2293,18 @@ initialize_marketplace(app)
 
 @app.before_request
 def prepare_demo_catalog_reviews():
+    if request.endpoint == 'static' and (request.view_args or {}).get('filename', '').startswith('uploads/sellerpilot/'):
+        # Draft originals are private; published product pictures are public.
+        url = '/static/' + request.view_args['filename']
+        published = Product.query.filter(or_(Product.image_url == url, Product.extra_images.contains(url))).all()
+        def has_public_image(product):
+            if product.image_url == url: return True
+            try:
+                extras = json.loads(product.extra_images or '[]')
+                return isinstance(extras, list) and url in extras
+            except (ValueError, TypeError): return False
+        if not any(has_public_image(product) for product in published):
+            abort(404)
     # SellerPilot can publish directly to the shared DB while the store stays
     # running. Backfill only unmarked products before catalog/review rendering.
     if request.method == 'GET' and request.endpoint in {

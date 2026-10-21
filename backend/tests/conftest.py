@@ -93,6 +93,8 @@ def client(shop_db_path, tmp_path):
     Base.metadata.create_all(engine)
     engine.dispose()
     app = create_app(settings)
+    from auth_fixture import authenticated_fixture
+    authenticated_fixture(app)
     with TestClient(app) as test_client:
         app.state.ai_provider = OfflineProvider()
         yield test_client

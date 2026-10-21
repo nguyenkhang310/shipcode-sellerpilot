@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.integrations.ute_mall import StaleShopPriceError, UTEMallRepository
+from app.integrations.ute_mall import ShopItemNotFoundError, StaleShopPriceError, UTEMallRepository
 from app.models.action import ActionAudit, ActionProposal
 
 
@@ -47,14 +47,25 @@ def create_price_proposal(
     return proposal
 
 
+def scoped_proposal(session: Session, shop: UTEMallRepository, proposal_id: int) -> ActionProposal:
+    proposal = session.get(ActionProposal, proposal_id)
+    if proposal is None:
+        raise ProposalNotFoundError(proposal_id)
+    try:
+        item = shop.get_item_by_sku(proposal.sku)
+    except ShopItemNotFoundError as error:
+        raise ProposalNotFoundError(proposal_id) from error
+    if (item['product_id'], item['variant_id'], item['target_kind']) != (proposal.product_id, proposal.variant_id, proposal.target_kind):
+        raise ProposalNotFoundError(proposal_id)
+    return proposal
+
+
 def confirm_price_proposal(
     session: Session,
     shop: UTEMallRepository,
     proposal_id: int,
 ) -> tuple[ActionProposal, bool]:
-    proposal = session.get(ActionProposal, proposal_id)
-    if proposal is None:
-        raise ProposalNotFoundError(proposal_id)
+    proposal = scoped_proposal(session, shop, proposal_id)
     if proposal.status == "approved":
         return proposal, True
     if proposal.status not in {"pending", "executing"}:
@@ -130,10 +141,8 @@ def _mark_conflict(session: Session, proposal: ActionProposal, current_price_vnd
     session.commit()
 
 
-def reject_price_proposal(session: Session, proposal_id: int) -> tuple[ActionProposal, bool]:
-    proposal = session.get(ActionProposal, proposal_id)
-    if proposal is None:
-        raise ProposalNotFoundError(proposal_id)
+def reject_price_proposal(session: Session, shop: UTEMallRepository, proposal_id: int) -> tuple[ActionProposal, bool]:
+    proposal = scoped_proposal(session, shop, proposal_id)
     if proposal.status == "rejected":
         return proposal, True
     if proposal.status != "pending":

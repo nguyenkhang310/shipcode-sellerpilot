@@ -1,5 +1,9 @@
 # Kiểm tra seller tools hiện tại
 
+Từ bản có đăng nhập: gọi `/api/v1/auth/login` bằng tài khoản shop local trước,
+rồi dán `data.token` vào **Authorize → SellerSession** trong Swagger. Các bước
+đọc/sửa dữ liệu dưới đây đều yêu cầu Bearer; không chụp token vào báo cáo.
+
 1. Chạy `cd backend && ./run_api.sh`.
 2. Mở `/docs`; gọi `/api/v1/health`. Với cấu hình hiện tại cần thấy
    `provider=opencode`, `model=glm-5.3-flash-free`,

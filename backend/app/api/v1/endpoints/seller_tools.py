@@ -113,11 +113,14 @@ def confirm_proposal(
 def reject_proposal(
     proposal_id: int,
     session: Session = Depends(get_session),
+    shop: UTEMallRepository = Depends(get_shop),
 ) -> ProposalResponse:
     try:
-        proposal, idempotent = reject_price_proposal(session, proposal_id)
+        proposal, idempotent = reject_price_proposal(session, shop, proposal_id)
         return ProposalResponse(data=proposal_to_dict(proposal, idempotent=idempotent))
     except ProposalNotFoundError as error:
         raise HTTPException(status_code=404, detail={"code": "proposal_not_found"}) from error
     except ProposalConflictError as error:
         raise HTTPException(status_code=409, detail={"code": "proposal_conflict", "message": str(error)}) from error
+    except ShopDatabaseError as error:
+        raise shop_error(error) from error

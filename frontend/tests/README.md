@@ -5,6 +5,7 @@ Từ root:
 ```sh
 npm run typecheck
 npm run test:api
+npm run test:auth
 npm run test:svg
 npm run build
 npm run build:ios
@@ -69,6 +70,29 @@ Nếu Playwright không nằm trong dependency cục bộ, đặt `PLAYWRIGHT_MO
 Ảnh và JSON kết quả nằm trong `docs/evaluations/`, được gitignore. Khi xong, dừng hai server QA và chạy lại `npm run build` để bỏ địa chỉ API thử khỏi bundle web.
 
 Các test browser không thay thế kiểm tra safe area, bàn phím, Dynamic Type và vòng đời app trên iPhone thật.
+
+## Kiểm tra đăng nhập thật
+
+Server kiểm tra nghiệp vụ 8123 có override xác thực **chỉ ở fixture test**. Khi
+kiểm tra ranh giới bảo mật phải dùng server auth 8124, tạo shop/user hoàn toàn
+tạm và giữ nguyên dependency xác thực production:
+
+```sh
+backend/.venv/bin/python backend/tests/auth_ui_server.py
+```
+
+Phục vụ bundle web ở 5174 như trên, rồi chạy:
+
+```sh
+QA_API_ORIGIN=http://127.0.0.1:8124 node frontend/tests/auth-login.cjs
+```
+
+Script xác minh server QA, dùng tài khoản tổng hợp riêng, kiểm tra trước đăng
+nhập không tải dữ liệu shop, sai mật khẩu, đăng xuất/thu hồi, hết hạn và không
+lưu token vào browser storage; ảnh riêng tư yêu cầu Bearer; chụp login cả sáng/tối
+ở 320/390/430/1024px. Không dùng tài khoản
+hoặc API thật. `npm run test:auth` kiểm tra adapter Keychain/Face ID và 401 bằng
+mock; chưa thay thế thử trên iPhone có bản native. [Quy trình Face ID](../../docs/AUTHENTICATION.md).
 
 ## Kiểm tra lỗi nhảy trang khi đổi kỳ
 

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+from app.integrations.private_media import CatalogFiles
 from sqlalchemy.orm import sessionmaker
 
 from app.ai.factory import create_provider
@@ -58,15 +58,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=settings.cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Authorization"],
     )
     app.include_router(router)
+    @app.middleware('http')
+    async def private_responses(request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith('/api/v1/'):
+            response.headers['Cache-Control'] = 'no-store'
+        return response
     # Mobile clients already reach the API on port 8000. Serve the shop's
     # public catalogue media through the same origin so product thumbnails do
     # not depend on the UTE MALL web server also being reachable on port 5011.
     app.mount(
         "/store-static",
-        StaticFiles(directory=settings.shop_static_dir, check_dir=False),
+        CatalogFiles(directory=settings.shop_static_dir, check_dir=False,
+                     shop=UTEMallRepository(settings.shop_database_path, settings.shop_timezone, settings.seller_shop_slug)),
         name="store-static",
     )
 
