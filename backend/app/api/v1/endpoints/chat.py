@@ -18,6 +18,7 @@ from app.models.action import ActionProposal
 from app.models.chat_request import ChatRequestRecord
 from app.models.conversation_state import ConversationState
 from app.models.product_draft import ProductDraft
+from app.models.product_edit import ProductEditProposal
 from app.services.conversation_state import ensure_conversation_open
 from app.services.product_drafts import delete_draft_images
 from app.services.conversations import recent_runs, run_data
@@ -160,6 +161,11 @@ async def delete_conversation(conversation_id: UUID, request: Request,
                 AgentRun.conversation_id == identifier, AgentRun.proposal_id.is_not(None))
             session.execute(update(ActionProposal).where(ActionProposal.id.in_(proposal_ids),
                 ActionProposal.status == 'pending').values(status='rejected', decided_at=datetime.utcnow()))
+            edit_ids = select(AgentRun.product_edit_proposal_id).where(AgentRun.shop_slug == tenant,
+                AgentRun.conversation_id == identifier, AgentRun.product_edit_proposal_id.is_not(None))
+            session.execute(update(ProductEditProposal).where(ProductEditProposal.shop_slug == tenant,
+                ProductEditProposal.id.in_(edit_ids), ProductEditProposal.status == 'pending')
+                .values(status='rejected', decided_at=datetime.utcnow()))
             drafts = session.scalars(select(ProductDraft).where(ProductDraft.shop_slug == tenant,
                 ProductDraft.conversation_id == identifier, ProductDraft.status != 'published')).all()
             for draft in drafts:

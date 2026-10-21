@@ -13,8 +13,8 @@ import { ORDER_STATES, orderDate } from './orderPresentation';
 import { OrderEditor } from './OrderEditor';
 import { OrderFeedback } from './OrderFeedback';
 
-export function OrdersPanel({ initialStatus = 'all', embedded, active = true, onChanged }: {
-  initialStatus?: string; embedded: boolean; active?: boolean; onStore: (path: string) => void; onChanged?: () => void;
+export function OrdersPanel({ initialStatus = 'all', embedded, active = true, onChanged, revision = 0 }: {
+  initialStatus?: string; embedded: boolean; active?: boolean; onStore: (path: string) => void; onChanged?: () => void; revision?: number;
 }) {
   const { ui, IOS, BRAND, isDark } = useTheme();
   const insets = useSafeAreaInsets();
@@ -35,6 +35,7 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
   const filters = useRef<ScrollView>(null);
   const chipPositions = useRef<Record<string, number>>({});
   const cacheKey = useRef(''), loadedAt = useRef(0);
+  const loadedRevision = useRef(revision);
   const pending = useRef(false);
   const key = status + ':' + query.trim();
   const load = useCallback(async (offset: number, pull = false, background = false) => {
@@ -49,22 +50,23 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
       if (controller.signal.aborted) return;
       setItems(previous => offset ? [...previous, ...data.items.filter(item => !previous.some(old => old.id === item.id))] : data.items);
       setTotal(data.total); setStatusCounts(data.status_counts || null); setError(''); cacheKey.current = key; loadedAt.current = Date.now();
+      loadedRevision.current = revision;
     } catch (e) {
       if (!controller.signal.aborted) setError(e instanceof ApiError ? e.message : 'Chưa tải được đơn hàng. Vui lòng thử lại.');
     } finally {
       if (!controller.signal.aborted) { pending.current = false; setLoading(false); setLoadingMore(false); setRefreshing(false); }
     }
-  }, [status, query, key]);
+  }, [status, query, key, revision]);
   useEffect(() => { setStatus(initialStatus); }, [initialStatus]);
   useEffect(() => {
     if (!active) { request.current?.abort(); pending.current = false; setLoading(false); setLoadingMore(false); setRefreshing(false); return; }
     if (cacheKey.current !== key) {
       setItems([]); setTotal(null); setStatusCounts(null); setExpanded(null); setError(''); setLoading(true);
       list.current?.scrollToOffset({ offset: 0, animated: false });
-    } else if (Date.now() - loadedAt.current < 60_000) return;
+    } else if (Date.now() - loadedAt.current < 60_000 && loadedRevision.current === revision) return;
     const timer = setTimeout(() => void load(0), query ? 250 : 0);
     return () => { clearTimeout(timer); request.current?.abort(); };
-  }, [active, key, load]);
+  }, [active, key, load, revision]);
   useEffect(() => () => { request.current?.abort(); if (feedbackTimer.current) clearTimeout(feedbackTimer.current); }, []);
   useEffect(() => {
     if (!active || editingId !== null) return;

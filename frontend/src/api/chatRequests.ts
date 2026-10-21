@@ -25,23 +25,30 @@ export const cancelChatRequest = (id: string) =>
     method: 'POST', timeoutMs: 20_000,
   });
 
+// A durable failed record is terminal even when its business-specific code
+// differs from chat_failed (for example a shop database outage).
+class EndedChatRequestError extends ApiError {}
+
 export const isTerminalChatError = (error: unknown): error is ApiError =>
-  error instanceof ApiError && ['chat_cancelled', 'chat_interrupted', 'chat_failed', 'chat_timeout', 'conversation_deleted'].includes(error.code || '');
+  error instanceof EndedChatRequestError || error instanceof ApiError && (
+    error.status === 422 || error.status === 413 ||
+    ['chat_cancelled', 'chat_interrupted', 'chat_failed', 'chat_timeout', 'conversation_deleted'].includes(error.code || ''));
 
 export async function recoverChatRequest(id: string, signal?: AbortSignal) {
   try {
     const { data } = await getChatRequest(id, signal);
     if (data.status === 'completed' && data.response) return data.response;
-    if (data.status === 'cancelled') throw new ApiError(409, 'Tin nhắn đã được dừng.', 'chat_cancelled');
+    if (data.status === 'cancelled') throw new EndedChatRequestError(409, 'Tin nhắn đã được dừng.', 'chat_cancelled');
     if (data.error) {
       const detail = data.error.detail;
-      throw new ApiError(data.error.status,
+      const ErrorType = data.status === 'failed' ? EndedChatRequestError : ApiError;
+      throw new ErrorType(data.error.status,
         typeof detail === 'string' ? detail : detail.message || 'Yêu cầu đã dừng.',
         typeof detail === 'string' ? undefined : detail.code);
     }
     return null; // Re-POST joins the running request; it does not start another.
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) return null;
+    if (error instanceof ApiError && error.status === 404 && !(error instanceof EndedChatRequestError)) return null;
     throw error;
   }
 }

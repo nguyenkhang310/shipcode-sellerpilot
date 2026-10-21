@@ -1,5 +1,6 @@
 import sqlite3
 from uuid import uuid4
+import pytest
 from app.ai.contracts import ClassificationResult, ParsedCommand
 from app.models.agent_run import AgentRun
 
@@ -211,3 +212,21 @@ def test_price_clarification_accepts_slang_units(client):
     result = chat(client, '5 xị', first['conversation_id'])
     assert result['proposal']['new_price_vnd'] == 500000
     assert result['proposal']['status'] == 'pending'
+
+
+@pytest.mark.parametrize('position', [0, 2, 999])
+def test_invalid_ordinal_never_selects_the_only_product(client, position):
+    first = chat(client, 'Tìm áo thun')
+    assert len(first['facts']['items']) == 1
+    result = chat(client, f'Đổi giá sản phẩm thứ {position} thành 125k', first['conversation_id'])
+    assert result['proposal'] is None
+    assert 'sku' in result['facts']['missing_fields']
+
+
+def test_price_clarification_survives_social_turns_without_becoming_cost_input(client):
+    first = chat(client, 'Đổi giá SKU A001')
+    chat(client, 'cảm ơn', first['conversation_id'])
+    chat(client, 'ok nhé', first['conversation_id'])
+    result = chat(client, '5 xị', first['conversation_id'])
+    assert result['proposal']['sku'] == 'A001'
+    assert result['proposal']['new_price_vnd'] == 500000

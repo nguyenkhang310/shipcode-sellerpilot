@@ -109,6 +109,12 @@ không hiển thị bong bóng rỗng hoặc dùng phần JSON đang dở. Lỗi
 cụ không nằm trong nhóm thử sửa này. Tải ảnh bị gián đoạn giữ ảnh để gửi lại;
 phản hồi bị mất nhưng server đã xử lý được khôi phục theo ID cũ.
 
+Khi soạn hàng, có thể gửi bổ sung ảnh nhiều lần tới tổng 6 ảnh. “Để sau” giữ
+nguyên nháp và ảnh để tiếp tục; hủy rõ ràng mới xóa ảnh chưa đăng. Đang chờ AI
+thì hoàn tất/dừng phản hồi trước khi đăng hoặc đổi ảnh, để thao tác duyệt áp
+đúng dữ liệu đã xem. Đăng/sửa thành công làm mới tab Sản phẩm độc lập với API
+tổng quan; danh sách trong app ưu tiên sản phẩm mới nhất.
+
 ## Hạn mức và kiểm thử
 
 Free Tier không có nghĩa là không giới hạn. Xem quota trực tiếp trong project:

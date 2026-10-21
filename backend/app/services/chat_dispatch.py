@@ -14,7 +14,7 @@ from app.integrations.ute_mall import ShopDatabaseError, UTEMallRepository
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.advisor import is_forget_request
 from app.services.business_advisor import planning_request
-from app.services.chat import handle_chat
+from app.services.chat import handle_chat, is_casual_message
 from app.services.order_assistant import is_order_question
 from app.services.conversations import recent_runs, history_messages
 from app.services.product_edit_chat import is_product_edit_request, pending_edit, handle_product_edit
@@ -44,7 +44,9 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
         previous=recent_runs(session,shop,conversation_id,limit=24)
         # Social acknowledgements are not names, captions or edit targets.
         # Keep work in progress intact so the next factual reply can resume it.
-        if social_reply(payload.message):
+        casual = is_casual_message(payload.message) and not re.search(
+            r'(?:^|[\n;,])\s*(?:tên|tiêu đề|mô tả|caption|nội dung)\s*[:=]', payload.message, re.I)
+        if social_reply(payload.message) or casual and not listing_request(payload.message) and not _wants_ai_description(payload.message):
             return ChatResponse(data=await handle_chat(session, shop, provider,
                 message=payload.message, conversation_id=conversation_id))
         # A current order read must not be mistaken for a draft title or a

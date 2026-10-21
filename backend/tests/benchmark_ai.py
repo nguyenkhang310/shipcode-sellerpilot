@@ -92,7 +92,9 @@ async def main():
                 await measure('image_listing', 'Bán sản phẩm trong ảnh giá 5 xị, kho 8 chiếc. Tự viết tên và mô tả theo hình, không bịa thông số.',
                               upload.json()['data']['conversation_id'], listing=True)
                 await measure('listing_acknowledgement', 'cảm ơn nhé', upload.json()['data']['conversation_id'], quick=True)
+                await measure('postpone_listing', 'Để sau', upload.json()['data']['conversation_id'], quick=True, listing=True)
                 await measure('image_followup_here_it_is', 'đây nè', upload.json()['data']['conversation_id'], listing=True)
+                await measure('cancel_listing_naturally', 'Thôi không đăng nữa', upload.json()['data']['conversation_id'], quick=True)
     report = {'tested_at': datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')).isoformat(),
               'timeout_seconds': settings.gemini_generation_timeout_seconds, 'cases': results}
     output = Path(__file__).resolve().parents[2] / 'docs/evaluations/ai-latency'

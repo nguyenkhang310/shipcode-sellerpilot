@@ -96,3 +96,16 @@ test('terminal upload/chat failures release pending work; transient errors keep 
     assert.equal(isTerminalChatError(error), false);
   }
 });
+
+test('business-specific failed records are terminal, including stored 404 errors', async () => {
+  for (const status of [404, 409, 503]) {
+    const calls=[];
+    const {load} = loadApi(async url => {calls.push(url);return {data:{status:'failed',error:{
+      status,detail:{code:'business_read_failed',message:'Không đọc được dữ liệu.'}}}};});
+    const {recoverChatRequest,isTerminalChatError}=load('./chatRequests');
+    await assert.rejects(recoverChatRequest('known-failed'), error => {
+      assert.equal(error.status,status);return isTerminalChatError(error);
+    });
+    assert.equal(calls.length,1);
+  }
+});

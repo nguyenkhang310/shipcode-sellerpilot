@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.api.v1.endpoints.seller_tools import get_shop, shop_error
@@ -34,10 +34,12 @@ def decide(proposal_id,approve,session,shop):
 
 
 @router.post('/{proposal_id}/confirm',response_model=ProductEditResponse)
-def confirm(proposal_id:int,session:Session=Depends(get_session),shop:UTEMallRepository=Depends(get_shop)):
-    return decide(proposal_id,True,session,shop)
+async def confirm(proposal_id:int,request:Request,session:Session=Depends(get_session),shop:UTEMallRepository=Depends(get_shop)):
+    async with request.app.state.chat_requests.execution:
+        return decide(proposal_id,True,session,shop)
 
 
 @router.post('/{proposal_id}/reject',response_model=ProductEditResponse)
-def reject(proposal_id:int,session:Session=Depends(get_session),shop:UTEMallRepository=Depends(get_shop)):
-    return decide(proposal_id,False,session,shop)
+async def reject(proposal_id:int,request:Request,session:Session=Depends(get_session),shop:UTEMallRepository=Depends(get_shop)):
+    async with request.app.state.chat_requests.execution:
+        return decide(proposal_id,False,session,shop)

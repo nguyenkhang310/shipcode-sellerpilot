@@ -93,13 +93,15 @@ def propose_price_change(
 
 
 @router.post("/proposals/{proposal_id}/confirm", response_model=ProposalResponse)
-def confirm_proposal(
+async def confirm_proposal(
     proposal_id: int,
+    request: Request,
     session: Session = Depends(get_session),
     shop: UTEMallRepository = Depends(get_shop),
 ) -> ProposalResponse:
     try:
-        proposal, idempotent = confirm_price_proposal(session, shop, proposal_id)
+        async with request.app.state.chat_requests.execution:
+            proposal, idempotent = confirm_price_proposal(session, shop, proposal_id)
         return ProposalResponse(data=proposal_to_dict(proposal, idempotent=idempotent))
     except ProposalNotFoundError as error:
         raise HTTPException(status_code=404, detail={"code": "proposal_not_found"}) from error
@@ -110,13 +112,15 @@ def confirm_proposal(
 
 
 @router.post("/proposals/{proposal_id}/reject", response_model=ProposalResponse)
-def reject_proposal(
+async def reject_proposal(
     proposal_id: int,
+    request: Request,
     session: Session = Depends(get_session),
     shop: UTEMallRepository = Depends(get_shop),
 ) -> ProposalResponse:
     try:
-        proposal, idempotent = reject_price_proposal(session, shop, proposal_id)
+        async with request.app.state.chat_requests.execution:
+            proposal, idempotent = reject_price_proposal(session, shop, proposal_id)
         return ProposalResponse(data=proposal_to_dict(proposal, idempotent=idempotent))
     except ProposalNotFoundError as error:
         raise HTTPException(status_code=404, detail={"code": "proposal_not_found"}) from error

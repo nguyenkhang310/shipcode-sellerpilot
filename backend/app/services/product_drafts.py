@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from app.ai.contracts import AIProviderError
 from app.ai.listing_text import _is_generic_product_command, _wants_ai_description
 from app.ai.quantities import quantity_value, EMPTY_STOCK_PHRASES
+from app.ai.draft_actions import draft_action
 from app.ai.listing_evidence import commercial_context as _commercial_context
 from app.ai.listing_contracts import ListingCopy, listing_validation_context, contextual_product_reference
 from app.ai.fallback import extract_price, normalize_text
@@ -165,7 +166,8 @@ def create_text_product_draft(session, shop, conversation_id=None):
     draft = ProductDraft(conversation_id=conversation_id, shop_slug=shop.seller_shop_slug or 'local',
                          status='collecting', image_filename='', image_url='', image_mime='', image_bytes=0)
     session.add(draft)
-    session.flush()
+    # Do not hold SQLite's writer lock across a remote AI call. Allocate the
+    # draft ID when saving the completed turn, after the last await.
     return draft
 
 
@@ -182,31 +184,36 @@ def create_product_draft_images(
     conversation_id = conversation_id or str(uuid4())
     ensure_conversation_open(session, shop.seller_shop_slug or 'local', conversation_id)
     existing = get_active_draft(session, shop, conversation_id)
-    if existing and draft_stored_images(existing):
-        raise ProductDraftConflictError("Hãy hoàn tất hoặc hủy sản phẩm đang soạn trước khi thêm ảnh mới.")
+    previous_images = draft_stored_images(existing) if existing else []
+    if len(previous_images) + len(contents) > MAX_PRODUCT_IMAGES:
+        raise ProductDraftError(f"Bản nháp đã có {len(previous_images)} ảnh. Mỗi sản phẩm tối đa {MAX_PRODUCT_IMAGES} ảnh.")
     stored: list[tuple[str, str, str, int]] = []
     try:
         for content in contents:
             filename, image_url, mime = store_image(content, upload_dir)
             stored.append((filename, image_url, mime, len(content)))
-        primary = stored[0]
-        extras = [
+        new_images = [
             {"filename": filename, "url": url, "mime": mime, "bytes": size}
-            for filename, url, mime, size in stored[1:]
+            for filename, url, mime, size in stored
         ]
+        images = previous_images + new_images
+        primary = images[0]
+        extras = images[1:]
         draft = existing or ProductDraft(
             conversation_id=conversation_id,
             shop_slug=shop.seller_shop_slug or "local",
             status="collecting",
-            image_filename=primary[0],
-            image_url=primary[1],
-            image_mime=primary[2],
-            image_bytes=primary[3],
+            image_filename=primary['filename'],
+            image_url=primary['url'],
+            image_mime=primary['mime'],
+            image_bytes=primary['bytes'],
             extra_images_json=json.dumps(extras, ensure_ascii=False) if extras else None,
         )
         if existing:
-            draft.image_filename, draft.image_url, draft.image_mime, draft.image_bytes = primary
+            draft.image_filename, draft.image_url = primary['filename'], primary['url']
+            draft.image_mime, draft.image_bytes = primary['mime'], primary['bytes']
             draft.extra_images_json = json.dumps(extras, ensure_ascii=False) if extras else None
+            draft.updated_at = datetime.utcnow()
         session.add(draft)
         session.flush()
         answer = (
@@ -218,7 +225,8 @@ def create_product_draft_images(
             message=f"Đã thêm {len(stored)} ảnh sản phẩm",
             answer=answer,
             tool="create_product_draft", facts={
-                "draft_id": draft.id, "image_count": len(stored),
+                "draft_id": draft.id, "image_count": len(images),
+                "image_start_index": len(previous_images), "new_image_count": len(new_images),
                 "missing_fields": missing_fields(draft),
             },
         )
@@ -244,7 +252,7 @@ async def advance_product_draft(
 ) -> dict:
     text = normalize_text(message).strip(".! ")
     previous = session.scalar(select(AgentRun).where(AgentRun.product_draft_id == draft.id)
-                              .order_by(AgentRun.id.desc()).limit(1))
+                              .order_by(AgentRun.id.desc()).limit(1)) if draft.id is not None else None
     pending_fields = json.loads(previous.facts_json).get('pending_fields', []) if previous else []
     used_model = False
     fallback_reason = None
@@ -257,7 +265,10 @@ async def advance_product_draft(
     if wants_copy:
         draft.copy_instructions = message[:2000]
 
-    if text in {"hủy", "huy", "hủy đăng", "huy dang", "bỏ bản nháp", "bo ban nhap", "để sau", "de sau"}:
+    action = draft_action(message)
+    if action == 'pause':
+        answer = 'Mình giữ nguyên bản nháp và ảnh. Khi muốn làm tiếp, bạn gửi thêm thông tin hoặc mở lại cuộc trò chuyện này nhé.'
+    elif action == 'cancel':
         pending_fields = []
         draft.status = "cancelled"
         draft.decided_at = draft.updated_at = datetime.utcnow()
@@ -460,6 +471,8 @@ def _owned_draft(session, shop, draft_id):
 
 
 def _save_draft_turn(session, draft, message, answer, used_model, fallback_reason, tool=None, ai_provider=None, pending_fields=None, fallback_stage=None):
+    if draft.id is None:
+        session.flush()
     tool = tool or ("prepare_product_publish" if draft.status == "ready" else "update_product_draft")
     run = _record_run(
         session, draft, message=message, answer=answer, tool=tool,
@@ -494,7 +507,7 @@ def _repair_command_content(draft: ProductDraft) -> bool:
 async def _compose_product_copy(session, ai_provider, draft, categories, upload_dir, message) -> ListingCopy:
     runs = list(reversed(session.scalars(select(AgentRun).where(
         AgentRun.product_draft_id == draft.id,
-    ).order_by(AgentRun.id.desc()).limit(6)).all()))
+    ).order_by(AgentRun.id.desc()).limit(6)).all())) if draft.id is not None else []
     history = []
     for run in runs:
         history.extend([{'role': 'user', 'content': run.message[:4000]},

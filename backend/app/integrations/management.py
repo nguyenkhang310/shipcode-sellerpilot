@@ -28,7 +28,7 @@ def _scope(connection, shop, table, alias=""):
     return f"{alias + '.' if alias else ''}shop_id = ?", [shop_id]
 
 
-def _product_rows(connection, shop, query="", limit=20, offset=0, low=False, *, min_price_vnd=None, max_price_vnd=None):
+def _product_rows(connection, shop, query="", limit=20, offset=0, low=False, *, min_price_vnd=None, max_price_vnd=None, sort='bestselling'):
     scope, params = _scope(connection, shop, "product", "p")
     columns = _columns(connection, "product")
     image = "p.image_url" if "image_url" in columns else "NULL"
@@ -52,27 +52,24 @@ def _product_rows(connection, shop, query="", limit=20, offset=0, low=False, *, 
     if low:
         filters.append("p.stock <= 5 AND p.status = 'active'")
     where = " AND ".join(filters)
+    ordering = 'p.stock ASC, p.id DESC' if low else 'p.id DESC' if sort == 'newest' else 'sold_count DESC, p.id DESC'
     total = connection.execute(f"SELECT COUNT(*) FROM product p WHERE {where}", params).fetchone()[0]
     rows = connection.execute(
         f"""SELECT p.id, p.name, p.sku, p.price AS price_vnd, p.stock, p.status,
                    {image} AS image_url, {sold} AS sold_count, {rating} AS rating
             FROM product p WHERE {where}
-            ORDER BY p.stock ASC, p.id DESC LIMIT ? OFFSET ?""" if low else
-        f"""SELECT p.id, p.name, p.sku, p.price AS price_vnd, p.stock, p.status,
-                   {image} AS image_url, {sold} AS sold_count, {rating} AS rating
-            FROM product p WHERE {where}
-            ORDER BY sold_count DESC, p.id DESC LIMIT ? OFFSET ?""",
+            ORDER BY {ordering} LIMIT ? OFFSET ?""",
         [*params, limit, offset],
     ).fetchall()
     return {"items": [dict(row) for row in rows], "total": total, "offset": offset, "limit": limit}
 
 
-def products(shop: UTEMallRepository, query="", limit=20, offset=0, low=False, *, min_price_vnd=None, max_price_vnd=None):
+def products(shop: UTEMallRepository, query="", limit=20, offset=0, low=False, *, min_price_vnd=None, max_price_vnd=None, sort='bestselling'):
     try:
         with shop._connect() as connection:
             connection.execute("BEGIN")
             return _product_rows(connection, shop, query, limit, offset, low,
-                                 min_price_vnd=min_price_vnd, max_price_vnd=max_price_vnd)
+                                 min_price_vnd=min_price_vnd, max_price_vnd=max_price_vnd, sort=sort)
     except sqlite3.Error as error:
         raise ShopDatabaseError("Cannot read products") from error
 

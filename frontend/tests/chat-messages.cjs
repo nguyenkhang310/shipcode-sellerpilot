@@ -86,3 +86,21 @@ test('a text-first draft does not consume its later gallery when history is rest
  assert.equal(messages[0].imageUris?.length||0,0);
  assert.deepEqual(Array.from(messages[2].imageUris),['http://api/image-a','http://api/image-b']);
 });
+
+test('appended photos stay with their own caption and an unfinished last upload is visible',()=>{
+ const product={...draft,preview_urls:['/front','/side','/back']};
+ const upload=(id,start,count)=>({...turn(id,'create_product_draft','Ảnh '+id,'Đã nhận ảnh.',product),
+   response:{...turn(id,'create_product_draft','','',product).response,facts:{image_start_index:start,new_image_count:count}}});
+ const messages=restoreMessages([
+   turn(1,'update_product_draft','Đăng bàn phím','Bạn thêm ảnh nhé.',product),
+   upload(2,0,1),turn(3,'update_product_draft','Mặt trước đây','Đã nhận.',product),
+   upload(4,1,1),turn(5,'update_product_draft','Thêm mặt bên','Đã nhận.',product),
+   upload(6,2,1),
+ ]);
+ assert.equal(messages.length,8);
+ assert.equal(messages[0].imageUris,undefined);
+ assert.deepEqual(Array.from(messages[2].imageUris),['http://api/front']);
+ assert.deepEqual(Array.from(messages[4].imageUris),['http://api/side']);
+ assert.deepEqual(Array.from(messages[6].imageUris),['http://api/back']);
+ assert.equal(messages[6].text,'Ảnh 6');
+});

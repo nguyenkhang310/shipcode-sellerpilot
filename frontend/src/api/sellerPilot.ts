@@ -29,7 +29,7 @@ export const getProduct = (id: number, signal?: AbortSignal) => apiRequest<Produ
 export const updateProduct = (id: number, changes: ProductChanges, version: string, requestId: string, variantId: number | null) => apiRequest<ProductDetail>('/management/products/' + id, {
   method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({...changes, expected_version: version, request_id: requestId, variant_id: variantId}), timeoutMs: 20000,
 });
-export const getProducts = (q = '', low = false, offset = 0, signal?: AbortSignal) => apiRequest<StorePage<StoreProduct>>('/management/products?' + new URLSearchParams({ q, low: String(low), offset: String(offset) }), { signal });
+export const getProducts = (q = '', low = false, offset = 0, signal?: AbortSignal) => apiRequest<StorePage<StoreProduct>>('/management/products?' + new URLSearchParams({ q, low: String(low), offset: String(offset), sort: 'newest' }), { signal });
 export const getOrders = (status = 'all', q = '', offset = 0, signal?: AbortSignal) => apiRequest<StorePage<StoreOrder>>('/management/orders?' + new URLSearchParams({ status, q, offset: String(offset) }), { signal });
 export const getOrder = (id: number, signal?: AbortSignal) => apiRequest<OrderDetail>('/management/orders/' + id, {signal});
 export const updateOrder = (id: number, changes: OrderChanges, version: string, requestId: string) => apiRequest<OrderDetail>('/management/orders/' + id, {

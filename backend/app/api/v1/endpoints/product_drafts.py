@@ -46,13 +46,15 @@ async def upload_product_image(
     shop: UTEMallRepository = Depends(get_shop),
 ) -> ChatResponse:
     content = await image.read(MAX_IMAGE_BYTES + 1)
-    request.app.state.chat_requests.ensure_conversation_available(shop.seller_shop_slug or 'local', conversation_id)
+    request.app.state.chat_requests.ensure_conversation_idle(shop.seller_shop_slug or 'local', conversation_id)
     try:
-        data = create_product_draft(
-            session, shop, content=content,
-            upload_dir=request.app.state.settings.shop_product_upload_dir,
-            conversation_id=str(conversation_id) if conversation_id else None,
-        )
+        async with request.app.state.chat_requests.execution:
+            request.app.state.chat_requests.ensure_conversation_idle(shop.seller_shop_slug or 'local', conversation_id)
+            data = create_product_draft(
+                session, shop, content=content,
+                upload_dir=request.app.state.settings.shop_product_upload_dir,
+                conversation_id=str(conversation_id) if conversation_id else None,
+            )
         return ChatResponse(data=data)
     except ProductDraftError as error:
         raise HTTPException(422, detail={"code": "invalid_product_image", "message": str(error)}) from error
@@ -70,7 +72,7 @@ async def upload_product_image_data(
     shop: UTEMallRepository = Depends(get_shop),
 ) -> ChatResponse:
     """Receive a compressed image without relying on native multipart file URIs."""
-    request.app.state.chat_requests.ensure_conversation_available(shop.seller_shop_slug or 'local', payload.conversation_id)
+    request.app.state.chat_requests.ensure_conversation_idle(shop.seller_shop_slug or 'local', payload.conversation_id)
     encoded = payload.image_base64
     if encoded.startswith("data:"):
         encoded = encoded.partition(",")[2]
@@ -82,11 +84,13 @@ async def upload_product_image_data(
             detail={"code": "invalid_product_image", "message": "Dữ liệu ảnh không hợp lệ."},
         ) from error
     try:
-        data = create_product_draft(
-            session, shop, content=content,
-            upload_dir=request.app.state.settings.shop_product_upload_dir,
-            conversation_id=str(payload.conversation_id) if payload.conversation_id else None,
-        )
+        async with request.app.state.chat_requests.execution:
+            request.app.state.chat_requests.ensure_conversation_idle(shop.seller_shop_slug or 'local', payload.conversation_id)
+            data = create_product_draft(
+                session, shop, content=content,
+                upload_dir=request.app.state.settings.shop_product_upload_dir,
+                conversation_id=str(payload.conversation_id) if payload.conversation_id else None,
+            )
         return ChatResponse(data=data)
     except ProductDraftError as error:
         raise HTTPException(422, detail={"code": "invalid_product_image", "message": str(error)}) from error
@@ -121,13 +125,16 @@ async def upload_product_images_data(
     try:
         if payload.request_id:
             from app.services.image_requests import upload_once
-            return upload_once(request.app.state.chat_requests, shop, payload, contents,
+            return await upload_once(request.app.state.chat_requests, shop, payload, contents,
                                request.app.state.settings.shop_product_upload_dir)
-        data = create_product_draft_images(
-            session, shop, contents=contents,
-            upload_dir=request.app.state.settings.shop_product_upload_dir,
-            conversation_id=str(payload.conversation_id) if payload.conversation_id else None,
-        )
+        request.app.state.chat_requests.ensure_conversation_idle(shop.seller_shop_slug or 'local', payload.conversation_id)
+        async with request.app.state.chat_requests.execution:
+            request.app.state.chat_requests.ensure_conversation_idle(shop.seller_shop_slug or 'local', payload.conversation_id)
+            data = create_product_draft_images(
+                session, shop, contents=contents,
+                upload_dir=request.app.state.settings.shop_product_upload_dir,
+                conversation_id=str(payload.conversation_id) if payload.conversation_id else None,
+            )
         return ChatResponse(data=data)
     except ProductDraftError as error:
         raise HTTPException(422, detail={"code": "invalid_product_image", "message": str(error)}) from error
@@ -186,11 +193,14 @@ async def publish(
 ) -> ProductDraftResponse:
     try:
         manager = request.app.state.chat_requests
+        draft = get_product_draft(session, shop, draft_id)
+        manager.ensure_conversation_idle(shop.seller_shop_slug or 'local', draft.conversation_id)
+        session.rollback()  # Release the read transaction before waiting for the writer.
         # Publishing and deleting history must agree about which images are
         # public. Serialize them so deletion cannot remove a published gallery.
         async with manager.execution:
             draft = get_product_draft(session, shop, draft_id)
-            manager.ensure_conversation_available(shop.seller_shop_slug or 'local', draft.conversation_id)
+            manager.ensure_conversation_idle(shop.seller_shop_slug or 'local', draft.conversation_id)
             return ProductDraftResponse(data=draft_to_dict(publish_product_draft(session, shop, draft_id)))
     except ProductDraftNotFoundError as error:
         raise _not_found(error) from error
@@ -209,9 +219,12 @@ async def cancel(
 ) -> ProductDraftResponse:
     try:
         manager = request.app.state.chat_requests
+        draft = get_product_draft(session, shop, draft_id)
+        manager.ensure_conversation_idle(shop.seller_shop_slug or 'local', draft.conversation_id)
+        session.rollback()
         async with manager.execution:
             draft = get_product_draft(session, shop, draft_id)
-            manager.ensure_conversation_available(shop.seller_shop_slug or 'local', draft.conversation_id)
+            manager.ensure_conversation_idle(shop.seller_shop_slug or 'local', draft.conversation_id)
             draft = cancel_product_draft(
                 session, shop, draft_id, request.app.state.settings.shop_product_upload_dir
             )

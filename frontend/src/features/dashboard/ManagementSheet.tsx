@@ -14,11 +14,11 @@ import { ProductEditor } from './ProductEditor';
 import { SecuritySettings } from '../auth/SecuritySettings';
 
 const labels: Record<string, string> = { pending: 'Chờ xác nhận', paid: 'Chờ lấy hàng', shipped: 'Đang giao', delivered: 'Đã giao', cancelled: 'Đã hủy', returned: 'Đã hoàn hàng', active: 'Đang bán', draft: 'Bản nháp', archived: 'Đã ẩn' };
-export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, darkMode, onDarkMode, onRefresh, embedded = false, active = true, connectionError = '', refreshing = false }: {
+export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, darkMode, onDarkMode, onRefresh, embedded = false, active = true, connectionError = '', refreshing = false, revision = 0 }: {
   route: ManagementRoute | null; onClose: () => void; onOpen: (route: ManagementRoute) => void;
   data: ManagementData | null; onAsk: (message: string) => void; onStore: (path: string) => void;
   darkMode: boolean; onDarkMode: (dark: boolean) => void; onRefresh: () => void;
-  embedded?: boolean; active?: boolean; connectionError?: string; refreshing?: boolean;
+  embedded?: boolean; active?: boolean; connectionError?: string; refreshing?: boolean; revision?: number;
 }) {
   const { ui, IOS, BRAND, isDark } = useTheme();
   const insets = useSafeAreaInsets();
@@ -42,19 +42,19 @@ export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, 
     finally { if (!request.signal.aborted) setLoading(false); }
   };
   useEffect(() => { setQuery(''); setItems([]); setTotal(0); setError(''); }, [route]);
-  useEffect(() => { if (active && route && ['products', 'inventory'].includes(route.kind)) { setItems([]); setTotal(0); setError(''); setLoading(true); } }, [query, route?.kind, active]);
+  useEffect(() => { if (route && ['products', 'inventory'].includes(route.kind)) { setItems([]); setTotal(0); setError(''); setLoading(true); } }, [query, route?.kind]);
   useEffect(() => {
     if (!route || !active) { controller.current?.abort(); return; }
     const timer = setTimeout(() => { void load(0); }, query ? 250 : 0);
     return () => { clearTimeout(timer); controller.current?.abort(); };
-  }, [route, query, retry, data?.updated_at, active]);
+  }, [route, query, retry, revision, active]);
   const title = route ? { products: 'Sản phẩm', orders: 'Đơn hàng', inventory: 'Hàng sắp hết', tasks: 'Việc cần xử lý', settings: 'Shop' }[route.kind] : '';
   const isList = route && ['products', 'inventory'].includes(route.kind);
   const content = <View accessibilityViewIsModal={!embedded} style={embedded ? { flex: 1 } : [ui.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>{!embedded ? <View style={ui.sheetHandle} /> : null}<View style={[ui.sheetHeader, { flexWrap: 'nowrap' }]}><Text accessibilityRole="header" style={[embedded ? ui.title : ui.sheetTitle, { flex: 1, minWidth: 0 }]}>{title}</Text>{!embedded ? <Pressable accessibilityRole="button" accessibilityLabel="Đóng" onPress={onClose} style={ui.circleButton}><Ionicons name="close" size={21} color={IOS.label} /></Pressable> : route?.kind === 'products' ? <Pressable accessibilityRole="button" accessibilityLabel="Đăng sản phẩm mới" onPress={() => onAsk('Đăng sản phẩm mới lên shop, giúp mình soạn tiêu đề và mô tả.')} style={[ui.circleButton, { borderRadius: 14, backgroundColor: isDark ? '#9EB9DC' : '#0B1F3F' }]}><Ionicons name="add" size={25} color={isDark ? '#0B1F3F' : '#FFF'} /></Pressable> : null}</View>
         {isList ? <View style={ui.search}><Ionicons name="search" size={19} color={IOS.secondary} /><TextInput accessibilityLabel={'Tìm sản phẩm'} style={ui.searchInput} value={query} onChangeText={setQuery} placeholder={'Tên sản phẩm hoặc SKU'} placeholderTextColor={IOS.secondary} autoCorrect={false} maxLength={200} returnKeyType="search" />{query ? <Pressable accessibilityRole="button" accessibilityLabel="Xóa tìm kiếm sản phẩm" onPress={() => setQuery('')} style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="close-circle" size={19} color={IOS.secondary} /></Pressable> : null}</View> : null}
-        {route?.kind === 'orders' ? <OrdersPanel initialStatus={route.status} embedded={embedded} active={active} onStore={onStore} onChanged={onRefresh} /> : <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[ui.sheetScroll, embedded && { paddingBottom: dockContentInset(insets.bottom) }]} showsVerticalScrollIndicator={false}>
+        {route?.kind === 'orders' ? <OrdersPanel revision={revision} initialStatus={route.status} embedded={embedded} active={active} onStore={onStore} onChanged={onRefresh} /> : <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[ui.sheetScroll, embedded && { paddingBottom: dockContentInset(insets.bottom) }]} showsVerticalScrollIndicator={false}>
           {error ? <View style={ui.errorCard}><Text style={ui.error}>{error}</Text><Pressable accessibilityRole="button" style={ui.secondaryButton} onPress={() => setRetry(value => value + 1)}><Text style={ui.secondaryText}>Thử lại</Text></Pressable></View> : null}
-          {isList ? <><Text style={[ui.caption, { marginBottom: 14 }]}>{loading && !items.length ? 'Đang tải dữ liệu…' : total + ' sản phẩm'}</Text>{items.map(item => <View key={item.id} style={ui.listCard}>
+          {isList ? <><Text style={[ui.caption, { marginBottom: 14 }]}>{loading && !items.length ? 'Đang tải dữ liệu…' : total + ' sản phẩm'}</Text>{items.map(item => <View key={item.id} testID={'product-card-' + item.id} style={ui.listCard}>
             <View style={ui.row}><ProductThumbnail uri={item.image_url} size={68} radius={14} label={'Ảnh ' + item.name} /><View style={ui.grow}><Text numberOfLines={2} style={ui.productName}>{item.name}</Text><Text style={ui.productPrice}>{money(item.price_vnd)}</Text></View></View>
             <Text selectable style={[ui.productMeta, { fontSize: 12, letterSpacing: .25 }]}>SKU {item.sku}</Text><View style={[ui.between, { flexWrap: 'wrap', gap: 8 }]}><Text style={[ui.caption, { flexShrink: 1 }, item.stock <= 5 && { color: isDark ? '#EAC88E' : '#976323' }]}>{item.stock <= 5 ? 'Kho thấp · ' : 'Kho '}{count(item.stock)} · {count(item.sold_count)} đã bán</Text><View style={[ui.pill, item.status === 'active' && { backgroundColor: isDark ? '#1D362C' : '#ECF6EF' }]}><Text style={[ui.pillText, item.status === 'active' && { color: isDark ? '#99D3AD' : '#32784C' }]}>{labels[item.status] || item.status}</Text></View></View>
             <View style={[ui.row, { gap: 9 }]}><Pressable accessibilityRole="button" accessibilityLabel={'Soạn bản chỉnh sửa cho ' + item.name} onPress={() => { onClose(); onAsk('Tối ưu tiêu đề và mô tả SKU ' + item.sku + ' cho rõ ràng hơn. Giữ nguyên thông số, không thêm tính năng chưa có.'); }} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={[ui.secondaryText, { fontSize: 13 }]}>Gợi ý nội dung</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={'Chỉnh sửa thủ công ' + item.name} onPress={() => setEditingId(item.id)} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8, gap: 5, backgroundColor: BRAND.orangeSoft }]}><Ionicons name="create-outline" size={18} color={BRAND.orangeInk} /><Text style={[ui.secondaryText, { color: BRAND.orangeInk, fontSize: 13 }]}>Chỉnh sửa</Text></Pressable></View>

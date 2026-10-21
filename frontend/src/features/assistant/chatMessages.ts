@@ -40,17 +40,40 @@ export function latestProductCards(messages: Message[]): Set<string> {
   return cards;
 }
 
+/** Select just the photos added in this upload, including recovered responses. */
+export function uploadedImageUris(data: ChatData): string[] | undefined {
+  const draft = data.product_draft;
+  if (!draft || draft.status === 'cancelled') return undefined;
+  const urls = draft.preview_urls;
+  const start = data.facts?.image_start_index, count = data.facts?.new_image_count;
+  const selected = typeof start === 'number' && Number.isInteger(start) && start >= 0
+    && typeof count === 'number' && Number.isInteger(count) && count > 0
+    ? urls.slice(start, start + count) : urls;
+  return selected.length ? selected.map(productDraftImageUrl) : undefined;
+}
+
 export function restoreMessages(turns: ConversationDetail['turns']): Message[] {
   // Upload is an internal request followed by the seller's actual caption.
   // Reopening history must not insert its temporary "what is the name?" reply.
-  const followed = new Set(turns.filter(turn => turn.response.tool !== 'create_product_draft')
-    .map(turn => turn.response.product_draft?.id).filter(id => id !== undefined));
+  const uploads = new Set(turns.filter(turn => turn.response.tool === 'create_product_draft')
+    .map(turn => turn.response.product_draft?.id));
+  const hidden = new Set<number>(), linked = new Map<number, ChatData>();
+  turns.forEach((turn, index) => {
+    const next = turns[index + 1];
+    if (turn.response.tool === 'create_product_draft' && turn.response.product_draft && next
+        && next.response.tool !== 'create_product_draft'
+        && next.response.product_draft?.id === turn.response.product_draft.id) {
+      hidden.add(index); linked.set(index + 1, turn.response);
+    }
+  });
   const shown = new Set<number>();
-  return turns.flatMap((turn): Message[] => {
+  return turns.flatMap((turn, index): Message[] => {
     const draft = turn.response.product_draft;
-    if (draft && turn.response.tool === 'create_product_draft' && followed.has(draft.id)) return [];
-    const imageUris = draft && draft.status !== 'cancelled' && !shown.has(draft.id)
-      ? draft.preview_urls.map(productDraftImageUrl) : undefined;
+    if (hidden.has(index)) return [];
+    const upload = linked.get(index) || (turn.response.tool === 'create_product_draft' ? turn.response : null);
+    const imageUris = upload ? uploadedImageUris(upload)
+      : draft && !uploads.has(draft.id) && draft.status !== 'cancelled' && !shown.has(draft.id)
+        ? draft.preview_urls.map(productDraftImageUrl) : undefined;
     if (draft && imageUris?.length) shown.add(draft.id);
     return [
       { id: turn.response.run_id + ':u', role: 'user', text: turn.message, imageUris },

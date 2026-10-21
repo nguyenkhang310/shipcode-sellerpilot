@@ -102,7 +102,7 @@ let browser,page;
  await send.click(); await page.getByRole('button',{name:/Thử lại/}).waitFor();
  await page.route('**/api/v1/chat/requests/*',async route=>{
    if(route.request().url().endsWith('/'+uploadId)) return route.fulfill({json:{data:{status:'failed',
-     error:{status:409,detail:{code:'chat_interrupted',message:'Yêu cầu đã gián đoạn.'}}}}});
+     error:{status:503,detail:{code:'shop_database_unavailable',message:'Yêu cầu đã gián đoạn.'}}}}});
    await qaFetch(route);
  });
  await page.getByRole('button',{name:/Thử lại/}).click();
@@ -115,7 +115,7 @@ let browser,page;
  await send.click(); const resent=(await resend).postDataJSON();
  assert.notEqual(resent.request_id,uploadId);
  await page.getByText(/Mình đã soạn tiêu đề và mô tả/).waitFor();
- checks.push('Interrupted gallery recovery releases the stale ID and resends retained images successfully');
+ checks.push('A failed gallery record with a business-specific 503 releases the stale ID and resends retained images');
  assert.deepEqual(errors,[]);
  await page.screenshot({path:path.join(OUTPUT,'final.png')});
  fs.writeFileSync(path.join(OUTPUT,'results.json'),JSON.stringify({checks,errors},null,2));

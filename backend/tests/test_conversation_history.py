@@ -8,6 +8,7 @@ from app.models.action import ActionProposal
 from app.models.agent_run import AgentRun
 from app.models.conversation_state import ConversationState
 from app.models.product_draft import ProductDraft
+from app.models.product_edit import ProductEditProposal
 from test_chat_requests import WaitingProvider, count, payload, status
 from test_product_drafts import CopyProvider, make_client, upload_and_reply
 
@@ -51,6 +52,31 @@ def test_deleted_chat_is_removed_and_late_replays_cannot_restore_it(client):
     with client.app.state.session_factory() as session:
         assert session.scalar(select(ActionProposal)).status == 'rejected'
     assert client.post('/api/v1/chat', json=payload('SKU A001 còn bao nhiêu?')).status_code == 200
+
+
+def test_delete_rejects_pending_content_edits_but_keeps_confirmed_changes(tmp_path):
+    import sqlite3
+    client, shop_path, _ = make_client(tmp_path)
+    with client:
+        first = client.post('/api/v1/chat', json={
+            'message': 'Sửa tiêu đề SKU SEED-PHONE thành "Điện thoại gọn nhẹ"',
+        }).json()['data']
+        proposal_id = first['product_edit_proposal']['id']
+        assert client.delete('/api/v1/conversations/' + first['conversation_id']).status_code == 200
+        assert client.post(f'/api/v1/product-edits/{proposal_id}/confirm').status_code == 409
+        with client.app.state.session_factory() as session:
+            assert session.get(ProductEditProposal, proposal_id).status == 'rejected'
+        with sqlite3.connect(shop_path) as db:
+            assert db.execute('SELECT name FROM product WHERE id=1').fetchone()[0] == 'Điện thoại mẫu'
+        second = client.post('/api/v1/chat', json={
+            'message': 'Sửa tiêu đề SKU SEED-PHONE thành "Điện thoại gọn nhẹ"',
+        }).json()['data']
+        approved_id = second['product_edit_proposal']['id']
+        assert client.post(f'/api/v1/product-edits/{approved_id}/confirm').status_code == 200
+        assert client.delete('/api/v1/conversations/' + second['conversation_id']).status_code == 200
+        assert client.post(f'/api/v1/product-edits/{approved_id}/confirm').json()['data']['idempotent']
+        with sqlite3.connect(shop_path) as db:
+            assert db.execute('SELECT name FROM product WHERE id=1').fetchone()[0] == 'Điện thoại gọn nhẹ'
 
 
 def test_history_actions_are_shop_scoped_and_do_not_create_unknown_conversations(client):

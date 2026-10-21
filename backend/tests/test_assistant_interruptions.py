@@ -47,3 +47,17 @@ def test_thanks_does_not_answer_pending_product_edit_target(tmp_path):
             'message': 'SKU SEED-PHONE', 'conversation_id': first['conversation_id'],
         }).json()['data']
         assert resumed['product_edit_proposal']['changes'][0]['after'] == 'Điện thoại nhỏ gọn'
+
+
+def test_casual_change_of_topic_cannot_become_a_draft_title(tmp_path):
+    from test_advisor import AdvisorAI
+    client, _, _ = make_client(tmp_path)
+    with client:
+        first = client.post('/api/v1/chat', json={'message': 'Đăng sản phẩm mới'}).json()['data']
+        before = draft_values(client, first['product_draft']['id'])
+        client.app.state.ai_provider = AdvisorAI([])
+        reply = client.post('/api/v1/chat', json={
+            'message': 'Hôm nay mình hơi mệt, nói chuyện chút đi', 'conversation_id': first['conversation_id'],
+        }).json()['data']
+        assert reply['mode'] == 'ai' and reply['product_draft'] is None
+        assert draft_values(client, first['product_draft']['id']) == before

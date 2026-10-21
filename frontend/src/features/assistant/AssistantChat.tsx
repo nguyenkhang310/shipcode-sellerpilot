@@ -11,7 +11,7 @@ import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Share, Text,
 import { cancelChatRequest, createMessageId, isTerminalChatError, recoverChatRequest } from '../../api/chatRequests';
 import { API_URL, ApiError } from '../../api/client';
 import { inExtension, isShopeeExtension } from '../../integrations/extension';
-import { decidePriceProposal, decideProductDraft, decideProductEdit, deleteConversation, pinConversation, getConversation, getConversations, productDraftImageUrl, sendSellerMessage, uploadProductImages } from '../../api/sellerPilot';
+import { decidePriceProposal, decideProductDraft, decideProductEdit, deleteConversation, pinConversation, getConversation, getConversations, sendSellerMessage, uploadProductImages } from '../../api/sellerPilot';
 import { ChatData, ConversationSummary, PriceProposal, ProductDraft, ProductEditProposal } from '../../api/types';
 import { ProductEditCard } from './ProductEditCard';
 import { ProductDraftCard } from './ProductDraftCard';
@@ -20,7 +20,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { money } from '../dashboard/DashboardScreen';
 import { MessageText } from './MessageText';
 import { TypingIndicator } from './TypingIndicator';
-import { Message, assistantMessage, latestProductCards, restoreMessages } from './chatMessages';
+import { Message, assistantMessage, latestProductCards, restoreMessages, uploadedImageUris } from './chatMessages';
 import { HistoryRow } from './HistoryRow';
 import { MessageEntrance } from './MessageEntrance';
 import { ChatHistoryDrawer } from './ChatHistoryDrawer';
@@ -64,6 +64,8 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   const [inputHeight, setInputHeight] = useState(INPUT_MIN_HEIGHT);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [selectingImages, setSelectingImages] = useState(false);
+  const imageSelection = useRef(false);
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState('');
   const [failedMessage, setFailedMessage] = useState('');
@@ -244,7 +246,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   }
   async function send(value = draft, retry = false) {
     const text = value.trim();
-    if (lock.current) return;
+    if (lock.current || decisionLock.current || imageSelection.current) return;
     if (retry && pendingChat.current?.phase === 'uploading') {
       const entry = pendingChat.current, version = generation.current;
       lock.current = true; setBusy(true);
@@ -263,7 +265,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
         setPendingImages([]);
         setMessages(items => items.some(item => item.id === 'local:' + entry.id) ? items : [...items, {
           id: 'local:' + entry.id, role: 'user', text: entry.text,
-          imageUris: recovered.data.product_draft?.preview_urls.map(productDraftImageUrl),
+          imageUris: uploadedImageUris(recovered.data),
         }]);
       } catch (e) {
         if (generation.current !== version) return;
@@ -389,15 +391,19 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
   }, []);
   async function decide(proposal: PriceProposal, choice: 'confirm' | 'reject') {
-    if (decisionLock.current) return;
+    if (decisionLock.current || lock.current || restoring) return;
+    const version = generation.current;
     decisionLock.current = true; setDecision(proposal.id); setDecisionErrors(errors => ({ ...errors, [proposal.id]: '' }));
     try {
       const { data } = await decidePriceProposal(proposal.id, choice);
+      if (data.status === 'approved') onShopChanged?.();
+      if (version !== generation.current) return;
       setMessages(items => items.map(item => item.response?.proposal?.id === data.id
         ? { ...item, response: { ...item.response, proposal: data } } : item));
       onToast?.(data.status === 'approved' ? 'Đã cập nhật giá trên shop.' : data.status === 'rejected' ? 'Đã bỏ qua đề xuất. Giá giữ nguyên.' : 'Giá đã thay đổi. Hãy tạo đề xuất mới.');
-      if (data.status === 'approved') onShopChanged?.();
     } catch (e) {
+      onShopChanged?.(); // A lost reply may follow a successful server-side write.
+      if (version !== generation.current) return;
       if (e instanceof ApiError && e.status === 409) setMessages(items => items.map(item => item.response?.proposal?.id === proposal.id
         ? { ...item, response: { ...item.response, proposal: { ...item.response.proposal, status: 'conflict' } } } : item));
       setDecisionErrors(errors => ({ ...errors, [proposal.id]: readableError(e) }));
@@ -405,50 +411,60 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     finally { decisionLock.current = false; setDecision(null); }
   }
   async function decideEdit(proposal: ProductEditProposal, choice: 'confirm' | 'reject') {
-    if (decisionLock.current) return;
+    if (decisionLock.current || lock.current || restoring) return;
+    const version = generation.current;
     decisionLock.current = true; setEditBusy(proposal.id);
     setEditErrors(errors => ({ ...errors, [proposal.id]: '' }));
     try {
       const { data } = await decideProductEdit(proposal.id, choice);
+      if (data.status === 'approved') onShopChanged?.();
+      if (version !== generation.current) return;
       setMessages(items => items.map(item => item.response?.product_edit_proposal?.id === data.id
         ? { ...item, response: { ...item.response, product_edit_proposal: data } } : item));
-      if (data.status === 'approved') { onShopChanged?.(); onToast?.('Đã cập nhật sản phẩm trên shop.'); }
+      if (data.status === 'approved') onToast?.('Đã cập nhật sản phẩm trên shop.');
     } catch (e) {
+      onShopChanged?.();
+      if (version !== generation.current) return;
       if (e instanceof ApiError && e.status === 409) setMessages(items => items.map(item => item.response?.product_edit_proposal?.id === proposal.id
         ? { ...item, response: { ...item.response, product_edit_proposal: { ...item.response.product_edit_proposal, status: 'conflict' } } } : item));
       setEditErrors(errors => ({ ...errors, [proposal.id]: readableError(e) }));
     } finally { decisionLock.current = false; setEditBusy(null); }
   }
   async function pickProductImage() {
-    if (lock.current) return;
+    if (lock.current || decisionLock.current || imageSelection.current) return;
+    const version = generation.current;
     setQuickOpen(false); setError('');
     const remaining = MAX_PRODUCT_IMAGES - pendingImages.length;
     if (remaining <= 0) {
       setError(`Mỗi sản phẩm chọn tối đa ${MAX_PRODUCT_IMAGES} ảnh.`);
       return;
     }
-    if (Platform.OS !== 'web') {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        setError('SellerPilot cần quyền truy cập thư viện để bạn chọn ảnh sản phẩm.');
-        return;
-      }
-    }
-    const selected = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      selectionLimit: remaining,
-      orderedSelection: true,
-      quality: .85,
-    });
-    if (selected.canceled || !selected.assets.length) return;
-    const normalizedImages: PendingImage[] = [];
+    imageSelection.current = true; setSelectingImages(true);
     try {
+      if (Platform.OS !== 'web') {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (version !== generation.current) return;
+        if (!permission.granted) {
+          setError('SellerPilot cần quyền truy cập thư viện để bạn chọn ảnh sản phẩm.');
+          return;
+        }
+      }
+      const selected = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: remaining,
+        orderedSelection: true,
+        quality: .85,
+      });
+      if (version !== generation.current) return;
+      if (selected.canceled || !selected.assets.length) return;
+      const normalizedImages: PendingImage[] = [];
       for (const [index, asset] of selected.assets.slice(0, remaining).entries()) {
         const context = ImageManipulator.manipulate(asset.uri);
-        if (asset.width > 1800) context.resize({ width: 1800 });
+        if (Math.max(asset.width, asset.height) > 1800) context.resize(asset.width >= asset.height ? { width: 1800 } : { height: 1800 });
         const rendered = await context.renderAsync();
         const normalized = await rendered.saveAsync({ compress: .8, format: SaveFormat.JPEG, base64: true });
+        if (version !== generation.current) return;
         if (!normalized.base64) throw new Error('image_base64_unavailable');
         normalizedImages.push({
           uri: normalized.uri,
@@ -457,13 +473,12 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
           base64: normalized.base64,
         });
       }
+      setPendingImages(current => [...current, ...normalizedImages].slice(0, MAX_PRODUCT_IMAGES));
+      setQuickOpen(false);
+      setTimeout(() => { if (version === generation.current) input.current?.focus(); }, 80);
     } catch {
-      setError('Chưa xử lý được một trong các ảnh. Bạn chọn lại giúp mình nhé.');
-      return;
-    }
-    setPendingImages(current => [...current, ...normalizedImages].slice(0, MAX_PRODUCT_IMAGES));
-    setQuickOpen(false);
-    setTimeout(() => input.current?.focus(), 80);
+      if (version === generation.current) setError('Chưa xử lý được ảnh. Bạn thử chọn lại giúp mình nhé.');
+    } finally { imageSelection.current = false; setSelectingImages(false); }
   }
   async function sendProductImages(uploadAssets: PendingImage[], text: string) {
     if (lock.current) return;
@@ -530,7 +545,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     }
   }
   async function decideDraft(productDraft: ProductDraft, choice: 'publish' | 'cancel') {
-    if (decisionLock.current) return;
+    if (decisionLock.current || lock.current || restoring) return;
     const version = generation.current, decidedConversation = conversationRef.current;
     decisionLock.current = true; setProductDecision(productDraft.id);
     setProductErrors(errors => ({ ...errors, [productDraft.id]: '' }));
@@ -553,6 +568,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       if (version !== generation.current || conversationRef.current !== decidedConversation) return;
       onToast?.(data.status === 'filled' ? 'Đã điền form. Kiểm tra các mục trên trang người bán trước khi lưu.' : data.status === 'published' ? 'Đã đăng sản phẩm lên UTech Official.' : 'Đã hủy bản nháp sản phẩm.');
     } catch (e) {
+      onShopChanged?.();
       if (version !== generation.current || conversationRef.current !== decidedConversation) return;
       setProductErrors(errors => ({ ...errors, [productDraft.id]: readableError(e) }));
     } finally {
@@ -567,6 +583,8 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     } catch { onToast?.('Chưa thể chia sẻ. Bạn có thể nhấn giữ để chọn văn bản.'); }
   }
   const last = messages[messages.length - 1];
+  const decisionPending = decision !== null || productDecision !== null || editBusy !== null;
+  const actionsDisabled = busy || restoring || decisionPending || selectingImages;
   const productCardMessageIds = useMemo(() => latestProductCards(messages), [messages]);
   const proposalLabel = { approved: 'Đã cập nhật trên shop', rejected: 'Đã bỏ qua · Giá giữ nguyên', conflict: 'Giá đã thay đổi · Cần tạo đề xuất mới', pending: 'Chờ xác nhận' };
 
@@ -595,14 +613,14 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       {restoring ? <View style={ui.thinking}><ActivityIndicator color={BRAND.navy} /><Text style={ui.thinkingText}>Đang mở hội thoại…</Text></View> : <View style={ui.thread}>{messages.map(message => message.role === 'user'
         ? <MessageEntrance key={message.id} style={ui.userMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion}><View testID="user-message" style={[ui.userBubble, Boolean(message.imageUris?.length) && ui.userBubbleMedia]}>{message.imageUris?.length === 1 ? <ProtectedImage testID="user-image-single" source={{ uri: message.imageUris[0] }} style={ui.userImageSingle} resizeMode="cover" /> : message.imageUris?.length ? <ScrollView testID="user-image-gallery" horizontal style={ui.userImageScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.userImageRow}>{message.imageUris.map((uri, index) => <ProtectedImage key={uri + index} source={{ uri }} style={ui.userImageMultiple} resizeMode="cover" />)}</ScrollView> : null}<Text selectable style={[ui.userText, Boolean(message.imageUris?.length) && ui.userTextWithMedia]}>{message.text}</Text></View></MessageEntrance>
         : <MessageEntrance key={message.id} style={ui.assistantMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion}><View style={ui.assistantContent}><View style={[ui.row, { gap: 7, marginBottom: 8 }]}><BrandLogo size={20} /><Text style={ui.assistantName}>SellerPilot</Text></View><View style={ui.assistantBubble}><MessageText text={message.text} /></View>
-          {message.response?.product_edit_proposal ? <ProductEditCard proposal={message.response.product_edit_proposal} busy={editBusy !== null} error={editErrors[message.response.product_edit_proposal.id]} onDecide={choice => void decideEdit(message.response!.product_edit_proposal!, choice)} /> : null}
+          {message.response?.product_edit_proposal ? <ProductEditCard proposal={message.response.product_edit_proposal} busy={actionsDisabled} error={editErrors[message.response.product_edit_proposal.id]} onDecide={choice => void decideEdit(message.response!.product_edit_proposal!, choice)} /> : null}
           {!isShopeeExtension() ? <OrderChatAction action={message.response?.facts.order_action} onOpen={id => { input.current?.blur(); setOrderId(id); }} /> : null}
           {message.response?.proposal ? <View style={ui.proposal}>
             <View style={ui.proposalBody}><Text style={ui.proposalKicker}>{proposalLabel[message.response.proposal.status]}</Text><Text style={ui.listTitle}>{message.response.proposal.product_name}</Text><Text style={ui.caption}>SKU {message.response.proposal.sku}</Text><View style={ui.priceRow}><Text style={ui.oldPrice}>{money(message.response.proposal.old_price_vnd)}</Text><Ionicons name="arrow-forward" size={17} color={IOS.secondary} /><Text style={ui.newPrice}>{money(message.response.proposal.new_price_vnd)}</Text></View>
               {decisionErrors[message.response.proposal.id] ? <Text style={ui.error}>{decisionErrors[message.response.proposal.id]}</Text> : null}</View>
-            {message.response.proposal.status === 'pending' ? <View style={ui.proposalActions}><Pressable accessibilityRole="button" disabled={decision !== null} onPress={() => void decide(message.response!.proposal!, 'reject')} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={ui.secondaryText}>Bỏ qua</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={'Xác nhận đổi giá SKU ' + message.response.proposal.sku} disabled={decision !== null} onPress={() => void decide(message.response!.proposal!, 'confirm')} style={[ui.primaryButton, { flex: 1.6, paddingHorizontal: 8 }, decision !== null && { opacity: .55 }]}>{decision === message.response.proposal.id ? <ActivityIndicator color="#FFF" size="small" /> : <Ionicons name="checkmark" size={18} color="#FFF" />}<Text style={ui.primaryText}>Xác nhận đổi giá</Text></Pressable></View> : null}
+            {message.response.proposal.status === 'pending' ? <View style={ui.proposalActions}><Pressable accessibilityRole="button" disabled={actionsDisabled} onPress={() => void decide(message.response!.proposal!, 'reject')} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={ui.secondaryText}>Bỏ qua</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={'Xác nhận đổi giá SKU ' + message.response.proposal.sku} disabled={actionsDisabled} onPress={() => void decide(message.response!.proposal!, 'confirm')} style={[ui.primaryButton, { flex: 1.6, paddingHorizontal: 8 }, actionsDisabled && { opacity: .55 }]}>{decision === message.response.proposal.id ? <ActivityIndicator color="#FFF" size="small" /> : <Ionicons name="checkmark" size={18} color="#FFF" />}<Text style={ui.primaryText}>Xác nhận đổi giá</Text></Pressable></View> : null}
           </View> : null}
-          {productCardMessageIds.has(message.id) && message.response?.product_draft ? <ProductDraftCard draft={message.response.product_draft} busy={productDecision !== null} saving={productDecision === message.response.product_draft.id} error={productErrors[message.response.product_draft.id]} browser={isShopeeExtension()} onDecide={choice => void decideDraft(message.response!.product_draft!, choice)} /> : null}
+          {productCardMessageIds.has(message.id) && message.response?.product_draft ? <ProductDraftCard draft={message.response.product_draft} busy={actionsDisabled} saving={productDecision === message.response.product_draft.id} error={productErrors[message.response.product_draft.id]} browser={isShopeeExtension()} onDecide={choice => void decideDraft(message.response!.product_draft!, choice)} /> : null}
           <View style={ui.messageActions}><Pressable accessibilityRole="button" accessibilityLabel={Platform.OS === 'web' ? 'Sao chép câu trả lời' : 'Chia sẻ câu trả lời'} onPress={() => void share(message.text)} style={ui.messageAction}><Ionicons name={Platform.OS === 'web' ? 'copy-outline' : 'share-outline'} size={17} color={IOS.secondary} /></Pressable>{message.response?.mode === 'fallback' ? <Text style={ui.sourceText}>{fallbackLabel(message.response.fallback_reason)}</Text> : null}</View>
         </View></MessageEntrance>)}</View>}
       {busy ? <TypingIndicator /> : null}
@@ -616,7 +634,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       <View style={ui.composer}><Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh hoặc mở gợi ý" accessibilityState={{ expanded: quickOpen }} onPress={() => setQuickOpen(value => !value)} style={ui.composerPlus}><Ionicons name={quickOpen ? 'close' : 'add'} size={27} color={BRAND.navy} /></Pressable>
         <View style={ui.composerInputFrame}><TextInput ref={input} accessibilityLabel="Nhắn cho SellerPilot" placeholder={pendingImages.length ? 'Thêm yêu cầu…' : 'Hỏi SellerPilot…'} placeholderTextColor={IOS.secondary} value={draft} onChangeText={value => { setDraft(value); if (!value) setInputHeight(INPUT_MIN_HEIGHT); }} multiline maxLength={4000} scrollEnabled={inputHeight >= INPUT_MAX_HEIGHT - 1} returnKeyType="default" blurOnSubmit={false} onFocus={() => setTimeout(() => { if (nearBottom.current) scroll.current?.scrollToEnd({ animated: false }); }, 80)} style={[ui.composerInput, { height: inputHeight }]} editable={!restoring} />
           {Platform.OS !== 'web' ? <Text pointerEvents="none" accessible={false} aria-hidden onTextLayout={event => resizeComposerFromLines(event.nativeEvent.lines.length)} style={ui.composerMeasure}>{draft + '\u200B'}</Text> : null}</View>
-        <Pressable accessibilityRole="button" accessibilityLabel={busy ? 'Dừng chờ phản hồi' : 'Gửi tin nhắn'} disabled={!busy && ((!draft.trim() && !pendingImages.length) || restoring)} onPress={() => { if (busy) { void stop(); } else void send(); }} style={({ pressed }) => [ui.send, !busy && ((!draft.trim() && !pendingImages.length) || restoring) && ui.sendDisabled, pressed && { opacity: .7 }]}><Ionicons name={busy ? 'stop' : 'arrow-up'} size={23} color={busy || draft.trim() || pendingImages.length ? '#FFF' : IOS.tertiary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={busy ? 'Dừng chờ phản hồi' : 'Gửi tin nhắn'} disabled={!busy && ((!draft.trim() && !pendingImages.length) || restoring || decisionPending || selectingImages)} onPress={() => { if (busy) { void stop(); } else void send(); }} style={({ pressed }) => [ui.send, !busy && ((!draft.trim() && !pendingImages.length) || restoring) && ui.sendDisabled, pressed && { opacity: .7 }]}><Ionicons name={busy ? 'stop' : 'arrow-up'} size={23} color={busy || draft.trim() || pendingImages.length ? '#FFF' : IOS.tertiary} /></Pressable>
       </View>
     </View>
     <ChatHistoryDrawer visible={historyOpen} onClose={() => setHistoryOpen(false)} reduceMotion={reduceMotion}><View style={ui.sheetHeader}><Text style={ui.sheetTitle}>Lịch sử</Text><Pressable accessibilityRole="button" accessibilityLabel="Đóng lịch sử trò chuyện" onPress={() => setHistoryOpen(false)} style={ui.circleButton}><Ionicons name="close" color={IOS.label} size={22} /></Pressable></View><ScrollView contentContainerStyle={ui.sheetScroll} keyboardShouldPersistTaps="handled"><Pressable accessibilityRole="button" accessibilityLabel="Cuộc trò chuyện mới" onPress={newConversation} style={[ui.primaryButton, { marginBottom: 20 }]}><Ionicons name="add" color="#FFF" size={20} /><Text style={ui.primaryText}>Cuộc trò chuyện mới</Text></Pressable>

@@ -1,5 +1,38 @@
 # Rà soát app sau khi hợp nhất nhánh Hoàng
 
+## Hội thoại nhiều lượt và đồng bộ Sản phẩm — 21/10/2026
+
+- Tái hiện `database is locked` sau khoảng 5s khi một người mở bản nháp bằng
+  chữ và người khác gửi chat. Dời flush cấp ID sang sau lần await AI cuối;
+  bản nháp chưa lưu không đọc nhầm lịch sử có `product_draft_id=NULL`. Upload
+  đợi writer bằng async lock, không chặn event loop hay nút Dừng. Cùng hội thoại
+  đang xử lý thì từ chối thay ảnh/đăng/hủy cho tới khi dừng hoặc hoàn thành.
+- Chọn số thứ tự ngoài danh sách không còn rơi về món duy nhất; làm rõ giá qua
+  vài câu cảm ơn vẫn giữ đúng SKU. Đổi sang tâm sự không thành tên sản phẩm.
+  “Để sau” giữ nháp/ảnh, khác với “hủy bản nháp này” hoặc “thôi không đăng nữa”.
+- Cho gửi bổ sung ảnh vào cùng nháp tới tổng 6 ảnh; giữ giá/tồn/nội dung. Lỗi
+  ảnh/giới hạn không để lại file dở; retry cùng ID không thêm trùng. Lịch sử gắn
+  ảnh theo từng lần upload/caption, giữ lượt upload cuối chưa có lời nhắn tiếp.
+  Chọn ảnh trả về muộn không nhập sang chat mới; nén theo cạnh dài cho ảnh dọc.
+- Retry nhận biết mọi record đã thất bại, cả mã nghiệp vụ 503/404, để không kẹt
+  ID cũ. Lỗi chưa rõ kết quả tiếp tục dùng ID cũ để tránh thực thi trùng. Xóa
+  hội thoại hủy cả đề xuất sửa nội dung đang chờ; thay đổi đã duyệt vẫn được giữ.
+  Quyết định proposal và xóa lịch sử dùng cùng writer lock.
+- Chat đăng/sửa hàng phát tín hiệu làm mới trực tiếp tới danh sách Sản phẩm,
+  kho và đơn, không phụ thuộc dashboard tải được hay timestamp có đổi. App yêu
+  cầu `sort=newest` để món mới ở đầu, giữ sắp bán chạy cho truy vấn tư vấn. Đã
+  kiểm tra món mới đứng đầu sau hơn một trang hàng cũ và phân trang không trùng.
+  Sau mất phản hồi ghi, app tải lại dữ liệu thật, không tự tuyên bố đã thành công.
+- 746 test backend, 15 test transport/message, 11 auth và 21 extension qua;
+  TypeScript, export web và bundle iOS qua. Browser QA qua 7 ca chat lỗi mạng,
+  7 ca chat ↔ Sản phẩm và 2 ca đơn ở 320/390/520px, không lỗi JS. Ca đăng bị mất
+  phản hồi và dashboard trả 503 vẫn thấy hàng/giá mới; retry không nhân sản phẩm.
+- Benchmark có guard shop tạm qua 14/14 ca, không fallback; lượt cần model lần
+  đo cuối khoảng 1,3–1,9s. Không gửi dữ liệu shop thật hoặc sửa `.env`. Đây là
+  lần đo, không phải SLA. Export iOS không thay thế thử trên iPhone thật.
+
+Khởi động lại `npm run demo` để nạp thay đổi. Không cần migration hay đổi key.
+
 ## Độ ổn định hội thoại và phục hồi lỗi — 21/10/2026
 
 - Tái hiện lời chào/cảm ơn bị đưa vào sửa bản nháp hoặc chọn sản phẩm đang chờ

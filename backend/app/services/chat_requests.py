@@ -104,6 +104,12 @@ class ChatRequestManager:
             raise HTTPException(410, detail={'code': 'conversation_deleted',
                 'message': 'Cuộc trò chuyện đang được xóa. Bạn mở cuộc trò chuyện mới nhé.'})
 
+    def ensure_conversation_idle(self, tenant, conversation_id):
+        self.ensure_conversation_available(tenant, conversation_id)
+        if conversation_id and (tenant, str(conversation_id)) in self.conversations:
+            raise HTTPException(409, detail={'code': 'conversation_busy',
+                'message': 'Hội thoại đang xử lý. Hãy chờ hoặc dừng phản hồi trước khi đổi bản nháp.'})
+
     async def _run(self, key, payload, shop):
         queued_at = perf_counter()
         try:

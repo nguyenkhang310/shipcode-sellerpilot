@@ -7,6 +7,7 @@ from app.ai.fallback import extract_price, extract_sku, normalize_text
 from app.ai.context import bounded_history
 from app.ai.text import assistant_text
 from app.ai.money import money_mentions
+from app.ai.small_talk import social_reply
 from app.models.action import ActionProposal
 from app.models.agent_run import AgentRun
 from app.models.product_draft import ProductDraft
@@ -31,7 +32,10 @@ def resolve_message(message, runs):
     text = normalize_text(message)
     if not runs:
         return message
-    last = runs[-1]
+    meaningful = [run for run in runs if not (run.intent == 'unknown' and run.tool_name is None and social_reply(run.message))]
+    if not meaningful:
+        return message
+    last = meaningful[-1]
     facts = json.loads(last.facts_json)
     # Keep the last unambiguous tool selection through acknowledgements/advice.
     # A new search (including an empty search) replaces that selection.
@@ -45,7 +49,9 @@ def resolve_message(message, runs):
     selected_sku = None
     choice = re.search(r"(?:thứ|thu|số|so)\s*(\d+)", text)
     items = facts.get("items", [])
-    if choice and 0 < int(choice.group(1)) <= len(items):
+    if choice:
+        if not 0 < int(choice.group(1)) <= len(items):
+            return message  # An invalid selection must never default to another item.
         selected_sku = items[int(choice.group(1)) - 1].get("sku")
     elif any(word in text for word in ("đầu tiên", "dau tien")) and items:
         selected_sku = items[0].get("sku")
