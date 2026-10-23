@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // One terminal owns the three demo services. No installs, DB seeding or forced port kills.
-const {spawn} = require('node:child_process');
+const {spawn, spawnSync} = require('node:child_process');
 const {existsSync} = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
@@ -94,6 +94,10 @@ async function main() {
   const expo = path.join(root, 'node_modules/expo/bin/cli');
   for (const file of [python('backend'), python('UTE MALL'), expo]) {
     if (!existsSync(file)) throw new Error(`Thiếu ${path.relative(root, file)}. Cài môi trường theo README trước.`);
+  }
+  for (const folder of ['backend', 'UTE MALL']) {
+    const probe = spawnSync(python(folder), ['-c', 'import sys,hashlib; sys.exit(0 if sys.version_info >= (3,11) and callable(getattr(hashlib,"scrypt",None)) else 1)'], {stdio: 'ignore', timeout: 10_000});
+    if (probe.status !== 0) throw new Error(`Môi trường ${folder}/.venv cần Python 3.11 trở lên có hỗ trợ scrypt. Cài lại môi trường theo README; giữ nguyên .env và database shop.`);
   }
   if (!existsSync(path.join(root, 'UTE MALL/.env'))) throw new Error('Chưa cấu hình Shopee Demo. Chạy bootstrap_demo.py theo README trước.');
   await new Promise((resolve, reject) => {

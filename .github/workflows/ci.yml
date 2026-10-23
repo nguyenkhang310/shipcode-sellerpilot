@@ -63,6 +63,7 @@ jobs:
           subprocess.run([sys.executable, 'bootstrap_demo.py'], env=env, check=True)
           PY
       - run: python tests/bootstrap_test.py
+      - run: python tests/password_security_test.py
       - run: python bootstrap_demo.py --check
       - run: python -W ignore tests/commerce_test.py
       - run: python -W ignore tests/demo_reviews_test.py

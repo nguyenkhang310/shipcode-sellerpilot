@@ -7,6 +7,7 @@ import sys
 import tempfile
 import secrets
 import unittest
+from unittest.mock import patch
 import uuid
 import subprocess
 import json
@@ -130,6 +131,29 @@ print(json.dumps({'order':row,'stats':{str(days):dashboard(shop,days) for days i
                 self.assertEqual(product.rating_count,Review.query.filter_by(product_id=product.id).count(),product.sku)
                 fulfilled=sum(item.quantity for item in OrderItem.query.join(Order).filter(OrderItem.product_id==product.id,Order.status=='delivered').all())
                 self.assertEqual(product.sold_count,fulfilled,product.sku)
+
+    def test_scrypt_login_dashboard_and_unavailable_verifier(self):
+        from werkzeug.security import generate_password_hash
+        with app.app_context():
+            owner=User.query.filter_by(username='utech').one()
+            previous=owner.password_hash
+            owner.password_hash=generate_password_hash(TEST_SELLER_PASSWORD,method='scrypt:32768:8:1')
+            db.session.commit()
+        try:
+            guest=app.test_client()
+            self.assertEqual(guest.post('/login?next=/seller',data={'login_id':'utech','password':'wrong'}).status_code,200)
+            with patch('password_security.werkzeug_check_password_hash',side_effect=AttributeError('scrypt unavailable')):
+                with self.assertLogs('password_security',level='WARNING'):
+                    response=guest.post('/login?next=/seller',data={'login_id':'utech','password':TEST_SELLER_PASSWORD})
+                self.assertEqual(response.status_code,200)
+                with guest.session_transaction() as state:self.assertNotIn('_user_id',state)
+            response=guest.post('/login?next=/seller',data={'login_id':'utech','password':TEST_SELLER_PASSWORD})
+            self.assertEqual(response.location,'/seller')
+            self.assertEqual(guest.get('/seller').status_code,200)
+        finally:
+            with app.app_context():
+                User.query.filter_by(username='utech').one().password_hash=previous
+                db.session.commit()
 
     def test_checkout_multi_shop_totals_and_stock(self):
         pid,vid,_=self.listing(price=200000)

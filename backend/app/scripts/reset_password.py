@@ -18,7 +18,8 @@ def reset_password(shop, username, password, confirmation):
     user = seller_user(shop, login_id=username.strip())
     if not user or not user['membership'] or user['membership']['role'] != 'owner':
         raise ValueError('Không tìm thấy tài khoản chủ shop đang liên kết. Chưa thay đổi dữ liệu.')
-    digest = generate_password_hash(password)
+    # Shared with Flask: older macOS Python/LibreSSL builds lack scrypt.
+    digest = generate_password_hash(password, method='pbkdf2:sha256:600000')
     with shop._connect() as connection:
         result = connection.execute('UPDATE user SET password_hash=? WHERE id=? AND password_hash=?',
                                     (digest, user['id'], user['password_hash']))

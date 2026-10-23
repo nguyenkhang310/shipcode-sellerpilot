@@ -17,8 +17,22 @@ def test_owner_recovery_preserves_orders_and_rejects_old_session(secured):
     assert client.get('/api/v1/auth/me', headers={'Authorization': 'Bearer '+token}).status_code == 401
     with sqlite3.connect(path) as db:
         digest = db.execute('SELECT password_hash FROM user WHERE id=1').fetchone()[0]
+        assert digest.startswith('pbkdf2:sha256:600000$')
         assert check_password_hash(digest, new_password) and digest != new_password
         assert db.execute('SELECT count(*) FROM "order"').fetchone()[0] == count
+
+
+def test_recovered_password_verifies_without_scrypt(secured, monkeypatch):
+    import hashlib
+    client, path = secured
+    password = 'Shared-compatible-password!'
+    reset_password(client.app.state.shop_repository, 'seller', password, password)
+    monkeypatch.delattr(hashlib, 'scrypt', raising=False)
+    with sqlite3.connect(path) as db:
+        digest = db.execute('SELECT password_hash FROM user WHERE id=1').fetchone()[0]
+    assert check_password_hash(digest, password)
+    assert not check_password_hash(digest, 'incorrect')
+    assert sign_in(client, password=password).status_code == 200
 
 
 @pytest.mark.parametrize('username,password,confirmation', [('buyer',PASSWORD,PASSWORD),('reviewer',PASSWORD,PASSWORD),('seller','short','short'),('seller',PASSWORD,'different')])

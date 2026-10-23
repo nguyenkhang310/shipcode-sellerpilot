@@ -64,6 +64,12 @@ và mã native `expo-secure-store` đang khóa trong package-lock.
 
 ## Phiên và quyền truy cập API
 
+Sàn và API phải dùng Python 3.11+ với `hashlib.scrypt`, như hướng dẫn README.
+`npm run demo` kiểm tra điều kiện này trước khi mở dịch vụ. Lệnh `auth:reset`
+tạo PBKDF2-SHA256 với 600.000 vòng, tương thích cả hai phía; các hash scrypt đã
+lưu vẫn được xác minh bình thường trên môi trường đúng. Không chuyển đổi hash
+cũ khi chưa có mật khẩu gốc và không đặt lại mật khẩu tự động.
+
 - `POST /api/v1/auth/login`: JSON `login_id`, `password`; trả `data.token`,
   thông tin user/shop và `expires_at`. Token ngẫu nhiên 32 byte, thời hạn 7 ngày;
   database chỉ giữ SHA-256, không lưu token gốc hay mật khẩu mới.
