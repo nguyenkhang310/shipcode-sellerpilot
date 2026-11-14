@@ -35,7 +35,7 @@ export function ExtensionBar({onPage, onConnection}: {onPage?: (page: BrowserPag
   const issue = syncError?.error || syncError?.reason;
   const syncIssue = issue ? SYNC_REASONS[issue] || issue : 'Chưa đọc đủ dữ liệu. Bấm Cập nhật để thử lại.';
   useEffect(() => {
-    let alive = true, running = false, hasInitialScanned = false;
+    let alive = true, running = false, lastScannedContext = '';
     async function refresh() {
       if (running) return;
       running = true;
@@ -52,8 +52,8 @@ export function ExtensionBar({onPage, onConnection}: {onPage?: (page: BrowserPag
         if (value.target && scope && value.id !== scope) {location.reload(); return;}
         setConnection(value); onConnection?.(value);
         if (value.target && value.tab_status === 'linked' && value.target_matches !== false) {
-          if (!hasInitialScanned) {
-            hasInitialScanned = true;
+          if (value.page_context && value.page_context !== lastScannedContext) {
+            lastScannedContext = value.page_context;
             extensionCall<BrowserPage>('scan').then(p => {
               if (alive && p) onPage?.(p);
             }).catch(() => {});
@@ -82,6 +82,9 @@ export function ExtensionBar({onPage, onConnection}: {onPage?: (page: BrowserPag
     setMessage('Bấm tên tài khoản/shop trên thanh đầu trang Shopee.');
   });
   const scan = () => void execute(async () => {
+    extensionCall<BrowserPage>('scan').then(p => {
+      if (p) onPage?.(p);
+    }).catch(() => {});
     const result = await extensionCall<{status: string}>('sync_now');
     if (['started', 'already_running'].includes(result.status)) {
       setSync({synced: false, syncing: true, status: 'running', resource: 'products', pages_read: 0, records_read: 0});

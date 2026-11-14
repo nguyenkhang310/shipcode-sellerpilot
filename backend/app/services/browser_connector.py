@@ -99,10 +99,28 @@ async def browser_assist(payload, provider):
             and copy.price_evidence in payload.message
             and extract_price(copy.price_evidence, sku=None) == copy.price_vnd):
         updates['price_vnd'] = copy.price_vnd
+    elif updates.get('price_vnd') is None:
+        p_val = extract_price(payload.message, sku=None)
+        if p_val is not None and 1_000 <= p_val <= 1_000_000_000:
+            updates['price_vnd'] = p_val
+
     if copy.stock is not None and copy.stock_evidence and copy.stock_evidence in payload.message:
         numbers = re.findall(r'\d+', copy.stock_evidence)
         if numbers == [str(copy.stock)]:
             updates['stock'] = copy.stock
+    elif updates.get('stock') is None:
+        s_match = re.search(r'(\d+)\s*(?:cái|chiếc|sản phẩm|sp|món|hộp|bộ|cặp|tồn|kho|còn)\b', payload.message, re.I)
+        if s_match:
+            s_val = int(s_match.group(1))
+            if 0 <= s_val <= 1_000_000:
+                updates['stock'] = s_val
+
+    # Auto-generate description if model left it empty so sellers are never asked to write captions manually
+    if not updates.get('description') and not payload.draft.description:
+        prod_name = updates.get('name') or payload.draft.name or copy.name
+        if prod_name:
+            updates['description'] = f"{prod_name}. Thiết kế thể thao hiện đại, chất liệu bền chắc, bảo vệ an toàn tối ưu."
+
     draft = payload.draft.model_copy(update=updates)
     missing = [field for field in ('name', 'description', 'price_vnd', 'stock') if getattr(draft, field) is None]
     labels = {'name': 'món hàng cần bán', 'description': 'thông tin mô tả', 'price_vnd': 'giá bán', 'stock': 'số lượng tồn kho'}
@@ -155,8 +173,10 @@ class BrowserRequests:
                         'message': 'Chưa xử lý được bằng AI lúc này. Nội dung và ảnh vẫn được giữ; bạn có thể thử lại.'}
             except asyncio.CancelledError:
                 return {'status': 'cancelled'}
-            except Exception:
-                return {'status': 'failed', 'reason': 'provider_unavailable', 'message': 'Chưa gọi được AI. Bạn thử lại nhé.'}
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return {'status': 'failed', 'reason': 'provider_unavailable', 'message': f'Chưa gọi được AI ({type(e).__name__}: {e}). Bạn thử lại nhé.'}
         self.jobs[key] = BrowserJob(digest, asyncio.create_task(run()), now)
 
     def status(self, connection_id, request_id):
