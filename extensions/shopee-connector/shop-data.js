@@ -1,12 +1,17 @@
 // Pure helpers: observed rows are data, never instructions or local-shop records.
 export const TTL_MS = 5 * 60 * 1000;
-export const normalize = value => String(value || '').normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase();
+export const cleanHeader = str => String(str || '')
+  .replace(/\([^)]*\)/g, '')
+  .replace(/[^a-zA-Z0-9\sàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+export const normalize = value => cleanHeader(value).toLowerCase();
 export const COLUMN = {
   name: /^(?:sản phẩm|tên sản phẩm|thông tin sản phẩm|product|product name|product information)$/i,
   sku: /^(?:sku|mã sku|sku sản phẩm|sku phân loại|sku biến thể|seller sku)$/i,
   stock: /^(?:tồn kho|kho hàng|kho|stock|inventory|số lượng tồn|available stock)$/i,
   price: /^(?:giá|giá bán|price)$/i,
-  sold: /^(?:đã bán|sold|sales)$/i,
+  sold: /^(?:đã bán|sold|sales|hiệu suất)$/i,
   order: /^(?:mã đơn(?: hàng)?|order id|order number)$/i,
   status: /^(?:trạng thái|status)$/i,
   total: /^(?:tổng tiền|tổng đơn hàng|total)$/i,
@@ -18,15 +23,16 @@ export function integer(value) {
   return Number.isSafeInteger(number) && number >= 0 && number <= 1000000000 ? number : null;
 }
 export function inventoryRows(page) {
-  if (Array.isArray(page.inventory)) return page.inventory;
+  if (Array.isArray(page.inventory) && page.inventory.length > 0) return page.inventory;
   return (page.tables || []).flatMap(table => {
     const headers = table[0] || [];
     const index = Object.fromEntries(Object.entries(COLUMN).map(([key, pattern]) => [key, headers.findIndex(h => pattern.test(normalize(h)))]));
-    if (index.name < 0 || index.stock < 0) return [];
+    if (index.name < 0) return [];
     return table.slice(1).map(row => {
       const name = row[index.name]?.trim().slice(0, 200) || '';
       const sku = index.sku >= 0 ? row[index.sku]?.trim().slice(0, 100) || null : null;
-      return {key: sku ? 'sku:' + sku : 'unverified:' + JSON.stringify(row), identity_verified: Boolean(sku), name, sku, stock: integer(row[index.stock])};
+      const stockVal = index.stock >= 0 ? integer(row[index.stock]) : null;
+      return {key: sku ? 'sku:' + sku : 'unverified:' + JSON.stringify(row), identity_verified: Boolean(sku), name, sku, stock: stockVal};
     }).filter(row => row.name);
   });
 }

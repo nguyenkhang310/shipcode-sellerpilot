@@ -7,6 +7,7 @@ global.chrome = {
   storage: {local: {get: async key => structuredClone(key === null ? saved : {[key]: saved[key]}), set: async value => {Object.assign(saved, structuredClone(value));}, remove: async key => {delete saved[key];}}},
   tabs: {get: async id => ({id, active: true, url: 'https://banhang.shopee.vn/'}),
     query: async () => [{id: 7, active: true, url: 'https://banhang.shopee.vn/'}],
+    update: async (tabId, opts) => ({id: tabId, ...opts}),
     sendMessage: async (_id, message) => ({ok: true, data: message.kind === 'read' ? {
       document_id: 'fixture-doc', snapshot: {url: 'https://banhang.shopee.vn/', title: 'Fixture',
         text: JSON.stringify({account_label: message.target?.label, metrics: []}), scope: 'visible_page', captured_at: new Date().toISOString()}
@@ -224,4 +225,72 @@ test('missing connector routes explain stale backend, while lost jobs and networ
     global.fetch = async () => {throw TypeError('Failed to fetch');};
     await assert.rejects(api.backend('/health'), /127\.0\.0\.1:8000/);
   } finally {global.fetch = original;}
+});
+
+test('Shopee field labels clean parenthetical tooltips and match price and stock patterns', () => {
+  const cleanLabel = lbl => (lbl || '')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/[:*?]/g, '')
+    .trim()
+    .slice(0, 200);
+
+  const patterns = {
+    name: /^(?:tên sản phẩm|product name)\s*[:*]?$|tên thương hiệu/i,
+    description: /^(?:mô tả(?: sản phẩm)?|product description)\s*[:*]?$/i,
+    price_vnd: /^(?:giá(?: bán)?|price)(?:\s*\(.*?\))?\s*[:*]?$|^giá\b/i,
+    stock: /^(?:kho hàng|tồn kho|số lượng|stock)(?:\s*\(.*?\))?\s*[:*]?$|^kho hàng\b/i,
+    weight_g: /^(?:cân nặng|trọng lượng|khối lượng|weight)(?:\s*\(.*?\))?\s*[:*]?$|^cân nặng\b/i,
+    brand: /^(?:thương hiệu|brand)\s*[:*]?$|^thương hiệu\b/i
+  };
+
+  assert.equal(cleanLabel('* Kho hàng (?)'), 'Kho hàng');
+  assert.equal(cleanLabel('* Giá'), 'Giá');
+  assert.equal(cleanLabel('* Tên sản phẩm'), 'Tên sản phẩm');
+  assert.equal(cleanLabel('Mô tả sản phẩm (?) :'), 'Mô tả sản phẩm');
+  assert.equal(cleanLabel('* Cân nặng (Sau khi đóng gói)'), 'Cân nặng');
+  assert.equal(cleanLabel('* Thương hiệu'), 'Thương hiệu');
+
+  assert.equal(patterns.stock.test(cleanLabel('* Kho hàng (?)')), true);
+  assert.equal(patterns.price_vnd.test(cleanLabel('* Giá')), true);
+  assert.equal(patterns.price_vnd.test(cleanLabel('Giá bán')), true);
+  assert.equal(patterns.stock.test(cleanLabel('Tồn kho')), true);
+  assert.equal(patterns.name.test(cleanLabel('* Tên sản phẩm')), true);
+  assert.equal(patterns.weight_g.test(cleanLabel('* Cân nặng (Sau khi đóng gói)')), true);
+  assert.equal(patterns.weight_g.test(cleanLabel('Trọng lượng')), true);
+  assert.equal(patterns.brand.test(cleanLabel('* Thương hiệu')), true);
+});
+
+test('publish on non-product page automatically navigates to Shopee new product page and saves pending draft', async () => {
+  const [state, api] = await load(); saved = {};
+  await state.bindCurrentTab('shopee');
+  await state.mutate(connection => {connection.target = {label: 'fixture-shop'};});
+  await state.mutate(connection => {connection.drafts[1] = {id: 1, status: 'ready', name: 'Mũ bảo hiểm POC', description: 'Mũ đẹp', price_vnd: 250000, stock: 20};});
+
+  let navigatedUrl = null;
+  const originalUpdate = chrome.tabs.update;
+  const originalSend = chrome.tabs.sendMessage;
+  chrome.tabs.update = async (tabId, opts) => {
+    navigatedUrl = opts.url;
+    return {id: tabId, ...opts};
+  };
+  chrome.tabs.sendMessage = async (tabId, message) => {
+    if (message.kind === 'fill') {
+      return {ok: true, data: {report: ['name', 'description', 'price_vnd', 'stock'].map(field => ({field, status: 'unmapped'})), submitted: false}};
+    }
+    return originalSend(tabId, message);
+  };
+
+  try {
+    const result = await api.handleApi('/product-drafts/1/publish', 'POST', '{}');
+    assert.equal(result.data.status, 'filled');
+    assert.equal(navigatedUrl, 'https://banhang.shopee.vn/portal/product/new');
+    const stored = saved.pending_shopee_draft;
+    assert.ok(stored);
+    assert.equal(stored.draft.name, 'Mũ bảo hiểm POC');
+    assert.equal(stored.draft.price_vnd, 250000);
+    assert.equal(stored.draft.stock, 20);
+  } finally {
+    chrome.tabs.update = originalUpdate;
+    chrome.tabs.sendMessage = originalSend;
+  }
 });

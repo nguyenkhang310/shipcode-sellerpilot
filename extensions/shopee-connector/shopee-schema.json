@@ -1,0 +1,67 @@
+{
+  "version": "1.0.0",
+  "featureFlags": {
+    "useInternalApi": true,
+    "autoNavigate": true,
+    "enableUnlist": false,
+    "dataCenterMetrics": false
+  },
+  "selectors": {
+    "product_name": {
+      "primary": [
+        "input[placeholder*='Tên thương hiệu' i]",
+        "input[placeholder*='nhập tên' i]",
+        "input[placeholder*='product name' i]",
+        "input[aria-label*='tên sản phẩm' i]",
+        "input[aria-label*='product name' i]"
+      ],
+      "fallback": [
+        "input[maxlength='120']",
+        "div[class*='product-name'] input",
+        "div[class*='product-edit__input'] input"
+      ]
+    },
+    "price": {
+      "primary": [
+        "input[placeholder='Giá']",
+        "input[placeholder*='nhập giá' i]",
+        "input[placeholder*='price' i]",
+        "input[aria-label*='giá bán' i]",
+        "input[aria-label*='price' i]"
+      ],
+      "fallback": [
+        "input[class*='price-input']",
+        "div[class*='price'] input"
+      ]
+    },
+    "stock": {
+      "primary": [
+        "input[placeholder='Kho hàng']",
+        "input[placeholder*='nhập kho' i]",
+        "input[placeholder*='stock' i]",
+        "input[aria-label*='kho hàng' i]",
+        "input[aria-label*='stock' i]"
+      ],
+      "fallback": [
+        "input[class*='stock-input']",
+        "div[class*='stock'] input"
+      ]
+    },
+    "description": {
+      "primary": [
+        "textarea[placeholder*='nội dung mô tả' i]",
+        "textarea[placeholder*='thêm hình ảnh' i]",
+        "div[contenteditable='true']",
+        "textarea[placeholder*='nhập mô tả' i]",
+        "textarea[placeholder*='description' i]",
+        "textarea[aria-label*='mô tả' i]"
+      ],
+      "fallback": [
+        "textarea",
+        ".eds-textarea__inner",
+        "div[class*='description'] [contenteditable='true']"
+      ]
+    },
+    "variation_table": "[class*='variation-table'], [class*='tier-variation'], [class*='variation-container']"
+  }
+}

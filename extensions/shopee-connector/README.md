@@ -99,15 +99,20 @@ Không lấy dữ liệu `UTE MALL` để lấp số liệu thiếu của Shopee
 có **Chuyển sang shop local** nếu muốn dùng hệ thống local; khi đó giao diện app
 và API local hoạt động như trước.
 
-## Điền form
+## Điền form tự động vào Shopee
 
-1. Mở form thêm/sửa sản phẩm Shopee, chọn ngành hàng phù hợp.
-2. Trong chat, chọn ảnh rồi nhập thông tin đã biết, ví dụ:
-   `Bàn phím trắng, giá 5 xị, còn 12 cái. Viết tên và mô tả giúp mình.`
-3. Nếu chưa nhận diện được ô, menu tên tài khoản → **Gán ô trên form sản phẩm**,
-   chọn từng trường rồi bấm đúng ô trên Shopee trong 30 giây.
-4. Duyệt bản nháp → **Điền vào Shopee**. Không tự bấm Save/Publish/submit.
-5. Tự chọn ảnh, ngành hàng, thuộc tính, biến thể; kiểm tra form rồi lưu/đăng
+1. Trong giao diện chat Side Panel, gửi ảnh sản phẩm kèm thông tin nhanh:
+   *Ví dụ: "Mũ bảo hiểm thể thao, giá 200k, kho 20 cái. Viết tên và mô tả đăng giúp mình."*
+2. AI tự động trích xuất thông tin, tạo mô tả chi tiết đạt chuẩn $\ge$ 100 ký tự.
+3. Bấm **"Điền tiếp vào Shopee"**:
+   - Nếu đang ở trang khác, extension tự động chuyển hướng vào `/portal/product/new`.
+   - Tự động upload ảnh từ bản nháp lên Shopee.
+   - Tự động chọn ngành hàng được đề xuất và nhấn Tiếp theo.
+   - Tự động điền Giá và Kho hàng (`inputs[1]` trong khối `.no-variations` với giá trị tồn kho chỉ định, ví dụ 20).
+   - Tự động mở dropdown thuộc tính và chọn Thương hiệu **"No brand"**.
+   - Tự động bật công tắc kênh Vận chuyển có sẵn.
+   - Tự động đóng các modal/popup hướng dẫn của Shopee nếu có.
+4. Bạn kiểm tra lại thông tin trên form Shopee và bấm **"Lưu & Hiển thị"** để xuất bản sản phẩm.
    trên Shopee. **Đã điền không phải đã đăng.**
 
 Giá trị bị khóa, nhãn trùng, vượt độ dài, trang đổi hoặc bị framework reset sẽ

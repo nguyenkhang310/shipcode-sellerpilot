@@ -370,6 +370,58 @@ EXPO_PUBLIC_STORE_URL=http://IP_LAN_CUA_MAY:5011
 
 Thay `IP_LAN_CUA_MAY` bằng IP thật. Restart Expo sau khi thay `.env`. Các biến `EXPO_PUBLIC_*` được đóng gói vào app, không được chứa secret. Expo tunnel chỉ chuyển tiếp Metro, không tự mở cổng 8000/5011. `0.0.0.0` là địa chỉ bind server, không phải URL để nhập trong app.
 
+## 5. Cài đặt và chạy Chrome Extension (Shopee Connector)
+
+Extension SellerPilot chạy trên Chrome Side Panel, giúp đồng bộ số liệu và tự động điền form sản phẩm trên **Kênh Người Bán Shopee** (`https://banhang.shopee.vn/`).
+
+### Bước 1: Build Extension từ thư mục gốc
+
+```sh
+# Tạo khóa ghép nối bảo mật nội bộ giữa backend và extension (chỉ chạy lần đầu)
+npm run extension:setup
+
+# Đóng gói tiện ích vào thư mục extensions/shopee-connector/dist
+npm run extension:build
+```
+
+> **Lưu ý:** Thư mục `dist/` chứa mã đóng gói riêng cho từng máy, đã được `.gitignore`. Mỗi thành viên tự chạy lệnh build trên máy cá nhân, không chia sẻ file `dist/`.
+
+### Bước 2: Nạp Extension vào trình duyệt Chrome
+
+1. Mở Chrome (hoặc Brave/Cốc Cốc/Edge) và truy cập địa chỉ: `chrome://extensions/`.
+2. Bật công tắc **Developer mode** (Chế độ cho nhà phát triển) ở góc trên bên phải.
+3. Bấm nút **Load unpacked** (Tải tiện ích đã giải nén) ở góc trên bên trái.
+4. Chọn đúng thư mục: `shipcode-sellerpilot/extensions/shopee-connector/dist` (chú ý: **không** chọn nhầm thư mục `frontend/dist/web`).
+
+### Bước 3: Kết nối với Shopee Seller Center
+
+1. Mở tab mới truy cập `https://banhang.shopee.vn/` và đăng nhập tài khoản người bán của bạn.
+2. Mở Side Panel của SellerPilot (bấm icon tiện ích trên thanh công cụ của Chrome).
+3. Bấm **Liên kết**, sau đó click vào **tên gian hàng/tài khoản trên thanh đầu trang Shopee** để xác nhận liên kết trong vòng 30 giây.
+4. Sau khi kết nối, SellerPilot sẽ hiển thị giao diện chat AI và các tab dữ liệu Tổng quan, Sản phẩm, Đơn hàng được đồng bộ từ Shopee qua tab nền (Zero New Tabs).
+
+### Bước 4: Tự động đăng sản phẩm lên Shopee
+
+1. Trong ô chat Trợ lý AI, gửi ảnh sản phẩm kèm nội dung tự nhiên:
+   *Ví dụ: "Mình bán mũ bảo hiểm thể thao, giá 200k, kho 20 cái. Đăng giúp mình."*
+2. AI soạn thảo bản nháp đầy đủ thông tin: Tên, Mô tả chuẩn SEO ($\ge$ 100 ký tự), Giá và Tồn kho.
+3. Bấm nút **"Điền tiếp vào Shopee"**:
+   - Extension sẽ điều hướng vào trang đăng sản phẩm mới (`/portal/product/new`).
+   - Tự động tải ảnh sản phẩm lên Shopee.
+   - Tự động chọn đúng ngành hàng đề xuất.
+   - Tự động điền Giá, Kho hàng (20 sản phẩm đơn).
+   - Tự động mở menu và chọn Thương hiệu **"No brand"**.
+   - Tự động bật kênh Vận chuyển có sẵn.
+   - Bạn chỉ cần kiểm tra lại và bấm **"Lưu & Hiển thị"** để hoàn tất.
+
+### Cập nhật khi chỉnh sửa mã nguồn
+Mỗi khi sửa đổi code frontend hoặc content script của extension:
+```sh
+npm run extension:build
+npm run test:extension  # Kiểm tra 25 bài unit tests
+```
+Sau đó vào `chrome://extensions/` và bấm nút **Reload (biểu tượng mũi tên xoay vòng)** tại extension SellerPilot để cập nhật ngay.
+
 ## Kiểm tra trước khi làm demo / gửi thay đổi
 
 Từ thư mục gốc:
