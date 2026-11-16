@@ -8,8 +8,8 @@ SellerPilot kết nối với gian hàng **UTech Official** trong bản Shopee D
 chung các thành phần chat/ảnh, có bố cục desktop riêng, chọn mục tiêu bằng nhãn tài
 khoản trên trang Shopee đã đăng nhập và hỗ trợ điền form. Không gửi nguyên văn
 trang hay lấy số liệu local thay cho dữ liệu Shopee. Nhãn được chọn chưa phải
-Shop ID xác thực qua API; có luồng tự đọc danh sách qua các trang trong một tab nền
-dùng chung, cache riêng theo shop và tổng hợp tồn kho cho AI. Gửi chat không tự mở
+Shop ID xác thực qua API; có luồng đọc giao diện và thử đọc cùng phiên trên tab đã liên kết, không mở tab nền,
+cache riêng theo shop và tổng hợp tồn kho cho AI. Gửi chat không tự mở
 tab hoặc thử lại đồng bộ lỗi; đồng bộ chạy lúc liên kết mới hoặc bấm Cập nhật.
 Bộ đọc còn phụ thuộc bố cục/phân trang Shopee, chưa đạt đủ
 nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
@@ -501,6 +501,57 @@ EXPO_PUBLIC_STORE_URL=http://IP_LAN_CUA_MAY:5011
 ```
 
 Thay `IP_LAN_CUA_MAY` bằng IP thật. Restart Expo sau khi thay `.env`. Các biến `EXPO_PUBLIC_*` được đóng gói vào app, không được chứa secret. Expo tunnel chỉ chuyển tiếp Metro, không tự mở cổng 8000/5011. `0.0.0.0` là địa chỉ bind server, không phải URL để nhập trong app.
+
+## 5. Cài đặt và chạy Chrome Extension (Shopee Connector)
+
+Extension SellerPilot chạy trên Chrome Side Panel, giúp đồng bộ số liệu và tự động điền form sản phẩm trên **Kênh Người Bán Shopee** (`https://banhang.shopee.vn/`).
+
+### Bước 1: Build Extension từ thư mục gốc
+
+```sh
+# Tạo khóa ghép nối bảo mật nội bộ giữa backend và extension (chỉ chạy lần đầu)
+npm run extension:setup
+
+# Đóng gói tiện ích vào thư mục extensions/shopee-connector/dist
+npm run extension:build
+```
+
+> **Lưu ý:** Thư mục `dist/` chứa mã đóng gói riêng cho từng máy, đã được `.gitignore`. Mỗi thành viên tự chạy lệnh build trên máy cá nhân, không chia sẻ file `dist/`.
+
+### Bước 2: Nạp Extension vào trình duyệt Chrome
+
+1. Mở Chrome (hoặc Brave/Cốc Cốc/Edge) và truy cập địa chỉ: `chrome://extensions/`.
+2. Bật công tắc **Developer mode** (Chế độ cho nhà phát triển) ở góc trên bên phải.
+3. Bấm nút **Load unpacked** (Tải tiện ích đã giải nén) ở góc trên bên trái.
+4. Chọn đúng thư mục: `shipcode-sellerpilot/extensions/shopee-connector/dist` (chú ý: **không** chọn nhầm thư mục `frontend/dist/web`).
+
+### Bước 3: Kết nối với Shopee Seller Center
+
+1. Mở tab mới truy cập `https://banhang.shopee.vn/` và đăng nhập tài khoản người bán của bạn.
+2. Mở Side Panel của SellerPilot (bấm icon tiện ích trên thanh công cụ của Chrome).
+3. Bấm **Liên kết**, sau đó click vào **tên gian hàng/tài khoản trên thanh đầu trang Shopee** để xác nhận liên kết trong vòng 30 giây.
+4. Sau khi kết nối, SellerPilot sẽ hiển thị giao diện chat AI và các tab dữ liệu Tổng quan, Sản phẩm, Đơn hàng được đồng bộ từ Shopee trong tab đã liên kết, không mở tab mới. Dữ liệu đọc được có thời gian cập nhật và phạm vi; một trang sản phẩm không được coi là toàn shop.
+
+### Bước 4: Soạn và điền form sản phẩm lên Shopee
+
+1. Trong ô chat Trợ lý AI, gửi ảnh sản phẩm kèm nội dung tự nhiên:
+   *Ví dụ: "Mình bán mũ bảo hiểm thể thao, giá 200k, kho 20 cái. Đăng giúp mình."*
+2. AI soạn tên/mô tả từ thông tin đã có; giá và tồn kho lấy từ lời người bán. Thiếu thông tin thì hỏi lại, không tự gán giá, kho, trọng lượng hoặc xuất xứ.
+3. Bấm **Điền vào form** trên bản nháp:
+   - Extension mở trang thêm sản phẩm trong đúng tab đã liên kết nếu cần.
+   - Ảnh được chuyển cho bộ tải ảnh của Shopee; người bán kiểm tra ảnh đã được Shopee nhận.
+   - Điền tên, mô tả, giá và tồn kho vào các ô nhận diện được. Kho bằng 0 được giữ nguyên.
+   - Với form nhiều bước, người bán chọn ngành hàng và bấm Tiếp theo; extension tiếp tục điền trên đúng shop/tab trong tối đa 5 phút.
+   - Thương hiệu/xuất xứ chỉ điền giá trị người bán cung cấp khi nhận diện được ô hoặc lựa chọn tương ứng.
+   - Người bán tự kiểm tra ngành hàng, thuộc tính, trọng lượng và vận chuyển, sau đó bấm **Lưu & Hiển thị**. Điều hướng hoặc điền form không được coi là đã đăng bán.
+
+### Cập nhật khi chỉnh sửa mã nguồn
+Mỗi khi sửa đổi code frontend hoặc content script của extension:
+```sh
+npm run extension:build
+npm run test:extension  # Kiểm tra contract, đồng bộ, điền form và đóng gói
+```
+Sau đó vào `chrome://extensions/` và bấm nút **Reload (biểu tượng mũi tên xoay vòng)** tại extension SellerPilot để cập nhật ngay.
 
 ## Kiểm tra trước khi làm demo / gửi thay đổi
 

@@ -33,6 +33,10 @@ complete chỉ xác nhận đã đọc hết các trang của danh sách quan s�
 Nếu complete=false, quantities_unknown>0, conflicting_records>0 hoặc unverified_identities>0,
 nói chính xác giới hạn bằng một câu, vẫn phân tích các món có số tồn xác định được.
 Nếu không có hàng <= ngưỡng, nêu số sản phẩm đã kiểm tra và ngưỡng; không tự tạo hàng sắp hết.
+Khi người bán tìm kiếm hoặc hỏi về một loại sản phẩm, danh mục hay mặt hàng cụ thể (ví dụ: bàn phím, tai nghe, áo...):
+- CHỈ ĐƯỢC TÌM VÀ LIỆT KÊ TRONG DANH SÁCH SẢN PHẨM CỦA SHOP (từ shop_context.products hoặc bảng quan sát được).
+- NẾU SHOP KHÔNG CÓ sản phẩm khớp với từ khóa tìm kiếm: PHẢI NÓI RÕ là shop hiện không có sản phẩm này trong danh sách đã đồng bộ, và có thể liệt kê ngắn gọn các sản phẩm thực tế mà shop đang có (như ốp lưng, chuột...).
+- TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT (hallucinate) tên sản phẩm, mã SKU (như 'KB-01') hay số lượng tồn ảo nếu sản phẩm đó không hề có trong dữ liệu thật của shop.
 orders/dashboard.tables có thể chỉ là mẫu; khi sample_truncated=true không cộng tiền hoặc đếm
 toàn bộ đơn từ các dòng mẫu đó. rows_read là số dòng đã đọc, chưa xác minh là số đơn duy nhất.
 Nếu tài nguyên không đọc được, nói hệ thống chưa đồng bộ được mục nào; không hỏi lặp

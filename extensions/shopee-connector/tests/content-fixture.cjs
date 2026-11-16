@@ -112,6 +112,31 @@ const path = require('node:path');
     const divTable = await message({kind: 'read'});
     assert.equal(divTable.data.inventory[0].key, 'product:123');
     assert.equal(divTable.data.inventory[0].stock, '5');
+    // A normal product editor must remain untouched until an explicit fill.
+    await page.evaluate(() => {
+      history.replaceState(null, '', '/portal/product/new');
+      document.querySelector('main').innerHTML = '<form><label>Tên sản phẩm<input id="name" value="Tên gốc"></label><label>Mô tả<textarea id="description">Giữ nguyên mô tả ngắn.</textarea></label><label>Giá bán<input id="price" value="350000"></label><div class="eds-form-item is-required"><label>Kho hàng<input id="stock" value="0"></label></div><label>Trọng lượng (g)<input id="weight"></label><input id="photos" type="file" accept="image/png" multiple><button type="submit">Lưu & Hiển thị</button></form>';
+      window.uploadChanges = 0;
+      document.querySelector('#photos').addEventListener('change', () => window.uploadChanges++);
+    });
+    await page.waitForTimeout(1700);
+    assert.equal(await page.locator('#price').inputValue(), '350000');
+    assert.equal(await page.locator('#stock').inputValue(), '0');
+    assert.equal(await page.locator('#description').inputValue(), 'Giữ nguyên mô tả ngắn.');
+    const formPage = await message({kind: 'read'}); pageContext = formPage.data.page_context;
+    const scan = await message({kind: 'scan_required'});
+    assert(!scan.data.missing_fields.includes('Kho hàng'), 'Zero inventory is valid and must never become a default positive quantity');
+    assert.equal((await message({kind: 'scan_required', target: {label: 'wrong-shop'}})).ok, false);
+    assert.equal((await message({kind: 'fill', document_id: 'stale', bypass_context_check: true, url: formPage.data.snapshot.url, draft: {price_vnd: 1}})).ok, false);
+    const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+    const imageFill = await message({kind: 'fill', document_id: formPage.data.document_id, url: formPage.data.snapshot.url,
+      draft: {name: 'Tên người bán', description: 'Giữ nguyên mô tả ngắn.', price_vnd: 350000, stock: 0, weight_g: 250, images: [image]}});
+    assert(imageFill.ok, imageFill.error);
+    assert.equal(imageFill.data.submitted, false);
+    assert.equal(imageFill.data.images, 'handed_to_uploader');
+    assert.equal(await page.evaluate(() => window.uploadChanges), 1, 'An image must not be uploaded once via change and again via synthetic drop');
+    assert.equal(await page.locator('#weight').inputValue(), '250');
+    assert.equal(await page.locator('#stock').inputValue(), '0');
     await page.evaluate(() => {const input = document.createElement('input'); input.type = 'password'; document.body.append(input);});
     assert.equal((await message({kind: 'read'})).ok, false);
     console.log('Passed: trusted account selection, account mismatch read/write guards, structured metrics/tables, private-data exclusion, native field events, Vietnamese multiline, stale document, no submit.');

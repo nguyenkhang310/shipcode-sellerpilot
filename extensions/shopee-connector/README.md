@@ -74,8 +74,9 @@ xem trước lỗi/dòng trùng và xác nhận nhập; nhập lại cùng file 
 đơn. Báo cáo là dữ liệu tại thời điểm xuất, không thay việc ghi trạng thái trực
 tiếp lên Shopee.
 
-Phương án này giữ mật khẩu, OTP và cookie trong trình duyệt. Không lấy cookie
-đem gọi API nội bộ, không giải CAPTCHA, không dùng proxy né chặn. Nếu Shopee yêu
+Phương án này giữ mật khẩu, OTP và cookie trong trình duyệt. Bridge mới thử các
+GET cùng origin trong phiên Shopee hiện có; mã CSRF chỉ dùng trong trang, không
+trả cookie/token qua extension hoặc backend. Không giải CAPTCHA hay dùng proxy né chặn. Nếu Shopee yêu
 cầu xác minh/đăng nhập hoặc cấu trúc trang không rõ, dừng và để người bán xử lý.
 Chrome extension chạy trên máy tính; Expo Go trên iPhone không chạy extension.
 
@@ -106,7 +107,7 @@ chủ động dừng terminal đó rồi chạy lại `npm run demo` để nạp
 4. Mở SellerPilot → **Liên kết**, rồi bấm **tên tài khoản/shop trên thanh đầu
    trang Shopee** trong 30 giây. Esc hủy chọn. Chỉ click trực tiếp được chấp nhận.
 5. Sau khi tên xuất hiện, SellerPilot tự đọc mục Sản phẩm/Tổng quan/Đơn hàng
-   trong một tab nền dùng chung, tự đóng sau lượt đọc nếu bạn không sử dụng tab đó.
+   trên tab đã liên kết. Không mở tab nền; mỗi nguồn có phạm vi và thời gian cập nhật riêng.
    Không cần tự mở lần lượt các mục. Nút **Cập nhật**
    bắt đầu lượt thu thập mới; có tiến trình số trang/dòng và nút **Dừng đồng bộ**.
 6. Hỏi `Sản phẩm nào gần hết hàng?` ngay từ trang Tổng quan. Chat dùng dữ liệu đã
@@ -128,7 +129,7 @@ các dịch vụ hiện có chỉ để cập nhật frontend/content script.
 
 ## Dữ liệu và giới hạn
 
-- Không đọc mật khẩu, cookie, hidden state, script hay API nội bộ Shopee.
+- Không gửi mật khẩu, OTP, cookie hoặc CSRF token tới backend. Content script đọc các trường đã nhận diện; bridge đọc cùng phiên được kiểm tra tài khoản trước/sau và chỉ trả các cột được cho phép.
 - Không gửi nguyên văn trang. Chỉ chuyển số liệu có nhãn nhận diện được, các
   cột sản phẩm/giá/tồn/đã bán/mã đơn/trạng thái/tổng tiền và nhãn form đã hỗ trợ.
   Loại cột người mua, điện thoại, địa chỉ; không lấy giá trị input.
@@ -136,19 +137,10 @@ các dịch vụ hiện có chỉ để cập nhật frontend/content script.
   Tham số URL thay đổi sẽ làm vô hiệu bản đọc để tránh điền nhầm sản phẩm.
 - Nhận diện nhãn tài khoản phải duy nhất, hiển thị ngoài nội dung main/form/bảng.
   Không xác nhận được nhãn thì chặn đọc/điền; không tự chọn một kết quả khác.
-- Bộ đọc tự tìm liên kết/menu trên trang đã liên kết, mở tab nền cùng cửa sổ,
-  về trang đầu nếu xác nhận được nút, rồi bấm trang tiếp cho đến cuối danh sách.
-  Giới hạn 100 trang/tài nguyên, 3 phút/lượt; không đoán URL hay gọi API nội bộ.
-- Không xác minh được menu, header, nút phân trang, bộ lọc, trang bị lặp hoặc đổi
-  tài khoản thì báo thiếu/giới hạn thay vì tuyên bố đã đọc toàn shop. Trình đọc
-  hỗ trợ table/ARIA và một số dạng div-table; DOM Shopee thực tế cần kiểm chứng.
-- Cache tách theo connection + nhãn tài khoản, hết hạn sau 5 phút. Trả lời luôn
-  kiểm tra lại tài khoản live; cache không vượt kiểm tra này. Không đổi timestamp
-  cũ thành thời điểm lookup. Nếu MV3 bị dừng, job báo interrupted; chỉ dọn tab nền
-  thuộc job và không đóng tab đang được người dùng sử dụng.
-- Tổng tồn, hàng hết (0), hàng sắp hết (>0 và <=5), SKU trùng/xung đột, số chưa
-  đọc được đều tính bằng code trước khi gửi AI. Không lấy doanh thu 0 để suy tồn 0.
-  Đã đọc hết các trang danh sách chưa đồng nghĩa đã xác minh mọi kho/biến thể.
+- Bộ đọc lấy dữ liệu đang nhận diện trên tab liên kết và có thể thử bridge đọc cùng phiên trên Shopee; không mở hoặc điều hướng tab khi người dùng chỉ hỏi chat/đồng bộ.
+- Bridge hiện đọc một trang; không tuyên bố đã đọc toàn bộ shop. Không có số tồn thì giữ không xác định, không chuyển thành 0. Dữ liệu chỉ được lưu sau khi kiểm tra lại đúng tài khoản và ngữ cảnh trang.
+- Cache có hạn 5 phút và tách theo kết nối/shop. Lỗi tài nguyên giữ dữ liệu cũ với thời điểm thật; không cập nhật giả thành vừa đồng bộ.
+- Cần kiểm chứng bridge và bố cục trên tài khoản thật. Endpoint nội bộ có thể thay đổi; kết quả fixture không chứng minh hỗ trợ đầy đủ mọi shop.
 - Kỳ thời gian báo cáo chưa được đổi tự động. Không suy kỳ “7 ngày” từ dashboard
   hôm nay. Bảng mẫu đơn hàng gửi AI có cờ sample_truncated; không dùng mẫu để
   cộng doanh thu hoặc đếm toàn bộ đơn.
@@ -175,21 +167,19 @@ Không lấy dữ liệu `UTE MALL` để lấp số liệu thiếu của Shopee
 có **Chuyển sang shop local** nếu muốn dùng hệ thống local; khi đó giao diện app
 và API local hoạt động như trước.
 
-## Điền form
+## Điền form vào Shopee
 
-1. Mở form thêm/sửa sản phẩm Shopee, chọn ngành hàng phù hợp.
-2. Trong chat, chọn ảnh rồi nhập thông tin đã biết, ví dụ:
-   `Bàn phím trắng, giá 5 xị, còn 12 cái. Viết tên và mô tả giúp mình.`
-3. Nếu chưa nhận diện được ô, menu tên tài khoản → **Gán ô trên form sản phẩm**,
-   chọn từng trường rồi bấm đúng ô trên Shopee trong 30 giây.
-4. Duyệt bản nháp → **Điền vào Shopee**. Không tự bấm Save/Publish/submit.
-5. Tự chọn ảnh, ngành hàng, thuộc tính, biến thể; kiểm tra form rồi lưu/đăng
-   trên Shopee. **Đã điền không phải đã đăng.**
+Gửi ảnh và thông tin sản phẩm trong chat, duyệt bản nháp rồi bấm **Điền vào form**.
+Nếu chưa mở form, extension điều hướng đúng tab liên kết sang trang thêm sản phẩm.
+Bản nháp vẫn ở trạng thái sẵn sàng cho tới khi các ô chính được xác minh giữ dữ liệu.
+Form nhiều bước được tiếp tục trong tối đa 5 phút, trên cùng shop/tab, sau khi người bán chọn ngành hàng và chuyển bước.
 
-Giá trị bị khóa, nhãn trùng, vượt độ dài, trang đổi hoặc bị framework reset sẽ
-báo lỗi. Rich text/iframe/biến thể cần kiểm thử riêng trên Shopee thật.
-Ảnh và lịch sử lưu trong Chrome storage, không vào database shop local. Xóa
-cuộc trò chuyện sẽ xóa ảnh/bản nháp liên quan. Gỡ extension sẽ mất lịch sử.
+Không có tác vụ tự sửa chạy trên mọi trang sản phẩm. Không tự gán giá/tồn, chia tồn cho biến thể, viết thêm công dụng, chọn No brand/xuất xứ hoặc bật vận chuyển khi chưa có thông tin xác nhận.
+Ảnh chỉ được chuyển một lần cho bộ tải ảnh của Shopee trong lượt tiếp tục; người bán cần kiểm tra ảnh đã được nhận.
+Người bán tự duyệt và bấm Lưu/Hiển thị. Extension không tự gửi duyệt hoặc tuyên bố đã đăng bán.
+
+Kiểm tra local trước khi tích hợp: unit test đồng bộ/điền form, fixture DOM và build.
+Luồng shop thật cần nghiệm thu riêng với chính giao diện đang dùng.
 
 ## Chẩn đoán
 

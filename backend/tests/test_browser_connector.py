@@ -284,3 +284,35 @@ def test_browser_cost_is_never_applied_as_selling_price(browser):
     result = finish(client, payload(mode='listing', message='Giá vốn 5 xị, mình chưa chốt giá bán. Còn 12 cái.'))
     assert result['result']['draft']['price_vnd'] is None
     assert result['result']['draft']['stock'] == 12
+
+
+@pytest.mark.parametrize('message,price,stock', [
+    ('Giá vốn 5 xị, chưa chốt giá bán. Kho 0 cái.', None, 0),
+    ('Giá bán 350k. Tồn kho: 12 cái.', 350000, 12),
+    ('Bộ 12 cái dùng trong nhà, chưa chốt tồn kho.', None, None),
+])
+def test_browser_fallback_uses_commercial_evidence_without_invented_description(browser, message, price, stock):
+    client, provider = browser
+
+    async def compose(**_kwargs):
+        return json.dumps({'name': 'Bàn phím trắng', 'description': None})
+
+    provider.compose_listing = compose
+    result = finish(client, payload(mode='listing', message=message))
+    assert result['status'] == 'completed'
+    assert result['result']['draft']['price_vnd'] == price
+    assert result['result']['draft']['stock'] == stock
+    assert result['result']['draft']['description'] is None
+    assert 'description' in result['result']['missing_fields']
+
+
+def test_browser_internal_exception_does_not_leak_provider_details(browser):
+    client, provider = browser
+
+    async def respond(*_args, **_kwargs):
+        raise RuntimeError('private-fixture-token-do-not-return')
+
+    provider.respond = respond
+    result = finish(client, payload())
+    assert result['status'] == 'failed'
+    assert 'private-fixture-token' not in json.dumps(result)

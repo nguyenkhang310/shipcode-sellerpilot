@@ -276,3 +276,52 @@ test('TikTok attribute replies preserve zero stock and require another explicit 
   assert(history.turns.every(t=>t.response.run_id&&t.response.integration_mode==='shopee_browser'));
  }finally{chrome.tabs.get=originalGet;chrome.tabs.sendMessage=originalSend;global.fetch=originalFetch;}
 });
+
+test('explicit Shopee navigation stays ready until a verified fill, scoped to the same shop, tab and step', async()=>{
+ const [state,api]=await load();saved={};
+ const originalGet=chrome.tabs.get,originalSend=chrome.tabs.sendMessage,originalUpdate=chrome.tabs.update;
+ const conversation=crypto.randomUUID(),core={name:'Bàn phím',description:'Giữ nguyên mô tả của người bán.',price_vnd:350000,stock:0};
+ let url='https://banhang.shopee.vn/',step=0,fills=0,navigations=0;chrome.runtime.id='fixture';
+ chrome.tabs.get=async id=>({id,url});
+ chrome.tabs.update=async(id,options)=>{assert.equal(id,7);url=options.url;navigations++;};
+ chrome.tabs.sendMessage=async(id,message)=>{
+  assert.equal(id,7);
+  if(message.kind==='read')return{ok:true,data:{document_id:'doc',page_context:'step-'+step,snapshot:{url},fields:(step===0?['Tên sản phẩm']:['Tên sản phẩm','Mô tả','Giá bán','Tồn kho']).map(label=>({label,type:'text'}))}};
+  if(message.kind==='fill'){
+   fills++;assert.equal(message.draft.stock,0);assert.equal(message.draft.price_vnd,350000);assert.equal(message.draft.description,core.description);
+   assert.equal(message.draft.brand,null);assert.equal(message.draft.origin,null);assert.equal(message.draft.weight_g,null);
+   return{ok:true,data:{submitted:false,report:['name','description','price_vnd','stock'].map(field=>({field,status:step===0&&field!=='name'?'unmapped':'filled'})),unfilled_required:['Ngành hàng']}};
+  }
+  throw Error('Unexpected message '+message.kind);
+ };
+ try{
+  await state.bindCurrentTab('shopee');await state.mutate(c=>{c.target={label:'fixture-shop'};c.drafts[1]={id:1,status:'ready',conversation_id:conversation,...core};});
+  const response=await api.handleApi('/product-drafts/1/publish','POST','{}');
+  assert.equal(response.data.status,'ready');assert.equal(navigations,1);assert.equal(fills,0);
+  const sender={id:'fixture',frameId:0,tab:{id:7},url};
+  for(const invalid of [{...sender,frameId:1},{...sender,tab:{id:8}},{...sender,url:'https://banhang.shopee.vn.evil.example/portal/product/new'},{...sender,id:'other'}])assert.equal(await api.continueFormFill(invalid),null);
+  assert.equal(fills,0);
+  assert.equal((await api.continueFormFill(sender)).status,'waiting');assert.equal(fills,1);assert.equal((await state.state()).drafts[1].status,'ready');
+  assert.equal(await api.continueFormFill(sender),null);assert.equal(fills,1,'Same step is never rewritten on every poll');
+  step=1;assert.equal((await api.continueFormFill(sender)).status,'filled');assert.equal(fills,2);
+  assert.equal((await state.state()).drafts[1].status,'filled');assert.equal(saved.pending_shopee_draft,undefined);
+  const history=(await api.handleApi('/conversations/'+conversation,'GET',null)).data;
+  assert(history.turns.every(turn=>turn.response.run_id&&turn.response.integration_mode==='shopee_browser'));
+  assert.match(history.turns.at(-1).response.answer,/Ngành hàng/);
+ }finally{chrome.tabs.get=originalGet;chrome.tabs.sendMessage=originalSend;if(originalUpdate)chrome.tabs.update=originalUpdate;else delete chrome.tabs.update;}
+});
+
+test('failed navigation and a cancelled or edited draft cannot leave an active autofill job',async()=>{
+ const [state,api]=await load();saved={};const originalUpdate=chrome.tabs.update,originalGet=chrome.tabs.get,originalSend=chrome.tabs.sendMessage;
+ const core={name:'Bàn phím',description:'Mô tả',price_vnd:500000,stock:0};let url='https://banhang.shopee.vn/';
+ chrome.tabs.get=async id=>({id,url});chrome.tabs.update=async()=>{throw Error('closed');};
+ try{
+  await state.bindCurrentTab('shopee');await state.mutate(c=>{c.target={label:'fixture-shop'};c.drafts[1]={id:1,status:'ready',...core};});
+  await assert.rejects(api.handleApi('/product-drafts/1/publish','POST','{}'),/Chưa mở được/);assert.equal(saved.pending_shopee_draft,undefined);
+  chrome.tabs.update=async(id,options)=>{url=options.url;};
+  await api.handleApi('/product-drafts/1/publish','POST','{}');
+  await api.handleApi('/product-drafts/1/cancel','POST','{}');assert.equal(saved.pending_shopee_draft,undefined);
+  let writes=0;chrome.tabs.sendMessage=async()=>{writes++;throw Error('Should not touch page');};
+  assert.equal(await api.continueFormFill({id:'fixture',frameId:0,tab:{id:7},url}),null);assert.equal(writes,0);
+ }finally{chrome.tabs.get=originalGet;chrome.tabs.sendMessage=originalSend;if(originalUpdate)chrome.tabs.update=originalUpdate;else delete chrome.tabs.update;}
+});

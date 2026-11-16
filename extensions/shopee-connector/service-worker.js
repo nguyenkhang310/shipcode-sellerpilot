@@ -1,5 +1,5 @@
 import {state, connectionStatus, bindCurrentTab, pageMessage, listScopes, restoreScope, selectTarget, completeTarget, autoConnectShopee, SOURCE} from './state.js';
-import {handleApi, backend} from './api.js';
+import {handleApi, backend, continueFormFill} from './api.js';
 import {syncShopeeData, getCachedPage, getSyncStatus, cancelSync} from './shopee-sync.js';
 const active = new Map();
 const chatJobs = new Map();
@@ -13,6 +13,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       void syncShopeeData(res.id).catch(() => {});
       return res;
     }).then(data => reply({ok: true, data}), error => reply({ok: false, error: error.message}));
+    return true;
+  }
+  if (message?.kind === 'autofill_continue' && sender.id === chrome.runtime.id && sender.tab) {
+    Promise.resolve().then(() => handleStep2Completed(message.scan))
+      .then(data => reply({ok: true, data}), error => reply({ok: false, error: error.message}));
     return true;
   }
   // Only the packaged UI may call the backend or mutate the connection.
@@ -59,6 +64,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       return pageMessage(conn, {kind: 'read'});
     }
     if (message.kind === 'bind_field') return pageMessage(await state(), {kind: 'bind', field: message.field});
+    if (message.kind === 'scan_required') return pageMessage(await state(), {kind: 'scan_required'});
     if (message.kind === 'backend_health') return backend('/health');
     if (message.kind === 'open_store') {
       const value = await state();

@@ -28,7 +28,7 @@ if (command === 'setup') {
   fs.rmSync(output, {recursive: true, force: true});
   fs.cpSync(path.join(root, 'frontend/dist/web'), output, {recursive: true});
   prepareExpoAssets(output);
-  for (const name of ['manifest.json', 'service-worker.js', 'shopee-sync.js', 'shop-data.js', 'state.js', 'api.js', 'bootstrap.js', 'content', 'connection.local.json']) fs.cpSync(path.join(source, name), path.join(output, name), {recursive: true});
+  for (const name of ['manifest.json', 'service-worker.js', 'shopee-sync.js', 'shop-data.js', 'state.js', 'api.js', 'bootstrap.js', 'content', 'connection.local.json', 'shopee-schema.json', 'schema-loader.js']) fs.cpSync(path.join(source, name), path.join(output, name), {recursive: true});
   fs.copyFileSync(path.join(root, 'frontend/assets/shipcode-logo-app.png'), path.join(output, 'icon.png'));
   const indexFile = path.join(output, 'index.html');
   let index = fs.readFileSync(indexFile, 'utf8').replace('<html lang="en">', '<html lang="vi">');

@@ -27,14 +27,26 @@ global.chrome = {
     remove: async tabId => {removed.push(tabId); tabs.delete(tabId);},
     sendMessage: async (tabId, message) => {
       readCount++;
-      if (wrongAccount && tabId !== 7) return {ok: false, error: 'Không xác nhận được tài khoản'};
+      if (wrongAccount) return {ok: false, error: 'Không xác nhận được tài khoản'};
+      if (message.kind === 'target_status') return {ok: true, data: {target_matches: true, document_id: 'bound', page_context: 'bound'}};
       if (message.kind === 'next_page') {pageIndex++; return {ok: true, data: {navigated: true}};}
       if (tabs.get(tabId).url.endsWith('/observed-orders')) return {ok: true, data: {...page(), metrics: [],
         list_kind: 'orders', tables: [[['Mã đơn hàng', 'Trạng thái'], ['ORDER-1', 'Chờ lấy hàng']]],
         pagination: {recognized: true, current: 1, has_next: false, at_last: true}}};
-      return {ok: true, data: page(tabId !== 7)};
+      return {ok: true, data: page(false)};
     },
-  }, scripting: {executeScript: async () => {}},
+  },
+  scripting: {
+    executeScript: async (options) => {
+      const key = options?.args?.[0];
+      if (wrongAccount) return [{result: null}];
+      if (key === 'products') return [{result: page(true)}];
+      if (key === 'orders') return [{result: {...page(), metrics: [],
+        list_kind: 'orders', tables: [[['Mã đơn hàng', 'Trạng thái'], ['ORDER-1', 'Chờ lấy hàng']]],
+        pagination: {recognized: true, current: 1, has_next: false, at_last: true}}}];
+      return [{result: null}];
+    }
+  },
 };
 function reset() {
   saved = {sellerpilot: connection()}; created = []; removed = []; pageIndex = 0; readCount = 0; wrongAccount = false;
@@ -67,25 +79,49 @@ test('inventory counts preserve zero/unknown, deduplicate SKU, reject conflicts 
   assert.equal(summary.quantities_unknown, 2); assert.equal(summary.conflicting_records, 1);
 });
 
-test('background sync discovers actual link, reads all pages, coalesces concurrent calls and leaves original tab intact', async () => {
+test('inventoryRows parses Shopee live product table with tooltips and sort arrows', async () => {
+  const [, data] = await modules();
+  const shopeePage = {
+    tables: [
+      [
+        ['Tên sản phẩm', 'Giá ↕', 'Kho hàng (?) ↕', 'Hiệu suất (?) ↕', 'Đánh giá sản phẩm (?)', 'Thao tác'],
+        ['Ốp lưng iPhone Silicon White Bo w 3D, Bảo Vệ Camera, Chống ...', '₫19.000 - ₫22.000', '36', 'Doanh số 5', '-', 'Cập nhật'],
+        ['Kính Cường Lực KingKong Chống Nhìn Trộm', '₫45.000', '12', 'Doanh số 10', '-', 'Cập nhật']
+      ]
+    ]
+  };
+  const parsed = data.inventoryRows(shopeePage);
+  assert.equal(parsed.length, 2);
+  assert.equal(parsed[0].name, 'Ốp lưng iPhone Silicon White Bo w 3D, Bảo Vệ Camera, Chống ...');
+  assert.equal(parsed[0].stock, 36);
+  assert.equal(parsed[1].name, 'Kính Cường Lực KingKong Chống Nhìn Trộm');
+  assert.equal(parsed[1].stock, 12);
+  const summary = data.summarizeInventory(parsed);
+  assert.equal(summary.records_count, 2);
+  assert.equal(summary.total_units, 48);
+  assert.equal(data.resourcePresent(shopeePage, 'products'), true);
+});
+
+test('Zero New Tabs: background sync reads in-tab or via Data Bridge, creates 0 new tabs and leaves bound tab intact', async () => {
   reset(); const [sync, data] = await modules();
   await Promise.all([sync.syncShopeeData(id, ['products']), sync.syncShopeeData(id, ['products'])]);
   await finishSync(sync);
   const cached = await sync.getCachedPage('products', id);
   assert(cached, JSON.stringify(await sync.getSyncStatus(id)));
-  assert.equal(cached.coverage.pages_read, 2); assert.equal(cached.coverage.pagination_complete, true);
+  assert.equal(cached.coverage.pages_read, 1);
   const summary = data.summarizeInventory(data.inventoryRows(cached));
-  assert.equal(summary.records_count, 3); assert.equal(summary.total_units, 13);
+  assert.equal(summary.records_count, 2); assert.equal(summary.total_units, 3);
   assert.equal(summary.low_stock_items[0].sku, 'K1');
-  assert.equal(created.length, 1); assert.equal(created[0].url, origin + '/observed-products');
-  assert.deepEqual(removed, [created[0].id]); assert(tabs.has(7));
+  assert.equal(created.length, 0, 'Zero New Tabs: chrome.tabs.create must NEVER be called');
+  assert.deepEqual(removed, [], 'No tabs removed because no background tabs created');
+  assert(tabs.has(7), 'Bound tab 7 must remain intact');
   const reads = readCount; await sync.getCachedPage('products', id); assert.equal(readCount, reads, 'cache reads never navigate');
   const key = 'shopee_sync:' + id;
   saved[key].pages.products.snapshot.captured_at = new Date(Date.now() - data.TTL_MS - 1).toISOString();
   assert.equal(await sync.getCachedPage('products', id), null, 'expired data must not look fresh');
 });
 
-test('cached pages cannot mix accounts or connections; wrong account stops and cleans owned tabs', async () => {
+test('cached pages cannot mix accounts or connections; wrong account stops without saving', async () => {
   reset(); const [sync, , state] = await modules();
   await sync.saveCachedPage('products', id, {...page(true), target: {label: 'shop-a'}});
   await assert.rejects(sync.saveCachedPage('products', id, {...page(true), target: {label: 'shop-b'}}), /không thuộc/);
@@ -96,53 +132,44 @@ test('cached pages cannot mix accounts or connections; wrong account stops and c
   wrongAccount = true;
   await sync.syncShopeeData(id, ['products']);
   await finishSync(sync);
-  assert.equal((await sync.getSyncStatus(id)).status, 'partial');
+  assert.equal((await sync.getSyncStatus(id)).status, 'failed');
   assert.equal(await sync.getCachedPage('products', id), null);
-  assert.equal(removed.length, 1); assert(tabs.has(7));
+  assert.equal(created.length, 0, 'Zero new tabs created on account error');
+  assert(tabs.has(7));
 });
 
-test('cancellation returns promptly and closes only owned tabs, without a success claim', async () => {
+test('cancellation returns promptly and preserves bound tab, without a success claim', async () => {
   reset(); const [sync] = await modules();
-  await sync.syncShopeeData(id, ['products']);
-  // Let the job reach a real background-tab polling wait.
-  while (!created.length) await new Promise(resolve => setTimeout(resolve, 5));
+  const res = await sync.syncShopeeData(id, ['products']);
+  assert.equal(res.status, 'started');
   sync.cancelSync(id);
   while ((await sync.getSyncStatus(id)).syncing) await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal((await sync.getSyncStatus(id)).status, 'cancelled');
   assert.equal(await sync.getCachedPage('products', id), null);
-  assert.deepEqual(removed, [created[0].id]); assert(tabs.has(7));
+  assert.equal(created.length, 0);
+  assert(tabs.has(7));
 });
 
-test('an explicit multi-section sync reuses one reader tab and retains both resources', async () => {
+test('an explicit multi-section sync reuses bound tab and retains both resources with 0 new tabs', async () => {
   reset(); const [sync] = await modules();
   await sync.syncShopeeData(id, ['products', 'orders']);
   await finishSync(sync);
   assert(await sync.getCachedPage('products', id));
   assert(await sync.getCachedPage('orders', id));
-  assert.equal(created.length, 1, 'one temporary tab for the entire sync');
-  assert.equal((await sync.getSyncStatus(id)).status, 'completed');
-  assert.deepEqual(removed, [created[0].id]); assert(tabs.has(7));
+  assert.equal(created.length, 0, 'Zero new tabs created for multi-section sync');
+  assert.equal((await sync.getSyncStatus(id)).status, 'partial', 'The first page of products cannot represent the whole catalog');
+  assert.deepEqual(removed, []);
+  assert(tabs.has(7));
 });
 
-test('taking over the reader tab stops further navigation and preserves that tab', async () => {
+test('bound tab is preserved and never closed or navigated away during sync', async () => {
   reset(); const [sync] = await modules();
-  const original = chrome.storage.local.set;
-  let takenOver = false;
-  chrome.storage.local.set = async value => {
-    await original(value);
-    if (!takenOver && value['shopee_sync:' + id]?.pages?.products?.coverage?.pagination_complete) {
-      takenOver = true; tabs.get(created[0].id).active = true;
-    }
-  };
-  try {
-    await sync.syncShopeeData(id, ['products', 'orders']);
-    await finishSync(sync);
-    assert.equal(created.length, 1);
-    assert.equal((await sync.getSyncStatus(id)).status, 'partial');
-    assert.equal(await sync.getCachedPage('orders', id), null);
-    assert(tabs.has(created[0].id)); assert(tabs.has(7)); assert.deepEqual(removed, []);
-    assert.equal(tabs.get(created[0].id).url, origin + '/observed-products');
-  } finally {chrome.storage.local.set = original;}
+  await sync.syncShopeeData(id, ['products', 'orders']);
+  await finishSync(sync);
+  assert.equal(created.length, 0);
+  assert(tabs.has(7));
+  assert.deepEqual(removed, []);
+  assert.equal(tabs.get(7).url, origin + '/');
 });
 
 test('a service-worker interruption is explicit and recovers only its inactive background tab', async () => {
@@ -156,4 +183,31 @@ test('a service-worker interruption is explicit and recovers only its inactive b
   saved['shopee_sync:' + id].job = {status: 'running', owned_tab_id: 43, opener_tab_id: 7};
   await sync.getSyncStatus(id);
   assert(tabs.has(43), 'an active tab taken over by the user is preserved');
+});
+
+test('a first API page keeps unknown stock unknown, strips query tokens and remains partial', async()=>{
+ reset();const [sync,data]=await modules();const original=chrome.scripting.executeScript;
+ const previous={document:global.document,window:global.window,location:global.location};
+ global.document={cookie:'SPC_CDS=fixture-session-private',querySelectorAll:()=>[]};
+ global.location={href:origin+'/portal/product/list?SPC_CDS=private-query',origin,pathname:'/portal/product/list',search:'?SPC_CDS=private-query'};
+ global.window={fetch:async()=>({ok:true,json:async()=>({code:0,data:{products:[{id:1,name:'Hàng chưa biết tồn'},{id:2,name:'Hàng đã hết',stock:0}],total:100}})})};
+ chrome.scripting.executeScript=async options=>options.world==='MAIN'?[{result:await options.func(...options.args)}]:[];
+ try{
+  await sync.syncShopeeData(id,['products']);await finishSync(sync);
+  const cached=await sync.getCachedPage('products',id),context=data.resourceContext(cached,'products');
+  assert(cached);assert.equal(context.complete,false);assert.equal(context.quantities_unknown,1);assert.equal(context.out_of_stock_count,1);
+  assert.equal(context.total_units,0);assert.equal((await sync.getSyncStatus(id)).status,'partial');
+  assert(!JSON.stringify(cached).includes('private-query'));assert(!JSON.stringify(cached).includes('fixture-session-private'));
+ }finally{
+  chrome.scripting.executeScript=original;for(const [key,value] of Object.entries(previous)){if(value===undefined)delete global[key];else global[key]=value;}
+ }
+});
+
+test('a changed account after an API read discards that response before caching',async()=>{
+ reset();const [sync]=await modules();const original=chrome.scripting.executeScript;
+ chrome.scripting.executeScript=async options=>{if(options.world==='MAIN'){wrongAccount=true;return[{result:page(true)}];}return original(options);};
+ try{
+  await sync.syncShopeeData(id,['products']);await finishSync(sync);
+  assert.equal(await sync.getCachedPage('products',id),null);assert.equal((await sync.getSyncStatus(id)).status,'failed');
+ }finally{chrome.scripting.executeScript=original;wrongAccount=false;}
 });

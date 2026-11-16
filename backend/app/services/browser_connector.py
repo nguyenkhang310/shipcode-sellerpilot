@@ -1,6 +1,7 @@
 """Isolated browser inference. No shop repository, SQL writes or publication tools."""
 import asyncio
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from time import monotonic
@@ -12,10 +13,12 @@ from app.ai.contracts import AIProviderError
 from app.ai.fallback import extract_price
 from app.ai.gemini import image_parts
 from app.ai.listing_contracts import ListingCopy, listing_validation_context
-from app.ai.money import money_hints
+from app.ai.money import money_hints, money_mentions
 from app.ai.quantities import quantity_value
 from app.ai.listing_evidence import commercial_context
 from app.ai.text import assistant_text
+
+logger = logging.getLogger(__name__)
 
 
 def browser_availability(context):
@@ -104,9 +107,23 @@ async def browser_assist(payload, provider):
             and extract_price(copy.price_evidence, sku=None) == copy.price_vnd
             and commercial_context(copy.price_evidence, payload.message)):
         updates['price_vnd'] = copy.price_vnd
+    elif updates.get('price_vnd') is None:
+        prices = {mention.value for mention in money_mentions(payload.message)
+                  if mention.value is not None and 1_000 <= mention.value <= 1_000_000_000
+                  and commercial_context(mention.text, payload.message)}
+        if len(prices) == 1:
+            updates['price_vnd'] = prices.pop()
+
     if copy.stock is not None and copy.stock_evidence and copy.stock_evidence in payload.message:
         if quantity_value(copy.stock_evidence) == copy.stock and commercial_context(copy.stock_evidence, payload.message, stock=True):
             updates['stock'] = copy.stock
+    elif updates.get('stock') is None:
+        s_match = re.search(r'(?:tồn kho|kho|số lượng|còn)\s*[:=]?\s*(\d+(?:[.,]\d{3})*(?:\s*(?:cái|chiếc|sản phẩm|sp|bộ|đôi))?)\b', payload.message, re.I)
+        if s_match:
+            s_val = quantity_value(s_match[1])
+            if s_val is not None and commercial_context(s_match[1], payload.message, stock=True):
+                updates['stock'] = s_val
+
     draft = payload.draft.model_copy(update=updates)
     missing = [field for field in ('name', 'description', 'price_vnd', 'stock') if getattr(draft, field) is None]
     labels = {'name': 'món hàng cần bán', 'description': 'thông tin mô tả', 'price_vnd': 'giá bán', 'stock': 'số lượng tồn kho'}
@@ -160,8 +177,9 @@ class BrowserRequests:
                         'message': 'Chưa xử lý được bằng AI lúc này. Nội dung và ảnh vẫn được giữ; bạn có thể thử lại.'}
             except asyncio.CancelledError:
                 return {'status': 'cancelled'}
-            except Exception:
-                return {'status': 'failed', 'reason': 'provider_unavailable', 'message': 'Chưa gọi được AI. Bạn thử lại nhé.'}
+            except Exception as error:
+                logger.warning('Browser inference failed: error_type=%s', type(error).__name__)
+                return {'status': 'failed', 'reason': 'provider_unavailable', 'message': 'Chưa gọi được AI. Nội dung vẫn được giữ, bạn thử lại nhé.'}
         self.jobs[key] = BrowserJob(digest, asyncio.create_task(run()), now)
 
     def status(self, connection_id, request_id):

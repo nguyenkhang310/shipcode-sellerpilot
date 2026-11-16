@@ -32,8 +32,8 @@ export function ExtensionShell() {
   const onConnection = useCallback((value: BrowserConnection) => setConnection(value), []);
 
   useEffect(() => {
-    if (!connection?.target || connection.target_matches === false) {setCachedPages({}); return;}
     let alive = true;
+    if (!connection?.target || connection.target_matches === false) {setCachedPages({}); return;}
     async function loadCache() {
       try {
         const [dash, prod, ord] = await Promise.all([
@@ -51,6 +51,24 @@ export function ExtensionShell() {
     return () => { alive = false; clearInterval(timer); };
   }, [connection?.id, connection?.target?.label, connection?.target_matches]);
 
+  useEffect(() => {
+    let alive = true;
+    if (connection?.target && connection.target_matches !== false) {
+      if (tab === 'products' || tab === 'overview' || tab === 'orders') {
+        const key = tab === 'overview' ? 'dashboard' : tab;
+        extensionCall<BrowserPage | null>('get_cached_page', { page_key: key }).then(cached => {
+          if (alive && cached) {
+            setCachedPages(prev => ({ ...prev, [key]: cached }));
+          }
+        }).catch(() => {});
+        extensionCall<BrowserPage>('scan').then(p => {
+          if (alive && p) setPage(p);
+        }).catch(() => {});
+      }
+    }
+    return () => { alive = false; };
+  }, [tab, connection?.id, connection?.target?.label, connection?.target_matches]);
+
   const validPage = page && connection?.tab_status === 'linked' && connection.target_matches !== false
     && (!connection.document_id || page.document_id === connection.document_id)
     && (!connection.page_context || page.page_context === connection.page_context)
@@ -58,16 +76,16 @@ export function ExtensionShell() {
 
   const trustedConnection = connection?.tab_status === 'linked' && connection.target_matches !== false;
   const currentMetrics = trustedConnection ? (cachedPages.dashboard?.metrics || validPage?.metrics || []) : [];
-  const stockPage = trustedConnection ? cachedPages.products : null;
+  const stockPage = trustedConnection ? (cachedPages.products || (validPage?.list_kind === 'products' ? validPage : null)) : null;
   const stock = stockPage?.inventory_summary;
 
   const currentTables = (() => {
     if (!trustedConnection) return [];
     const filterTable = (tables: string[][][], isOrder: boolean) =>
       tables.filter(table => table[0]?.some(header => isOrder
-        ? /^(mã đơn(?: hàng)?|order id)$/i.test(header)
-        : /^(sản phẩm|tên sản phẩm|product|product name|sku|mã sku)$/i.test(header))
-        && (isOrder || !table[0]?.some(header => /^(mã đơn(?: hàng)?|order id)$/i.test(header))));
+        ? /^(?:mã đơn(?: hàng)?|order id)(?:\s*\(.*?\))?$/i.test(header.trim())
+        : /^(?:sản phẩm|tên sản phẩm|thông tin sản phẩm|product|product name|sku|mã sku)(?:\s*\(.*?\))?$/i.test(header.trim()))
+        && (isOrder || !table[0]?.some(header => /^(?:mã đơn(?: hàng)?|order id)(?:\s*\(.*?\))?$/i.test(header.trim()))));
 
     if (tab === 'orders') {
       const live = filterTable(validPage?.tables || [], true);
@@ -78,8 +96,21 @@ export function ExtensionShell() {
     if (tab === 'products') {
       const live = filterTable(validPage?.tables || [], false);
       if (live.length) return live;
+      if (validPage?.inventory?.length) {
+        return [[
+          ['Tên sản phẩm', 'SKU', 'Kho hàng'],
+          ...validPage.inventory.map(item => [item.name, item.sku || '—', String(item.stock ?? '—')])
+        ]];
+      }
       const cached = filterTable(cachedPages.products?.tables || [], false);
-      return cached.length ? cached : (cachedPages.products?.tables || []);
+      if (cached.length) return cached;
+      if (cachedPages.products?.inventory?.length) {
+        return [[
+          ['Tên sản phẩm', 'SKU', 'Kho hàng'],
+          ...cachedPages.products.inventory.map(item => [item.name, item.sku || '—', String(item.stock ?? '—')])
+        ]];
+      }
+      return cachedPages.products?.tables || [];
     }
     return [];
   })();

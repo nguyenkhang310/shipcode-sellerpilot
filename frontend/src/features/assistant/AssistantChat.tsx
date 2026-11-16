@@ -41,7 +41,7 @@ const STORAGE_BASE = 'sellerpilot:conversation:' + (inExtension() ? location.ori
 const PROMPTS = [
   { icon: 'trend', title: 'Hôm nay shop thế nào?', message: 'Hôm nay shop có bao nhiêu đơn và giá trị đơn hàng bao nhiêu?' },
   { icon: 'inventory', title: 'Kiểm tra hàng sắp hết', message: 'Những sản phẩm nào sắp hết hàng?' },
-  { icon: 'search', title: 'Tìm sản phẩm trong shop', message: 'Tìm sản phẩm bàn phím' },
+  { icon: 'search', title: 'Tìm sản phẩm trong shop', message: 'Shop đang có những sản phẩm nào?' },
   { icon: 'plan', title: 'Lập kế hoạch cho shop', message: 'Phân tích số liệu 7 ngày qua và lập kế hoạch kinh doanh 7 ngày tới. Chọn sản phẩm ưu tiên, lịch hành động, ý tưởng video TikTok và cách đo kết quả.' },
 ] as const;
 const readableError = (e: unknown) => e instanceof ApiError

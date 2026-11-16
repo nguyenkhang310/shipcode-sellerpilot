@@ -108,6 +108,85 @@ async function saveTurn(connectionId, conversationId, message, response) {
     connection.results ||= {};
   });
 }
+
+const PENDING_FORM = 'pending_shopee_draft';
+const formJobs = new Map();
+const coreFields = ['name', 'description', 'price_vnd', 'stock'];
+function formPayload(draft) {
+  return {...Object.fromEntries(coreFields.map(key => [key, draft[key]])),
+    images: draft.preview_urls?.length ? draft.preview_urls : draft.preview_url ? [draft.preview_url] : [],
+    brand: draft.brand ?? null, origin: draft.origin ?? null, weight_g: draft.weight_g ?? null};
+}
+async function ensureDraft(connection, draft) {
+  const current = await state(), live = current.drafts[draft.id];
+  if (current.id !== connection.id || !live || live.status !== draft.status
+    || JSON.stringify(formPayload(live)) !== JSON.stringify(formPayload(draft))) fail('Bản nháp hoặc kết nối đã đổi. Kiểm tra lại trước khi điền.', 409);
+}
+async function clearFormJob(job) {
+  const saved = (await chrome.storage.local.get(PENDING_FORM))[PENDING_FORM];
+  if (saved?.id === job.id) await chrome.storage.local.remove(PENDING_FORM);
+}
+async function queueForm(connection, draft, url) {
+  const job = {id: crypto.randomUUID(), connection_id: connection.id, tab_id: connection.tab_id,
+    draft_id: draft.id, target: connection.target, url, timestamp: Date.now(), payload: formPayload(draft)};
+  await ensureCurrent(connection.id);
+  await chrome.storage.local.set({[PENDING_FORM]: job});
+  return job;
+}
+async function finishForm(connection, draft, result) {
+  const missing = coreFields.filter(field => !result?.report?.some(row => row.field === field && row.status === 'filled'));
+  if (result?.submitted !== false || missing.length) fail('Chưa xác minh điền đủ các ô: ' + missing.join(', ') + '. Kiểm tra các ô đã điền trên trang rồi thử lại.', 409);
+  const updated = {...draft, status: 'filled', decided_at: new Date().toISOString()};
+  await mutate(current => {
+    if (current.id !== connection.id || current.drafts[draft.id]?.status !== draft.status
+      || JSON.stringify(formPayload(current.drafts[draft.id])) !== JSON.stringify(formPayload(draft))) fail('Bản nháp hoặc kết nối đã đổi. Kiểm tra lại trước khi điền.', 409);
+    current.drafts[draft.id] = updated;
+  });
+  if (draft.conversation_id) {
+    const missing = [...new Set(result.unfilled_required || [])].slice(0, 5);
+    const answer = missing.length ? 'Đã điền các ô được xác minh. Còn các mục cần xác nhận:\n' + missing.map(label => '• ' + label).join('\n')
+      : 'Đã điền các ô được xác minh. Bạn kiểm tra ảnh, ngành hàng, thuộc tính và vận chuyển trước khi lưu. Sản phẩm chưa được đăng.';
+    await saveTurn(connection.id, draft.conversation_id, '[Trợ lý kiểm tra form]', chatData(connection, draft.conversation_id, answer, {tool: 'confirm_fill', product_draft: updated}));
+  }
+  return updated;
+}
+// A continuation can come only from the original top-level linked tab. Reports
+// supplied by content messages are ignored; the worker rereads and verifies.
+export async function continueFormFill(sender) {
+  const connection = await state();
+  if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || sender.tab?.id !== connection.tab_id
+    || connection.mode !== 'shopee' || !connection.target?.label) return null;
+  const job = (await chrome.storage.local.get(PENDING_FORM))[PENDING_FORM];
+  if (!job || formJobs.has(job.id)) return null;
+  let url;
+  try { url = new URL(sender.url); } catch { return null; }
+  if (url.origin + url.pathname !== job.url || job.connection_id !== connection.id || job.tab_id !== connection.tab_id
+    || job.target?.label !== connection.target.label) return null;
+  const draft = connection.drafts[job.draft_id];
+  if (Date.now() - job.timestamp > 300000 || Date.now() < job.timestamp || draft?.status !== 'ready'
+    || JSON.stringify(formPayload(draft)) !== JSON.stringify(job.payload)) { await clearFormJob(job); return null; }
+  formJobs.set(job.id, true);
+  try {
+    const page = await pageMessage(connection, {kind: 'read'});
+    if (page.snapshot?.url !== job.url) return null;
+    // Retry only when Shopee exposes a new document/step, never rewrite the
+    // same form every second after the seller starts making manual edits.
+    const signature = JSON.stringify([page.document_id, page.page_context, page.fields]);
+    if (job.attempted === signature || !page.fields?.length) return null;
+    job.attempted = signature;
+    await ensureDraft(connection, draft);
+    await chrome.storage.local.set({[PENDING_FORM]: job});
+    const result = await pageMessage(connection, {kind: 'fill', document_id: page.document_id, page_context: page.page_context,
+      url: page.snapshot.url, draft: {...job.payload, ...(job.images_sent ? {images: []} : {})}});
+    await ensureCurrent(connection.id);
+    if (result?.images === 'handed_to_uploader') {job.images_sent = true; await chrome.storage.local.set({[PENDING_FORM]: job});}
+    const missing = coreFields.filter(field => !result?.report?.some(row => row.field === field && row.status === 'filled'));
+    if (result?.submitted === false && !missing.length) {await finishForm(connection, draft, result); await clearFormJob(job); return {status: 'filled'};}
+    return {status: 'waiting', missing_fields: missing};
+  } catch { await clearFormJob(job); return {status: 'needs_review'}; }
+  finally { formJobs.delete(job.id); }
+}
+
 export async function handleApi(path, method, raw, signal, authorization) {
   const connection = await state();
   if (connection.mode === 'local') {
@@ -215,47 +294,41 @@ export async function handleApi(path, method, raw, signal, authorization) {
   const decision = path.match(/^\/product-drafts\/(\d+)\/(publish|cancel)$/);
   if (decision && method === 'POST') {
     const draft = connection.drafts[decision[1]];
-    if (!draft || !['collecting', 'ready'].includes(draft.status)) fail('Bản nháp không còn khả dụng.', 409);
-    let updated, result;
-    if (decision[2] === 'cancel') updated = {...draft, status: 'cancelled', preview_url: '', preview_urls: [], image_count: 0};
-    else {
-      if (draft.status !== 'ready') fail('Cần bổ sung thông tin bản nháp.', 409);
-      const page = await pageMessage(connection, {kind: 'read'});
-      await ensureCurrent(connection.id);
-      const baseDraft = Object.fromEntries(['name', 'description', 'price_vnd', 'stock'].map(key => [key, draft[key]]));
-      const isTikTok = page.snapshot.url && page.snapshot.url.includes('tiktok.com');
-      const payloadDraft = isTikTok ? {
-        ...baseDraft,
-        images: draft.preview_urls?.length ? draft.preview_urls : (draft.preview_url ? [draft.preview_url] : []),
-        category_name: draft.category_name || null,
-        brand: draft.brand || null,
-        origin: draft.origin || null,
-        weight_g: draft.weight_g ?? null
-      } : baseDraft;
-      result = await pageMessage(connection, {kind: 'fill', document_id: page.document_id, page_context: page.page_context, url: page.snapshot.url,
-        draft: payloadDraft});
-      const core = ['name', 'description', 'price_vnd', 'stock'];
-      const missing = core.filter(field => !result.report?.some(row => row.field === field && row.status === 'filled'));
-      if (result.submitted !== false || missing.length) {
-        fail('Chưa xác minh điền đủ các ô: ' + missing.join(', ') + '. Kiểm tra cả những ô đã điền trên trang rồi thử lại.', 409);
-      }
-      updated = {...draft, status: 'filled', decided_at: new Date().toISOString()};
+    if (!draft || !['collecting', 'ready', 'filled'].includes(draft.status)) fail('Bản nháp không còn khả dụng.', 409);
+    if (decision[2] === 'cancel') {
+      const pending = (await chrome.storage.local.get(PENDING_FORM))[PENDING_FORM];
+      if (pending?.connection_id === connection.id && pending.draft_id === draft.id) await clearFormJob(pending);
+      const updated = {...draft, status: 'cancelled', preview_url: '', preview_urls: [], image_count: 0};
+      await mutate(current => {if (current.id !== connection.id) fail('Kết nối đã đổi.', 409); current.drafts[draft.id] = updated;});
+      return {data: updated};
     }
-    await mutate(current => {if (current.id !== connection.id) fail('Kết nối đã đổi.', 409); current.drafts[draft.id] = updated;
-      for (const convo of Object.values(current.conversations)) for (const turn of convo.turns) if (turn.response.product_draft?.id === draft.id) turn.response.product_draft = {id: updated.id};});
-    if (result?.unfilled_required !== undefined && draft.conversation_id) {
-      if (result.unfilled_required.length) {
-        const unique = [...new Set(result.unfilled_required)].slice(0, 5);
-        const promptText = `Đã điền các ô được xác minh. Còn ${unique.length} mục cần bạn xác nhận:\n` +
-          unique.map(f => `• ${f}`).join('\n') +
-          `\nBạn muốn điền thông tin nào cho các mục này? Bạn có thể nhắn ở đây (Ví dụ: Thương hiệu: Không có thương hiệu, Xuất xứ: Việt Nam...) hoặc chọn trực tiếp trên trang TikTok Shop nhé!`;
-        await saveTurn(connection.id, draft.conversation_id, '[Trợ lý kiểm tra form]', chatData(connection, draft.conversation_id, promptText, {tool: 'prompt_attributes'}));
-      } else {
-        const promptText = 'Đã điền các ô được xác minh. Bạn kiểm tra ảnh, ngành hàng, thuộc tính và thông tin vận chuyển trên trang người bán trước khi gửi duyệt. Sản phẩm chưa được đăng.';
-        await saveTurn(connection.id, draft.conversation_id, '[Trợ lý kiểm tra form]', chatData(connection, draft.conversation_id, promptText, {tool: 'confirm_fill'}));
-      }
+    if (!['ready', 'filled'].includes(draft.status)) fail('Cần bổ sung thông tin bản nháp.', 409);
+    const page = await pageMessage(connection, {kind: 'read'});
+    await ensureDraft(connection, draft);
+    const url = new URL(page.snapshot.url), isTikTok = url.hostname.endsWith('tiktok.com');
+    const isProductForm = isTikTok ? /^\/product\/(?:create|edit)(?:\/|$)/.test(url.pathname)
+      : /^\/(?:portal\/)?product\/(?:new|detail|edit|\d+)(?:\/|$)/.test(url.pathname);
+    if (!isProductForm && typeof chrome.tabs.update === 'function') {
+      if (isTikTok) fail('Mở trang thêm sản phẩm TikTok Shop rồi bấm Điền vào form.', 409);
+      const targetUrl = 'https://banhang.shopee.vn/portal/product/new';
+      const job = await queueForm(connection, draft, targetUrl);
+      try {await chrome.tabs.update(connection.tab_id, {url: targetUrl, active: true});}
+      catch {await clearFormJob(job); fail('Chưa mở được form Shopee. Liên kết lại tab rồi thử lại.', 409);}
+      // Navigating has not filled anything. Keep the draft ready until verified.
+      return {data: draft};
     }
-    return {data: updated};
+    const result = await pageMessage(connection, {kind: 'fill', document_id: page.document_id, page_context: page.page_context, url: page.snapshot.url,
+      draft: {...formPayload(draft), ...(isTikTok ? {category_name: draft.category_name || null} : {})}});
+    const missing = coreFields.filter(field => !result?.report?.some(row => row.field === field && row.status === 'filled'));
+    if (!isTikTok && result?.submitted === false && missing.length && page.fields?.length
+      && page.fields.every(field => /tên sản phẩm|product name/i.test(field.label))) {
+      const job = await queueForm(connection, draft, url.origin + url.pathname);
+      job.attempted = JSON.stringify([page.document_id, page.page_context, page.fields]);
+      job.images_sent = result.images === 'handed_to_uploader';
+      await chrome.storage.local.set({[PENDING_FORM]: job});
+      return {data: draft};
+    }
+    return {data: await finishForm(connection, draft, result)};
   }
   if (path.startsWith('/management/')) fail('Chưa xác minh adapter cho API quản lý local trên Shopee. Giao diện Shopee dùng dữ liệu đồng bộ riêng, không gán số liệu còn thiếu thành 0.', 501);
   fail('Thao tác này chưa được nối và kiểm chứng trên Shopee thật. Không có thay đổi nào được thực hiện.', 501);
