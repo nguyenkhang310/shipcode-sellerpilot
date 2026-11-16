@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View, ViewInstance } from 'react-native';
 import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
 import { ManagementData } from '../../api/types';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -20,7 +20,7 @@ type ChartProps = { data: ManagementData; days: number; pending: boolean; select
 export function SalesTrend({ data, days, pending, selectedDate }: ChartProps) {
   const { ui, IOS, isDark, BRAND } = useTheme();
   const [selection, setSelection] = useState<{ period: string; index: number } | null>(null);
-  const chart = useRef<View>(null);
+  const chart = useRef<ViewInstance>(null);
   const series = pending ? [] : data.series;
   const period = selectedDate || days + ':' + data.from_date;
   const selected = selection?.period === period ? selection.index : null;

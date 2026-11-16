@@ -6,8 +6,84 @@ backend AI của app. Luồng Shopee có **bố cục desktop riêng**, không d
 
 Đây là **kết nối qua trình duyệt**, chưa phải tích hợp Shopee Open Platform.
 Không cần Partner ID/Partner Key để dùng luồng này. Chỉ có tài khoản người bán
-không tự cấp quyền API cho SellerPilot. Đồng bộ toàn shop và thao tác độc lập
-với trang đang mở vẫn cần ứng dụng được Shopee cấp quyền và adapter riêng.
+không tự cấp quyền API cho SellerPilot. Đọc qua giao diện phụ thuộc phiên đăng
+nhập, phân trang và bố cục trang. Đồng bộ khi trình duyệt đóng hoặc thao tác
+không phụ thuộc giao diện cần nguồn tích hợp khác; extension hiện tại chưa bảo
+đảm các khả năng đó.
+
+## Hướng kết nối không cần Shopee Open Platform
+
+Đối chiếu mã nguồn và tài liệu ngày **07/11/2026**: **browser companion** là một
+phương án hỗ trợ cho tài khoản người bán hiện có. Chủ shop tự đăng nhập Kênh Người
+Bán trong Chrome, ghép nối SellerPilot rồi đồng bộ. Content script đọc các
+trường đã nhận diện trên giao diện; việc xác thực tài khoản vẫn do Shopee thực
+hiện trong trình duyệt. Luồng này không cần Partner ID/Partner Key và không
+yêu cầu Mall ở phía mã SellerPilot. Chưa nghiệm thu DOM shop thật thì chưa kết
+luận đọc đủ được mọi sản phẩm, biến thể hoặc trạng thái đơn.
+
+**Cập nhật 10/11/2026:** mục tiêu chính là quản lý shop thật trực tiếp trong app,
+theo luồng cấp quyền như BigSeller. Phương án extension dưới đây không thay thế
+tích hợp đó. Xem [thiết kế chuyển sang shop thật](../../README.md#chuyển-sang-shop-shopee-thật-trên-app)
+và điều kiện quyền truy cập trước khi triển khai.
+
+Chrome cung cấp Side Panel và content scripts cho kiểu tích hợp này:
+[Side Panel API](https://developer.chrome.com/docs/extensions/reference/api/sidePanel),
+[Content scripts](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts).
+Khả năng của Chrome không đồng nghĩa Shopee xác nhận hoặc bảo đảm tương thích.
+Chưa có nguồn chính thức được xác minh trong lần rà soát này để kết luận rằng
+mọi Open API tại Việt Nam chỉ dành riêng Shopee Mall; điều kiện cấp quyền vẫn
+cần kiểm tra theo loại ứng dụng và tài khoản thực tế.
+
+| Nhu cầu | Hướng thực hiện | Trạng thái |
+| --- | --- | --- |
+| Xem dữ liệu và hỏi AI cạnh Kênh Người Bán | Extension đọc danh sách, kiểm tra phân trang và cache theo shop | Đã có, cần kiểm chứng trên giao diện tài khoản thật |
+| Soạn/sửa nội dung sản phẩm | Tạo bản nháp, duyệt rồi điền form trên Shopee | Đã có; người bán tự hoàn tất lưu/đăng |
+| Đọc lịch sử dài theo kỳ, đối chiếu đầy đủ dòng hàng | Nhập file báo cáo CSV/XLSX do người bán chủ động xuất | Đề xuất; chưa có parser hoặc nút nhập file trong app |
+| Xem dữ liệu Shopee trên app iPhone | Extension đồng bộ dữ liệu có phạm vi lên backend rồi app đọc nguồn này | Đề xuất; chưa có cầu nối dữ liệu này |
+| Đồng bộ mới khi Chrome tắt hoặc phiên Shopee hết hạn | Cần nguồn dữ liệu khác được cấp quyền hoặc file mới | Extension không đáp ứng |
+
+Luồng đang chạy:
+
+```text
+Chủ shop đăng nhập Shopee trên Chrome
+  → Content script đọc trường được nhận diện
+  → Service worker tổng hợp, kiểm tra nhãn shop, độ phủ và hạn dữ liệu
+  → Side Panel hiển thị và gửi ngữ cảnh tới backend AI
+```
+
+Để đưa dữ liệu lên app iPhone, phần cần xây dựng tiếp là:
+
+```text
+Browser companion / file do người bán chọn
+  → API đồng bộ có xác thực người bán và quyền nguồn dữ liệu
+  → Kho dữ liệu riêng theo shop/nguồn, kiểm tra trùng và cập nhật đồng thời
+  → API thống kê theo nguồn Shopee
+  → Dashboard, biểu đồ và trợ lý trên app
+```
+
+Không nối trực tiếp bảng DOM vào database shop local. Cầu nối mới phải giữ nguồn,
+thời điểm đọc, kỳ báo cáo, độ phủ và các trường chưa biết; dùng ID sản phẩm/SKU/
+biến thể/mã đơn có kiểm chứng để đối soát, không dùng riêng tên shop làm khóa
+bảo mật. App phải hiển thị thời điểm đồng bộ cuối; mất kết nối Chrome thì dùng
+dữ liệu đã lưu với trạng thái cũ, không báo đang đồng bộ trực tiếp.
+
+File xuất phù hợp để bổ sung lịch sử và đối soát khi bộ đọc giao diện không
+đủ dữ liệu. Cần file mẫu thực tế để kiểm tra cột, múi giờ, mã đơn nhiều dòng,
+giảm giá/phí và các trạng thái trước khi viết parser. Chọn trường cần dùng,
+xem trước lỗi/dòng trùng và xác nhận nhập; nhập lại cùng file không tạo thêm
+đơn. Báo cáo là dữ liệu tại thời điểm xuất, không thay việc ghi trạng thái trực
+tiếp lên Shopee.
+
+Phương án này giữ mật khẩu, OTP và cookie trong trình duyệt. Không lấy cookie
+đem gọi API nội bộ, không giải CAPTCHA, không dùng proxy né chặn. Nếu Shopee yêu
+cầu xác minh/đăng nhập hoặc cấu trúc trang không rõ, dừng và để người bán xử lý.
+Chrome extension chạy trên máy tính; Expo Go trên iPhone không chạy extension.
+
+Tiêu chí trước khi chuyển từ thử nghiệm sang dùng thật: đối chiếu từng SKU/
+biến thể, đơn trùng nhiều dòng, đổi shop trong cùng tài khoản, lọc thời gian,
+đăng xuất/phiên hết hạn, mất mạng và dữ liệu chưa đọc đủ. Chưa có kết quả các
+kiểm tra đó thì chỉ mô tả đúng phạm vi đọc được, không tuyên bố thay thế hoàn
+toàn Shopee Seller Centre.
 
 ## Cài đặt
 

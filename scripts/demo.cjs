@@ -90,7 +90,8 @@ async function ready(url, timeout = 45_000) {
 
 async function main() {
   const [major, minor] = process.versions.node.split('.').map(Number);
-  if (major < 22 || major === 22 && minor < 13) throw new Error('Cần Node.js 22.13 trở lên.');
+  if (!(major === 22 && minor >= 13 || major === 24 && minor >= 3 || major >= 26))
+    throw new Error('Expo SDK 58 cần Node.js 22.13+ (22 LTS), 24.3+ hoặc 26+. Nếu dùng nvm, chạy nvm use ở thư mục gốc repo.');
   const expo = path.join(root, 'node_modules/expo/bin/cli');
   for (const file of [python('backend'), python('UTE MALL'), expo]) {
     if (!existsSync(file)) throw new Error(`Thiếu ${path.relative(root, file)}. Cài môi trường theo README trước.`);

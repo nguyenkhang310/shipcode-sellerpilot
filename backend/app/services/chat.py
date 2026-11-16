@@ -36,6 +36,7 @@ from app.services.seller_tools import (
 )
 from app.services.seller_voice import read_reply
 from app.services.order_assistant import order_answer
+from app.services.chat_reports import build_chat_report
 from app.services.business_advisor import (attach_business_brief, planning_fallback,
                                           business_reply_issue, business_correction)
 
@@ -118,7 +119,7 @@ async def handle_chat(
     # A complete shop-wide read must not inherit a SKU merely because its
     # wording contains "giá trị" after a previous product discussion.
     current_command = parse_fallback(message, today=today)
-    if is_exact_fact_question(message, current_command):
+    if current_command.intent == 'shop_summary' or is_exact_fact_question(message, current_command):
         resolved = message
     history = history_messages(runs)
     order_read = order_answer(shop, message, runs)
@@ -181,6 +182,10 @@ async def handle_chat(
     preferences = read_memory(session, shop, 'shop')
     if preferences:
         result['facts']['seller_preferences'] = preferences
+    if command.intent == 'sales_advice' and not order_read:
+        # Evidence and reports are useful even without an available LLM.
+        attach_business_brief(shop, result['facts'], message=message, history=history,
+                              preferences=preferences)
     if getattr(ai_provider, 'prefer_direct_facts', False):
         rendered = read_reply(result, today=today, preferences=preferences)
         if rendered is not None:
@@ -227,6 +232,7 @@ async def handle_chat(
     confirmation_reply = bool(simple and runs and any(
         word in normalize_text(message) for word in ("xác nhận", "đồng ý", "confirm")
     ))
+    report = build_chat_report(result['tool'], result['facts'])
     if can_generate and not forgetting:
         if direct_reply:
             if simple:
@@ -236,7 +242,7 @@ async def handle_chat(
             result["answer"] = simple
         elif hasattr(ai_provider, "respond") and mode == "ai":
             try:
-                response_facts = result['facts']
+                response_facts = {**result['facts'], **({'report_available': True} if report else {})}
                 for attempt in range(2):
                     generated = (prepared_answer if attempt == 0 and prepared_answer is not None else
                                  await ai_provider.respond(message, history=history, facts=response_facts))
@@ -250,7 +256,7 @@ async def handle_chat(
                     logger.warning('AI reply needs correction: reason=%s attempt=%s', issue, attempt + 1)
                     if attempt:
                         raise AIProviderError('invalid_response', stage=issue)
-                    response_facts = {**result['facts'], 'reply_correction': {
+                    response_facts = {**response_facts, 'reply_correction': {
                         'reason': issue,
                         'requirements': 'Viết lại dựa trên đúng số liệu. Chỉ đề xuất, không nói đã thực hiện thay đổi. Không suy đoán shop mới mở từ số đơn bằng 0. Mọi số tiền tính lời/giảm giá phải lấy đúng từ pricing_analysis. Đơn đang giao không phải đơn cần gửi lại. ' + business_correction(issue),
                     }}
@@ -303,6 +309,7 @@ async def handle_chat(
         "fallback_reason": fallback_reason,
         "integration_mode": "local_store",
         **result,
+        "report": report,
         "product_draft": None,
     }
 
@@ -361,11 +368,22 @@ def execute_command(
     command: ParsedCommand,
 ) -> dict[str, Any]:
     if command.intent == "shop_summary":
+        today = datetime.now(shop.timezone).date()
+        anchor = command.day or today
+        if anchor > today:
+            return response('Ngày này chưa diễn ra. Bạn chọn hôm nay hoặc một ngày trước đó để xem số liệu nhé.',
+                            None, {}, {'requested_date': anchor.isoformat()})
+        days = ((anchor.weekday() + 1 if command.calendar_period == 'week' else anchor.day)
+                if command.calendar_period else command.days or 1)
+        # Retain the same snapshot for text, charts, retries and history. Reading
+        # summary and dashboard separately could disagree during a concurrent write.
+        stats = management.dashboard(shop, days, selected_date=anchor)
+        facts = {key: stats[key] for key in (
+            'days', 'from_date', 'to_date', 'order_value_vnd', 'order_count', 'average_order_vnd',
+            'delivered_value_vnd', 'change_percent', 'previous_value_vnd', 'series',
+            'order_status_counts', 'updated_at', 'timezone')}
+        facts['includes_partial_today'] = anchor == today
         if command.calendar_period or command.days and command.days > 1:
-            anchor = command.day or datetime.now(shop.timezone).date()
-            days = (anchor.weekday() + 1 if command.calendar_period == 'week' else anchor.day) if command.calendar_period else command.days
-            stats = management.dashboard(shop, days, selected_date=anchor if command.calendar_period else None)
-            facts = {key: stats[key] for key in ("days", "from_date", "to_date", "order_value_vnd", "order_count", "average_order_vnd", "delivered_value_vnd", "change_percent")}
             label = 'Tuần này' if command.calendar_period == 'week' else 'Tháng này' if command.calendar_period else f'{days} ngày qua'
             if command.calendar_period:
                 facts['calendar_period'] = command.calendar_period
@@ -376,23 +394,15 @@ def execute_command(
                       f"• Giá trị đơn đã giao: **{format_vnd(stats['delivered_value_vnd'])}**\n\n"
                       "Giá trị đơn hàng chưa phải toàn bộ tiền đã thu; không bao gồm đơn hủy hoặc hoàn.")
             return response(answer, "get_shop_summary", {"days": days, **({'calendar_period': command.calendar_period} if command.calendar_period else {})}, facts)
-        summary_day = command.day or datetime.now(shop.timezone).date()
-        summary = shop.summary(summary_day, as_of=datetime.now(shop.timezone) if command.days == 1 else None)
-        facts = {
-            "date": summary["date"],
-            "timezone": summary["timezone"],
-            "order_count": summary["order_count"],
-            "order_value_vnd": summary["revenue_vnd"],
-            "pending_count": summary["pending_count"],
-            "cancelled_count": summary["cancelled_count"],
-            "status_counts": summary["status_counts"],
-        }
-        answer = (f"Ngày **{format_day(summary['date'])}**, shop có **{summary['order_count']} đơn** hợp lệ.\n\n"
-                  f"• Giá trị đơn hàng: **{format_vnd(summary['revenue_vnd'])}**\n"
-                  f"• Chờ xử lý: **{summary['pending_count']} đơn**\n"
-                  f"• Đã hủy: **{summary['cancelled_count']} đơn**\n\n"
+        facts.update(date=anchor.isoformat(), status_counts=stats['order_status_counts'],
+                     pending_count=stats['order_status_counts'].get('pending', 0),
+                     cancelled_count=stats['order_status_counts'].get('cancelled', 0))
+        answer = (f"Ngày **{format_day(facts['date'])}**, shop có **{facts['order_count']} đơn** hợp lệ.\n\n"
+                  f"• Giá trị đơn hàng: **{format_vnd(facts['order_value_vnd'])}**\n"
+                  f"• Chờ xử lý: **{facts['pending_count']} đơn**\n"
+                  f"• Đã hủy: **{facts['cancelled_count']} đơn**\n\n"
                   "Đây là giá trị đơn, chưa phải toàn bộ tiền đã thu.")
-        return response(answer, "get_shop_summary", {"date": summary["date"]}, facts)
+        return response(answer, "get_shop_summary", {"date": facts["date"]}, facts)
 
     if command.intent == "inventory_query" and command.inventory_scope == "low_stock":
         threshold = (

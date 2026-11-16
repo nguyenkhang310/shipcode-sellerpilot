@@ -79,7 +79,7 @@ def parse_fallback(message: str, *, today: date) -> ParsedCommand:
             new_price_vnd=extract_price(text, sku=sku),
         )
 
-    if any(phrase in text for phrase in ("nên làm gì", "nen lam gi", "tư vấn", "tu van", "viết mô tả", "viet mo ta", "viết bài", "lên kế hoạch", "lập kế hoạch", "lap ke hoach", "kế hoạch hành động", "lên plan", "len plan", "lập plan", "lap plan", "tiktok", "tik tok", "quay video", "lam video", "làm video", "kịch bản", "kich ban", "cải thiện", "ưu tiên", "uu tien", "phân tích", "phan tich")):
+    if any(phrase in text for phrase in ("nên làm gì", "nen lam gi", "tư vấn", "tu van", "viết mô tả", "viet mo ta", "viết bài", "lên kế hoạch", "lập kế hoạch", "lap ke hoach", "kế hoạch hành động", "lên plan", "len plan", "lập plan", "lap plan", "tiktok", "tik tok", "quay video", "lam video", "làm video", "kịch bản", "kich ban", "cải thiện", "ưu tiên", "uu tien", "phân tích", "phan tich", "bán chạy", "ban chay", "xếp hạng sản phẩm", "xep hang san pham")):
         return ParsedCommand(intent="sales_advice", sku=sku, days=reporting_days(message))
 
     lookup = catalog_lookup(message)

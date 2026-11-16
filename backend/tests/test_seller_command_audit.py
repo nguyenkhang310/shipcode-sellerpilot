@@ -54,7 +54,15 @@ def test_calendar_reads_use_the_start_of_week_or_month_not_rolling_days(tmp_path
         expected={key:value for key,value in {'days':days,'from_date':day.replace(day=day.day-days+1).isoformat(),
             'to_date':day.isoformat(),'order_value_vnd':100000,'order_count':1,'average_order_vnd':100000,
             'delivered_value_vnd':0,'change_percent':None}.items()}
-        with patch('app.services.chat.management.dashboard',return_value=expected) as dashboard:
+        # Freeze the shop's clock as well as the parser's date. Otherwise the
+        # month-end case becomes a future-date request before October 31.
+        from datetime import datetime, time
+        moment = datetime.combine(day, time(12), client.app.state.shop_repository.timezone)
+        expected.update(previous_value_vnd=0, series=[], order_status_counts={},
+                        updated_at=moment.isoformat(), timezone='Asia/Ho_Chi_Minh')
+        with patch('app.services.chat.management.dashboard',return_value=expected) as dashboard, \
+                patch('app.services.chat.datetime') as clock:
+            clock.now.return_value = moment
             result=execute_command(session,client.app.state.shop_repository,command)
         assert dashboard.call_args.args[1]==days
         assert dashboard.call_args.kwargs['selected_date']==day

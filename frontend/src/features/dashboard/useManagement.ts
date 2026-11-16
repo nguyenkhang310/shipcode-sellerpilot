@@ -81,9 +81,5 @@ export function useManagement(live = true) {
   }, [load]);
   const refresh = useCallback(() => load(selected.current.days, true, false, false, selected.current.date), [load]);
   const pullRefresh = useCallback(() => load(selected.current.days, true, false, true, selected.current.date), [load]);
-  const ensureFresh = useCallback(() => {
-    if (!request.current) void load(selected.current.days, false, false, false, selected.current.date);
-  }, [load]);
-
-  return { ...state, onDays, onDate, refresh, pullRefresh, ensureFresh };
+  return { ...state, onDays, onDate, refresh, pullRefresh };
 }

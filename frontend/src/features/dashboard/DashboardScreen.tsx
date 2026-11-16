@@ -49,7 +49,7 @@ export function DashboardScreen({ data, loading, refreshing, error, days, select
     <Pressable accessibilityRole="button" accessibilityLabel="Thông tin shop đang kết nối" onPress={() => onOpen({ kind: 'settings' })} style={[s.shop, block]}>
       <View style={[s.shopMark, { backgroundColor: isDark ? '#293341' : '#F1F4F8' }]}><Ionicons name="storefront-outline" size={20} color={accent} /></View>
       <View style={ui.grow}><Text numberOfLines={1} style={[s.shopName, { color: ink }]}>{data?.shop.name || 'Gian hàng của bạn'}</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 }}><View style={[ui.dot, { width: 5, height: 5 }, (!data || Boolean(error)) && { backgroundColor: muted }]} /><Text style={[s.meta, { color: muted }]}>{error ? 'Chưa đồng bộ' : data ? 'Shopee · Đã kết nối' : 'Đang kết nối'}</Text></View></View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 }}><View style={[ui.dot, { width: 5, height: 5 }, (!data || Boolean(error)) && { backgroundColor: muted }]} /><Text style={[s.meta, { color: muted }]}>{error ? 'Chưa đồng bộ' : data ? 'Shop nội bộ · Đã kết nối' : 'Đang kết nối'}</Text></View></View>
       <Ionicons name="chevron-forward" size={15} color={muted} />
     </Pressable>
     {error && !data ? <View style={ui.errorCard}><Text style={ui.error}>{error}</Text><Pressable accessibilityRole="button" onPress={onRefresh} style={ui.secondaryButton}><Text style={ui.secondaryText}>Thử kết nối lại</Text></Pressable></View> : null}

@@ -1,4 +1,4 @@
-// Run with React 19.2.3 + react-test-renderer 19.2.3 in QA_NODE_MODULES,
+// Run with React 19.3.0 + react-test-renderer 19.3.0 in QA_NODE_MODULES,
 // or install the renderer locally. No real API or seller database is used.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -48,6 +48,7 @@ async function mount(live = false) {
     }),
     fail: index => act(async () => { calls[index].reject(new ApiError('Mạng tạm gián đoạn')); }),
     poll: () => act(async () => { timers.forEach(fn => fn()); }),
+    focus: value => act(async () => { live = value; root.update(React.createElement(Probe)); }),
     close: () => act(async () => { root.unmount(); }),
   };
 }
@@ -107,6 +108,21 @@ test('background reads preserve unchanged render, recover errors and release req
   await h.poll(); await h.reply(3, { order_count: 13 });
   assert.equal(h.state.data.order_count, 13); assert.equal(h.state.error, '');
   await h.poll(); await h.close(); assert.equal(h.calls[4].signal.aborted, true);
+});
+
+test('returning to home revalidates once in the background without a loading transition', async () => {
+  const h = await mount(true);
+  try {
+    await h.reply(0);
+    const before = h.state;
+    await h.focus(false); await h.poll(); assert.equal(h.calls.length, 1);
+    await h.focus(true); assert.equal(h.calls.length, 2);
+    assert.equal(h.state.data, before.data); assert.equal(h.state.loading, false); assert.equal(h.state.refreshing, false);
+    await h.focus(false); await h.focus(true);
+    assert.equal(h.calls.length, 2, 'Rapid re-entry must not issue another read while one is pending');
+    await h.reply(1, { order_count: 14 });
+    assert.equal(h.state.data.order_count, 14); assert.equal(h.state.loading, false);
+  } finally { await h.close(); }
 });
 
 test('individual dates have distinct cache keys, ignore stale replies and reject wrong-day data', async () => {

@@ -1,7 +1,7 @@
 import { dockContentInset } from '../../components/layout/dockGeometry';
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, FlatList, Keyboard, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, Keyboard, Pressable, RefreshControl, ScrollView, ScrollViewInstance, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError } from '../../api/client';
 import { ProductThumbnail } from '../../components/ui/ProductThumbnail';
@@ -32,7 +32,7 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
   const [error, setError] = useState(''), [expanded, setExpanded] = useState<number | null>(null);
   const request = useRef<AbortController | null>(null), failedOffset = useRef(0);
   const list = useRef<FlatList<StoreOrder>>(null);
-  const filters = useRef<ScrollView>(null);
+  const filters = useRef<ScrollViewInstance>(null);
   const chipPositions = useRef<Record<string, number>>({});
   const cacheKey = useRef(''), loadedAt = useRef(0);
   const loadedRevision = useRef(revision);
@@ -121,7 +121,7 @@ export function OrdersPanel({ initialStatus = 'all', embedded, active = true, on
     <FlatList onScroll={event => { scrollPosition.current = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={64} ref={list} testID="orders-list" data={items} keyExtractor={item => String(item.id)} renderItem={renderOrder} extraData={expanded} style={{ flex: 1 }} contentContainerStyle={[ui.sheetScroll, { paddingBottom: embedded ? dockContentInset(insets.bottom) : 24 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" initialNumToRender={8} maxToRenderPerBatch={6} windowSize={7}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(0, true)} tintColor={BRAND.navy} />}
       ListHeaderComponent={<Text style={[ui.caption, { marginBottom: 12 }]}>{total === null ? 'Đang tải đơn hàng…' : count(total) + ' đơn hàng'}</Text>}
-      ListEmptyComponent={!loading && !error ? <View style={ui.center}><Ionicons name="receipt-outline" size={36} color={IOS.tertiary} /><Text style={ui.loadingText}>Không tìm thấy đơn hàng</Text></View> : null}
+      ListEmptyComponent={!loading && !error ? <View style={ui.center}><Ionicons name="receipt-outline" size={36} color={IOS.tertiary} /><Text style={ui.loadingText}>Không tìm thấy đơn hàng</Text></View> : undefined}
       ListFooterComponent={<>{error ? <View style={ui.errorCard}><Text style={ui.error}>{error}</Text><Pressable accessibilityRole="button" onPress={() => void load(failedOffset.current)} style={ui.secondaryButton}><Text style={ui.secondaryText}>Thử lại</Text></Pressable></View> : null}{loading && !items.length || loadingMore ? <ActivityIndicator color={BRAND.navy} style={{ margin: 24 }} /> : !error && total !== null && items.length < total ? <Pressable accessibilityRole="button" onPress={() => void load(items.length)} style={ui.secondaryButton}><Text style={ui.secondaryText}>Xem thêm đơn hàng</Text></Pressable> : null}</>}
     />
     <OrderFeedback message={feedback} bottom={embedded ? dockContentInset(insets.bottom) : 12} />

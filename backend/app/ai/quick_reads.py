@@ -31,6 +31,9 @@ def quick_read(message, *, today):
     days = 7 if period and ('7 ' in period or 'tuan' in period) else 30 if period and ('30 ' in period or 'thang' in period) else 1 if period else None
     day = today - timedelta(days=1) if period == 'hom qua' else today
     body = ' '.join(re.sub(period_re, '', text).replace(',', ' ').split())
+    # A visual presentation request is still a read. Only strip an anchored
+    # prefix; the remaining business clause must match the complete grammar.
+    body = re.sub(r'^(?:(?:ve|tao|hien thi|cho xem|xem|lap) )?(?:bieu do|bang thong ke|bao cao truc quan)(?: (?:ve|cua))?\s+', '', body)
     body = re.sub(r'^(?:xem|kiem tra|cho xem|thong ke|bao cao)(?: giup (?:minh|toi|em))?\s+', '', body)
     subject = r'(?:shop(?: (?:cua )?(?:minh|toi|em))? )?'
     count = r'(?:(?:co|duoc|ban duoc|chot duoc|nhan duoc) )?(?:bao nhieu|may) don(?: hang)?'

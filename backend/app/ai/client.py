@@ -31,7 +31,12 @@ def response_prompt(facts):
         return (PROMPT_PATH.with_name('browser.md').read_text(encoding='utf-8')
                 + '\n\n' + PROMPT_PATH.with_name('voice.md').read_text(encoding='utf-8')
                 + '\n\n' + BUSINESS_SYSTEM_PROMPT)
-    return RESPONSE_SYSTEM_PROMPT + ('\n\n' + BUSINESS_SYSTEM_PROMPT if facts.get('business_advisory') else '')
+    prompt = RESPONSE_SYSTEM_PROMPT + ('\n\n' + BUSINESS_SYSTEM_PROMPT if facts.get('business_advisory') else '')
+    if facts.get('report_available'):
+        prompt += ('\n\nGiao diện sẽ hiển thị báo cáo trực quan từ số liệu backend ngay dưới câu trả lời. '
+                   'Không nói ứng dụng không hỗ trợ biểu đồ/bảng. Không tạo HTML, SVG, mã vẽ hoặc '
+                   'bảng Markdown thay báo cáo; hãy nêu nhận xét có căn cứ và việc nên làm, tránh chép lại từng dòng số liệu.')
+    return prompt
 
 
 class OllamaClient:

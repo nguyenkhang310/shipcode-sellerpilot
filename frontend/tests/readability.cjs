@@ -2,7 +2,7 @@
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
-const {snapshot,mockApi}=require('./management-fixture.cjs');
+const {snapshot,mockApi,enterApp}=require('./management-fixture.cjs');
 const output=path.resolve(__dirname,'../../docs/evaluations/readability');fs.mkdirSync(output,{recursive:true});
 let browser,page;
 (async()=>{
@@ -20,6 +20,7 @@ let browser,page;
   await route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{data:answer}});
  });
  await page.goto(process.env.QA_APP_URL||'http://127.0.0.1:5174');
+ await enterApp(page);
  const account=page.getByRole('button',{name:'Cài đặt shop và giao diện',exact:true});
  await account.screenshot({path:path.join(output,'avatar.png')});
  const label=page.getByRole('tab',{name:'Sản phẩm',exact:true}).getByText('Sản phẩm',{exact:true});
@@ -32,9 +33,9 @@ let browser,page;
   await page.setViewportSize({width,height:844});
   const raised=await page.getByTestId('assistant-dock-button').boundingBox();
   const productTab=await page.getByRole('tab',{name:'Sản phẩm',exact:true}).boundingBox();
-  assert(raised.y+20<productTab.y,'Assistant visibly rises above the four management tabs');
-  assert(raised.width>=70&&raised.height>=70,'Assistant keeps a generous touch target');
-  assert(await page.getByTestId('dock-contour').getAttribute('d').then(d=>d.includes('80 C')),'Dock contour has a real concave cutout');
+  assert(raised.y+18<=productTab.y,'Assistant visibly rises above the four management tabs');
+  assert(raised.width>=44&&raised.width<=64&&raised.height>=44,'Assistant stays compact with a usable touch target');
+  assert(await page.getByTestId('dock-contour').getAttribute('d').then(d=>d.includes('67 C')),'Dock contour has a real concave cutout');
   const hit=await page.evaluate(({x,y})=>document.elementFromPoint(x,y)?.closest('[role="tab"]')?.getAttribute('aria-label'),{x:raised.x+raised.width/2,y:raised.y+8});
   assert.equal(hit,'SellerPilot','The protruding part is clickable, not clipped by the bar');
   for(const name of ['Quản lý','Sản phẩm','Đơn hàng','Shop']){
@@ -45,8 +46,12 @@ let browser,page;
 
   }
 
+  await page.getByRole('button',{name:'Xem ảnh sản phẩm 1',exact:true}).click();
+  await page.waitForFunction(()=>{const img=document.querySelector('[data-testid="draft-main-image"] img');return img?.complete&&img.naturalWidth>0;});
+  const firstSource=await page.getByTestId('draft-main-image').locator('img').evaluate(img=>img.currentSrc);
   await page.getByRole('button',{name:'Xem ảnh sản phẩm 2',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('[data-testid="draft-main-image"] img')?.currentSrc.includes('view=2'));
+  // Protected images render a blob URL, never the authenticated API URL.
+  await page.waitForFunction(before=>{const img=document.querySelector('[data-testid="draft-main-image"] img');return img?.complete&&img.naturalWidth>0&&img.currentSrc!==before;},firstSource);
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   const overflow=await card.evaluate(el=>el.scrollWidth>el.clientWidth+1);assert(!overflow,'Draft card does not overflow at '+width);
   const body=page.getByTestId('draft-description'),before=await body.boundingBox();
@@ -57,7 +62,7 @@ let browser,page;
   const box=await action.boundingBox();assert(box.width>=44&&box.height>=48);
   await page.screenshot({path:path.join(output,`draft-${width}.png`)});
  }
- checks.push('Raised 72px assistant, concave glass dock, clickable upper edge and four 44px management targets at all widths');
+ checks.push('Compact raised assistant, concave glass dock, clickable upper edge and four 44px management targets at all widths');
  checks.push('Readable navigation, long title/price/stock, two selectable photos and expandable description at 320/390/430/520px');
  // A delayed history reload after a decision must not overwrite a new conversation.
  await page.route('**/api/v1/product-drafts/99/publish',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{data:{...draft,status:'published'}}}));

@@ -15,6 +15,7 @@ from app.services.product_drafts import draft_to_dict
 from app.services.seller_tools import proposal_to_dict
 from app.models.product_edit import ProductEditProposal
 from app.services.product_edits import edit_to_dict
+from app.services.chat_reports import build_chat_report
 
 
 def recent_runs(session, shop, conversation_id, limit=12):
@@ -112,4 +113,5 @@ def run_data(session, run):
         "product_edit_proposal": edit_to_dict(product_edit) if product_edit else None,
         "product_draft": draft_data,
         "suggestions": [], "integration_mode": "local_store",
+        "report": build_chat_report(run.tool_name, facts),
     }

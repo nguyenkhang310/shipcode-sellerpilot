@@ -29,6 +29,6 @@
     "test:extension:ui": "node extensions/shopee-connector/tests/panel-fixture.cjs"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": "^22.13.0 || ^24.3.0 || >=26.0.0"
   }
 }

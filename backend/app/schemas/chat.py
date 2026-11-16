@@ -8,6 +8,7 @@ from app.ai.text import assistant_text
 from app.schemas.seller_tools import ProposalData
 from app.schemas.product_drafts import ProductDraftData
 from app.schemas.product_edits import ProductEditData
+from app.schemas.chat_report import ChatReport
 
 
 class ChatRequest(BaseModel):
@@ -48,6 +49,7 @@ class ChatData(BaseModel):
     product_draft: ProductDraftData | None = None
     product_edit_proposal: ProductEditData | None = None
     suggestions: list[str] = Field(default_factory=list)
+    report: ChatReport | None = None
     integration_mode: Literal["local_store"] = "local_store"
 
 

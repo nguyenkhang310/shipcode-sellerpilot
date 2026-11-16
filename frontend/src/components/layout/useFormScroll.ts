@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { Keyboard, ScrollView } from 'react-native';
+import { Keyboard, ScrollViewInstance } from 'react-native';
 
 /** Keep the focused field above a modal's pinned footer after keyboard resize. */
 export function useFormScroll(viewportHeight?: number) {
-  const ref = useRef<ScrollView>(null);
+  const ref = useRef<ScrollViewInstance>(null);
   const positions = useRef<Record<string, number>>({});
   const focused = useRef<{ key: string; offset: number } | null>(null);
   const frame = useRef<number | null>(null);

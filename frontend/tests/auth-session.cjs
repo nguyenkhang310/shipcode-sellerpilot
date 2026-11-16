@@ -1,5 +1,5 @@
 // React hook integration with a fake Keychain/API; never reads seller credentials.
-// QA_NODE_MODULES must contain React and react-test-renderer 19.2.3.
+// QA_NODE_MODULES must contain React and react-test-renderer 19.3.0.
 const {test}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),ts=require('typescript');
 const qa=name=>require(process.env.QA_NODE_MODULES?path.join(process.env.QA_NODE_MODULES,name):name);

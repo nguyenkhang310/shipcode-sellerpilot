@@ -1,9 +1,10 @@
 import { ReactNode, useEffect, useRef } from 'react';
-import { Animated, Easing, Platform, StyleProp, ViewStyle } from 'react-native';
+import { Animated, Easing, LayoutChangeEvent, Platform, StyleProp, ViewStyle } from 'react-native';
 
 /** Opacity/translation only: message heights and the scroll anchor stay stable. */
-export function MessageEntrance({ children, style, animate, reduceMotion }: {
+export function MessageEntrance({ children, style, animate, reduceMotion, onLayout }: {
   children: ReactNode; style?: StyleProp<ViewStyle>; animate: boolean; reduceMotion: boolean;
+  onLayout?: (event: LayoutChangeEvent) => void;
 }) {
   const progress = useRef(new Animated.Value(animate && !reduceMotion ? 0 : 1)).current;
   useEffect(() => {
@@ -12,6 +13,6 @@ export function MessageEntrance({ children, style, animate, reduceMotion }: {
       easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== 'web', isInteraction: false });
     transition.start(); return () => transition.stop();
   }, [animate, reduceMotion, progress]);
-  return <Animated.View style={[style, { opacity: progress,
+  return <Animated.View onLayout={onLayout} style={[style, { opacity: progress,
     transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [7, 0] }) }] }]}>{children}</Animated.View>;
 }

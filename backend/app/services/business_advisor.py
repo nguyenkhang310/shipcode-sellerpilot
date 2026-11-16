@@ -12,7 +12,7 @@ def planning_request(message, history=()):
     mode = ('business_plan' if re.search(r'ke hoach|len plan|lap plan|lo trinh|chien luoc', text) else
             'measurement_plan' if re.search(r'cach do|do hieu qua|cach theo doi|don tu tiktok|hieu qua tung video', text) and not re.search(r'kich ban|quay video|lam video', text) else
             'video_script' if re.search(r'tiktok|tik tok|kich ban|quay video|lam video|video ngan|reels|cau mo dau|hook|hieu qua tung video', text) else
-            'performance_analysis' if re.search(r'phan tich (?:so lieu|shop|kinh doanh|hieu suat|doanh)|tang doanh thu|tang don|ra don|ban cham', text) else None)
+            'performance_analysis' if re.search(r'phan tich (?:so lieu|shop|kinh doanh|hieu suat|doanh)|tang doanh thu|tang don|ra don|ban cham|ban chay|xep hang san pham', text) else None)
     contextual = re.fullmatch(r'(?:vay |roi |hay )?(?:cu the hon|chi tiet hon|di sau hon|lam ro hon|buoc tiep theo)(?: di| nhe| giup minh)?[.!? ]*', text.strip())
     contextual = contextual or (len(text) < 220 and re.search(r'chi quay|lam mot minh|mot nguoi|1 nguoi|khong co thoi gian|do hieu qua|giu chan|it nhap', text))
     if mode is None and contextual:

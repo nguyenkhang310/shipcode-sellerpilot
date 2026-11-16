@@ -10,6 +10,16 @@ const loaded={exports:{}};
 vm.runInNewContext('(function(require,module,exports){'+code+'\n})',{})(()=>({productDraftImageUrl:url=>'http://api'+url}),loaded,loaded.exports);
 const {restoreMessages,latestProductCards}=loaded.exports;
 const {assistantText,assistantMessage}=loaded.exports;
+
+test('report snapshot survives answer normalization and history restoration',()=>{
+ const report={title:'Hiệu quả kinh doanh',metrics:[{label:'Giá trị đơn',value:0,unit:'vnd'}],charts:[],table:null};
+ const response={run_id:80,tool:'get_shop_summary',answer:JSON.stringify({answer:'Chưa có đơn.'}),report};
+ const fresh=assistantMessage(response);
+ assert.equal(fresh.response.report,report);
+ const history=restoreMessages([{message:'Doanh thu hôm nay',response}]);
+ assert.equal(history[1].response.report,report);
+ assert.equal(history[1].response.report.metrics[0].value,0);
+});
 const draft={id:1,status:'ready',preview_urls:['/image-a','/image-b']};
 const turn=(id,tool,message,answer,product=draft)=>({message,response:{run_id:id,tool,answer,product_draft:product}});
 

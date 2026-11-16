@@ -56,6 +56,39 @@ có thể làm gián đoạn yêu cầu. Kiểm tra `GET /api/v1/health` có
 `draft_image_context_v2` trong `data.capabilities` để biết tiến trình đã nạp
 luồng mới; chỉ sửa file trên đĩa không cập nhật một backend đang chạy cố định.
 
+## Báo cáo trực quan trong hội thoại
+
+Phản hồi chat có trường `report` tùy chọn: chỉ số, biểu đồ đường/cột và bảng dữ
+liệu với contract đóng trong `schemas/chat_report.py`. Backend dựng báo cáo từ
+facts của tool đọc shop, không nhận HTML/SVG/spec do model sinh và không gọi AI
+thêm để vẽ. Các câu như “Vẽ biểu đồ doanh thu 7 ngày qua”, “Xem tồn kho” và
+“Phân tích số liệu 7 ngày qua” có thể hiển thị báo cáo kể cả khi provider lỗi.
+
+- Số tổng, chuỗi biểu đồ và trạng thái của báo cáo doanh số lấy cùng một snapshot;
+  không lấy lại dashboard sau khi đã trả lời. Ngày hiện tại loại đơn tương lai,
+  ngày lịch sử có 24 mốc giờ; nhiều ngày dùng chuỗi theo ngày.
+- Giá trị đơn loại hủy/hoàn và không gọi là lợi nhuận hoặc tiền thực thu. Khi kỳ
+  trước bằng 0, tỷ lệ thay đổi là `null`, không vẽ tỷ lệ tăng trưởng giả.
+- Bảng bán tốt dùng dòng hàng trong kỳ và giá lúc đặt; chưa khớp danh mục thì
+  có ghi chú. Không dùng số “đã bán” toàn thời gian của catalog để xếp hạng kỳ.
+- Bảng tồn giữ tối đa 50 SKU, biểu đồ tối đa 8 SKU đầu; nhãn ghi rõ giới hạn.
+  Không cộng trùng tồn sản phẩm cha với biến thể.
+- Request đã hoàn tất lưu cả báo cáo; lịch sử dựng lại từ facts đã lưu, không
+  truy vấn số liệu hiện tại. Facts cũ thiếu trường có thể chỉ hiện chỉ số; thiếu
+  dữ kiện không bị thay bằng 0. Báo cáo không hợp lệ được bỏ qua để giữ câu trả lời.
+- App mặc định chỉ hiện hai chỉ số chính và một biểu đồ; chuyển tab Xu hướng /
+  Trạng thái hoặc Sản phẩm / Bảng số liệu để xem từng phần, không xếp dồn toàn bộ.
+  Chỉ số phụ và ghi chú nằm trong Chi tiết báo cáo. Có chạm chọn mốc, mở đủ dòng,
+  thu gọn danh sách dài và cuộn ngang bảng; dùng theme sáng/tối hiện có.
+  Chuyển tab là thao tác local, không gọi AI/API thêm.
+  Khi có báo cáo mới, app giữ đầu câu trả lời để đọc từ trên xuống thay vì
+  tự cuộn thẳng tới cuối thẻ; không kéo người đang đọc lịch sử xuống dưới.
+  Luồng extension không lấy báo cáo shop local điền vào
+  dữ liệu sàn thật. Không cần migration database hoặc dependency biểu đồ mới.
+
+Kiểm thử backend: `tests/test_chat_reports.py`. Kiểm thử UI với API/database tạm:
+`node frontend/tests/chat-reports.cjs`, theo hướng dẫn `frontend/tests/README.md`.
+
 ## Tiếng Việt, bộ nhớ và tính giá
 
 Câu đọc ngắn như “Hôm nay được bao nhiêu đơn vậy?”, “Có món nào sắp hết không?”

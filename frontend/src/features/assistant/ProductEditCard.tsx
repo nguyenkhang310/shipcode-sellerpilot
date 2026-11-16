@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { SystemIcon } from '../../components/ui/SystemIcon';
 import { ProductEditProposal } from '../../api/types';
 import { useTheme } from '../../theme/ThemeProvider';
 import { money, count } from '../dashboard/formatters';
@@ -36,7 +36,7 @@ export function ProductEditCard({ proposal, busy, error, onDecide }: {
     {proposal.status === 'pending' || proposal.status === 'executing' ? <View style={ui.proposalActions}>
       {proposal.status === 'pending' ? <Pressable accessibilityRole="button" disabled={busy} onPress={() => onDecide('reject')} style={[ui.secondaryButton, { flex: 1 }]}><Text style={ui.secondaryText}>Bỏ qua</Text></Pressable> : null}
       <Pressable accessibilityRole="button" accessibilityLabel={'Xác nhận sửa sản phẩm SKU ' + proposal.sku} disabled={busy} onPress={() => onDecide('confirm')} style={[ui.primaryButton, { flex: 1.6 }, busy && { opacity: .55 }]}>
-        {busy ? <ActivityIndicator color="#FFF" /> : <Ionicons name="checkmark" size={18} color="#FFF" />}<Text style={ui.primaryText}>{proposal.status === 'executing' ? 'Kiểm tra lại kết quả' : 'Xác nhận sửa'}</Text>
+        {busy ? <ActivityIndicator color="#FFF" /> : <SystemIcon name="checkmark" size={18} color="#FFF" />}<Text style={ui.primaryText}>{proposal.status === 'executing' ? 'Kiểm tra lại kết quả' : 'Xác nhận sửa'}</Text>
       </Pressable>
     </View> : null}
   </View>;

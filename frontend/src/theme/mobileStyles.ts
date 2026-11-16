@@ -1,5 +1,6 @@
 import { Platform, StyleSheet } from 'react-native';
 import { BRAND, LIGHT_IOS } from './tokens';
+import { ASSISTANT_BUTTON_SIZE, DOCK_HEIGHT } from '../components/layout/dockGeometry';
 
 export function createMobileStyles(c: typeof LIGHT_IOS, dark: boolean, brand: typeof BRAND) {
   const ink = c.label, muted = dark ? '#A8A9B1' : '#737680', navy = brand.navy;
@@ -66,17 +67,17 @@ export function createMobileStyles(c: typeof LIGHT_IOS, dark: boolean, brand: ty
     productName: { fontSize: 16, color: ink, fontWeight: '500', lineHeight: 23 },
     productMeta: { fontSize: 14, color: muted, marginTop: 4, lineHeight: 21 },
     productPrice: { fontSize: 16, fontWeight: '600', color: navy, marginTop: 4 },
-    dockOuter: { position: 'absolute', left: 17, right: 17, zIndex: 20 },
-    dockShadow: { ...Platform.select({ web: {}, default: shadow }) as object },
-    dockInner: { flexDirection: 'row', padding: 6, height: 72 },
-    dockPill: { position: 'absolute', top: 6, bottom: 6, left: 6, backgroundColor: dark ? '#FFFFFF18' : '#FFFFFF6B', borderWidth: StyleSheet.hairlineWidth, borderColor: dark ? '#FFFFFF20' : '#FFFFFFB3', borderRadius: 30 },
-    dockTab: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 3, borderRadius: 30 },
-    dockLabel: { fontSize: 12, fontWeight: '500', color: dark ? '#B8BBC5' : '#626773' },
+    dockOuter: { position: 'absolute', alignSelf: 'center', zIndex: 20 },
+    dockShadow: { ...Platform.select({ web: {}, default: { shadowColor: '#101820', shadowOpacity: dark ? .2 : .09, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 3 } }) as object },
+    dockInner: { flexDirection: 'row', padding: 5 },
+    dockPill: { position: 'absolute', bottom: 7, left: 5, borderWidth: StyleSheet.hairlineWidth, borderRadius: 24 },
+    dockTab: { flex: 1, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderRadius: 24 },
+    dockLabel: { fontSize: 12, lineHeight: 17, fontWeight: '500', color: dark ? '#C3C3CB' : '#585A64' },
     dockSelected: { color: navy, fontWeight: '600' },
-    aiNavItem: { position: 'absolute', top: 0, width: 72, height: 100, alignItems: 'center', justifyContent: 'flex-start' },
-    aiNavRing: { width: 72, height: 72, borderRadius: 36, padding: 1, overflow: 'hidden', borderWidth: 2, borderColor: dark ? '#FFB83D' : '#FF9F0A', backgroundColor: '#FFB800', ...Platform.select({ web: { boxShadow: '0 5px 14px rgba(234,112,0,0.24)' }, default: { shadowColor: '#D86C00', shadowOpacity: .23, shadowRadius: 7, shadowOffset: { width: 0, height: 4 }, elevation: 5 } }) as object },
+    aiNavItem: { position: 'absolute', top: 0, width: ASSISTANT_BUTTON_SIZE, height: DOCK_HEIGHT, alignItems: 'center', justifyContent: 'flex-start' },
+    aiNavRing: { width: ASSISTANT_BUTTON_SIZE, height: ASSISTANT_BUTTON_SIZE, borderRadius: ASSISTANT_BUTTON_SIZE / 2, padding: 1, overflow: 'hidden', borderWidth: 1, borderColor: dark ? '#FFC65D' : '#FFB23D', backgroundColor: '#FFB800', ...Platform.select({ web: { boxShadow: '0 3px 8px rgba(156,86,10,0.18)' }, default: { shadowColor: '#9C560A', shadowOpacity: .18, shadowRadius: 4, shadowOffset: { width: 0, height: 3 }, elevation: 3 } }) as object },
     aiNavRingActive: { borderColor: '#FFE080' },
-    aiNavLogo: { width: '100%', height: '100%', borderRadius: 34 },
+    aiNavLogo: { width: '100%', height: '100%', borderRadius: ASSISTANT_BUTTON_SIZE / 2 - 2 },
     chat: { flex: 1, backgroundColor: page },
     chatScroll: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 24, flexGrow: 1 },
     chatEmpty: { justifyContent: 'center', paddingTop: 20, paddingBottom: 15 },

@@ -28,6 +28,8 @@ export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, 
   const [total, setTotal] = useState(0), [loading, setLoading] = useState(false), [error, setError] = useState('');
   const [retry, setRetry] = useState(0), [connectionOpen, setConnectionOpen] = useState(false);
   const controller = useRef<AbortController | null>(null);
+  const lastLoaded = useRef<{ key: string; at: number } | null>(null);
+  const loadKey = `${route?.kind}:${query}:${retry}:${revision}`;
   const load = async (offset: number) => {
     if (!route || !['products', 'inventory'].includes(route.kind)) return;
     controller.current?.abort();
@@ -38,16 +40,22 @@ export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, 
       if (request.signal.aborted) return;
       setItems(previous => offset ? [...previous, ...result.data.items.filter(item => !previous.some(old => old.id === item.id))] : result.data.items);
       setTotal(result.data.total);
-    } catch (e) { if (!request.signal.aborted) setError(e instanceof ApiError ? e.message : 'Chưa kết nối được shop. Vui lòng thử lại.'); }
+      lastLoaded.current = { key: loadKey, at: Date.now() };
+    } catch (e) { if (!request.signal.aborted) { lastLoaded.current = null; setError(e instanceof ApiError ? e.message : 'Chưa kết nối được shop. Vui lòng thử lại.'); } }
     finally { if (!request.signal.aborted) setLoading(false); }
   };
-  useEffect(() => { setQuery(''); setItems([]); setTotal(0); setError(''); }, [route]);
+  useEffect(() => { setQuery(''); setItems([]); setTotal(0); setError(''); lastLoaded.current = null; }, [route]);
   useEffect(() => { if (route && ['products', 'inventory'].includes(route.kind)) { setItems([]); setTotal(0); setError(''); setLoading(true); } }, [query, route?.kind]);
   useEffect(() => {
     if (!route || !active) { controller.current?.abort(); return; }
+    // Re-entering a warm tab keeps its loaded pages and scroll position. A shop
+    // write, edit, search or explicit retry changes the key and always reloads.
+    if (embedded && lastLoaded.current?.key === loadKey && Date.now() - lastLoaded.current.at < 30_000) {
+      setLoading(false); return;
+    }
     const timer = setTimeout(() => { void load(0); }, query ? 250 : 0);
     return () => { clearTimeout(timer); controller.current?.abort(); };
-  }, [route, query, retry, revision, active]);
+  }, [route, query, retry, revision, active, embedded, loadKey]);
   const title = route ? { products: 'Sản phẩm', orders: 'Đơn hàng', inventory: 'Hàng sắp hết', tasks: 'Việc cần xử lý', settings: 'Shop' }[route.kind] : '';
   const isList = route && ['products', 'inventory'].includes(route.kind);
   const content = <View accessibilityViewIsModal={!embedded} style={embedded ? { flex: 1 } : [ui.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>{!embedded ? <View style={ui.sheetHandle} /> : null}<View style={[ui.sheetHeader, { flexWrap: 'nowrap' }]}><Text accessibilityRole="header" style={[embedded ? ui.title : ui.sheetTitle, { flex: 1, minWidth: 0 }]}>{title}</Text>{!embedded ? <Pressable accessibilityRole="button" accessibilityLabel="Đóng" onPress={onClose} style={ui.circleButton}><Ionicons name="close" size={21} color={IOS.label} /></Pressable> : route?.kind === 'products' ? <Pressable accessibilityRole="button" accessibilityLabel="Đăng sản phẩm mới" onPress={() => onAsk('Đăng sản phẩm mới lên shop, giúp mình soạn tiêu đề và mô tả.')} style={[ui.circleButton, { borderRadius: 14, backgroundColor: isDark ? '#9EB9DC' : '#0B1F3F' }]}><Ionicons name="add" size={25} color={isDark ? '#0B1F3F' : '#FFF'} /></Pressable> : null}</View>
@@ -71,7 +79,7 @@ export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, 
           ] as const).map(([label, value, action]) => <Pressable key={label} accessibilityRole="button" onPress={action} style={[ui.listCard, ui.between]}><Text style={[ui.productName, ui.grow]}>{label}</Text><Text style={ui.taskCount}>{value ?? '—'}</Text><Ionicons name="chevron-forward" size={17} color={IOS.tertiary} /></Pressable>)}</> : null}
           {route?.kind === 'settings' ? <>
             <SecuritySettings />
-            <View style={ui.listCard}><Text style={ui.listTitle}>{data?.shop.name || 'Chưa kết nối shop'}</Text><View style={ui.row}><View style={[ui.dot, (!data || Boolean(connectionError)) && { backgroundColor: IOS.tertiary }]} /><Text style={ui.caption}>{connectionError ? 'Chưa đồng bộ được dữ liệu mới' : refreshing ? 'Đang đồng bộ…' : data ? 'Đã kết nối Shopee' : 'Chưa kết nối'}</Text></View><Text style={ui.caption}>{data?.shop.location || 'SellerPilot · by ShipCode'}</Text><Pressable accessibilityRole="button" onPress={() => onStore('/shop/' + (data?.shop.slug || 'utech-official'))} style={ui.secondaryButton}><Text style={ui.secondaryText}>Mở gian hàng</Text><Ionicons name="open-outline" size={16} color={BRAND.navy} /></Pressable></View>
+            <View style={ui.listCard}><Text style={ui.listTitle}>{data?.shop.name || 'Chưa kết nối shop'}</Text><View style={ui.row}><View style={[ui.dot, (!data || Boolean(connectionError)) && { backgroundColor: IOS.tertiary }]} /><Text style={ui.caption}>{connectionError ? 'Chưa đồng bộ được dữ liệu mới' : refreshing ? 'Đang đồng bộ…' : data ? 'Đã kết nối shop nội bộ' : 'Chưa kết nối'}</Text></View><Text style={ui.caption}>{data?.shop.location || 'SellerPilot · by ShipCode'}</Text><Pressable accessibilityRole="button" onPress={() => onStore('/shop/' + (data?.shop.slug || 'utech-official'))} style={ui.secondaryButton}><Text style={ui.secondaryText}>Mở gian hàng</Text><Ionicons name="open-outline" size={16} color={BRAND.navy} /></Pressable></View>
             <View style={[ui.listCard, ui.between]}><View style={ui.row}><Ionicons name="moon-outline" size={21} color={BRAND.navy} /><Text style={ui.productName}>Giao diện tối</Text></View><Switch accessibilityLabel="Giao diện tối" value={darkMode} onValueChange={onDarkMode} trackColor={{ true: BRAND.orange, false: isDark ? '#454A54' : '#D2D8E1' }} /></View>
             <View style={ui.grouped}>{([
               ['storefront-outline', 'Kênh người bán', '/seller'],
@@ -82,7 +90,7 @@ export function ManagementSheet({ route, onClose, onOpen, data, onAsk, onStore, 
             {connectionError ? <View style={ui.errorCard}><Text style={ui.error}>{connectionError}</Text></View> : null}
             <Pressable accessibilityRole="button" accessibilityLabel="Đồng bộ dữ liệu" disabled={refreshing} onPress={onRefresh} style={[ui.secondaryButton, { marginTop: 18 }]}><Ionicons name="refresh-outline" size={18} color={BRAND.navy} />{refreshing ? <ActivityIndicator color={BRAND.navy} /> : null}<Text style={ui.secondaryText}>{refreshing ? 'Đang đồng bộ…' : 'Đồng bộ dữ liệu'}</Text></Pressable>
             {data ? <Text style={[ui.caption, { marginTop: 12 }]}>Cập nhật {new Date(data.updated_at).toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' })}</Text> : null}
-            <Pressable accessibilityRole="button" accessibilityState={{ expanded: connectionOpen }} onPress={() => setConnectionOpen(value => !value)} style={[ui.task, { paddingHorizontal: 0 }]}><Text style={[ui.caption, ui.grow]}>Thông tin kết nối</Text><Ionicons name={connectionOpen ? 'chevron-up' : 'chevron-down'} size={16} color={IOS.secondary} /></Pressable>{connectionOpen ? <Text selectable style={ui.caption}>{API_URL}</Text> : null}
+            <Pressable accessibilityRole="button" accessibilityLabel="Thông tin kết nối" accessibilityState={{ expanded: connectionOpen }} onPress={() => setConnectionOpen(value => !value)} style={[ui.task, { paddingHorizontal: 0 }]}><Text style={[ui.caption, ui.grow]}>Thông tin kết nối</Text><Ionicons name={connectionOpen ? 'chevron-up' : 'chevron-down'} size={16} color={IOS.secondary} /></Pressable>{connectionOpen ? <Text selectable style={ui.caption}>{API_URL}</Text> : null}
 
           </> : null}
         </ScrollView>}

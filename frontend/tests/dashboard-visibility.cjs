@@ -63,6 +63,6 @@ let browser,page;
  await page.getByRole('button',{name:'Xác nhận đăng xuất',exact:true}).click();
  await page.getByTestId('login-screen').waitFor();await logoLoaded();
  assert.deepEqual(errors,[]);
- const result={checks:['Readable complete amounts including zero and MAX_SAFE_INTEGER at 320/390/430/520px in both themes','Dock has a consistent 85% tint over its blur','Assistant and logout login use the warmed 192px mark; no original 1.2MB logo request'],measurements,errors};
+ const result={checks:['Readable complete amounts including zero and MAX_SAFE_INTEGER at 320/390/430/520px in both themes','Dock retains a strong contrast layer over its blur','Assistant and logout login use the warmed 192px mark; no original 1.2MB logo request'],measurements,errors};
  fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({checks:result.checks,errors},null,2));
 })().catch(async e=>{console.error(e);if(page)await page.screenshot({path:path.join(output,'failure.png')});process.exitCode=1;}).finally(async()=>browser?.close());

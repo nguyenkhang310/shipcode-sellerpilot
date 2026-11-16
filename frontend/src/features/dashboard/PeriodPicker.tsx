@@ -25,7 +25,7 @@ export function PeriodPicker({ days, date, onDays, onDate, reduceMotion }: {
   const cellWidth = Math.max(0, (width - 8) / 4);
   useEffect(() => {
     if (measured.current !== cellWidth || reduceMotion) { measured.current = cellWidth; x.setValue(selection * cellWidth); return; }
-    const animation = Animated.timing(x, { toValue: selection * cellWidth, duration: 210, easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== 'web', isInteraction: false });
+    const animation = Animated.timing(x, { toValue: selection * cellWidth, duration: 140, easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== 'web', isInteraction: false });
     animation.start(); return () => animation.stop();
   }, [selection, cellWidth, reduceMotion, x]);
   const show = () => { setPending(date || today); setMonth(monthOf(date || today)); setOpen(true); };

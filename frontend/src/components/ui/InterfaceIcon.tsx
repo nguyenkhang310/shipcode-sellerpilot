@@ -1,8 +1,15 @@
 import Svg, { Path, Rect } from 'react-native-svg';
+import type { SymbolViewProps } from 'expo-symbols';
+import { NativeSymbol } from './NativeSymbol';
 
 // One optical size and stroke weight for navigation and task shortcuts.
 // Functional controls such as close/send retain their platform glyphs.
 export type InterfaceIconName = 'overview' | 'products' | 'assistant' | 'orders' | 'shop' | 'trend' | 'inventory' | 'search' | 'plan';
+const SYMBOLS = {
+  overview: 'square.grid.2x2', products: 'cube', assistant: 'bubble.left.and.bubble.right',
+  orders: 'doc.text', shop: 'bag', trend: 'chart.xyaxis.line', inventory: 'archivebox',
+  search: 'magnifyingglass', plan: 'calendar',
+} as const satisfies Record<InterfaceIconName, SymbolViewProps['name']>;
 export function InterfaceIcon({ name, size = 24, color }: { name: InterfaceIconName; size?: number; color: string }) {
   const drawing = {
     overview: <><Rect x={3.5} y={3.5} width={6} height={7} rx={1.2} /><Rect x={14.5} y={3.5} width={6} height={7} rx={1.2} /><Rect x={3.5} y={15} width={6} height={5.5} rx={1.2} /><Rect x={14.5} y={15} width={6} height={5.5} rx={1.2} /></>,
@@ -15,5 +22,5 @@ export function InterfaceIcon({ name, size = 24, color }: { name: InterfaceIconN
     search: <><Path d="M16.5 16.5 21 21" /><Path d="M18.5 10.5a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></>,
     plan: <><Rect x={4} y={5.5} width={16} height={15} rx={2} /><Path d="M8 3v5M16 3v5M4 10.5h16M8 14h3M8 17h6" /></>,
   }[name];
-  return <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.65} strokeLinecap="round" strokeLinejoin="round" accessible={false} accessibilityElementsHidden importantForAccessibility="no">{drawing}</Svg>;
+  return <NativeSymbol name={SYMBOLS[name]} size={size} color={color} fallback={<Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.65} strokeLinecap="round" strokeLinejoin="round" accessible={false} accessibilityElementsHidden importantForAccessibility="no">{drawing}</Svg>} />;
 }

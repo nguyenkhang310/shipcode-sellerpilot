@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import { SystemIcon } from '../../components/ui/SystemIcon';
 import { Pressable, Text } from 'react-native';
 import { useTheme } from '../../theme/ThemeProvider';
 
@@ -9,7 +9,7 @@ export function OrderChatAction({ action, onOpen }: { action: unknown; onOpen: (
   const id = action.id;
   return <Pressable accessibilityRole="button" accessibilityLabel={'Mở chi tiết đơn #' + id}
     onPress={() => onOpen(id)} style={[ui.secondaryButton, { marginTop: 10, borderColor: BRAND.orange }]}>
-    <Ionicons name="receipt-outline" size={18} color={BRAND.orangeInk} />
+    <SystemIcon name="receipt-outline" size={18} color={BRAND.orangeInk} />
     <Text style={[ui.secondaryText, { color: BRAND.orangeInk }]}>Theo dõi & xử lý đơn #{id}</Text>
   </Pressable>;
 }

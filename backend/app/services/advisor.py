@@ -178,7 +178,8 @@ def shop_context(shop, days=7):
     stats = management.dashboard(shop, days)
     today = stats if days == 1 else management.dashboard(shop, 1)
     period_keys = ('days', 'from_date', 'to_date', 'order_count', 'order_value_vnd',
-                   'average_order_vnd', 'delivered_value_vnd', 'change_percent', 'cancelled_count')
+                   'average_order_vnd', 'delivered_value_vnd', 'change_percent', 'cancelled_count',
+                   'series', 'order_status_counts', 'timezone', 'updated_at')
     facts = {'shop': stats['shop'], 'period': {k: stats[k] for k in period_keys if k in stats},
              'today': {k: today[k] for k in ('to_date', 'order_count', 'order_value_vnd')},
              'tasks': stats['tasks'], 'top_products': stats['top_products'],

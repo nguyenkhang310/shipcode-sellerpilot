@@ -1,5 +1,5 @@
 import { ProtectedImage } from '../../components/ui/ProtectedImage';
-import { Ionicons } from '@expo/vector-icons';
+import { SystemIcon } from '../../components/ui/SystemIcon';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { ProductDraft } from '../../api/types';
@@ -35,7 +35,7 @@ export function ProductDraftCard({ draft, busy, saving, error, browser, onDecide
     </View>
     {['collecting', 'ready'].includes(draft.status) ? <View style={ui.proposalActions}>
       <Pressable accessibilityRole="button" accessibilityLabel="Hủy bản nháp sản phẩm" disabled={busy} onPress={() => onDecide('cancel')} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={ui.secondaryText}>Hủy</Text></Pressable>
-      {draft.status === 'ready' ? <Pressable accessibilityRole="button" accessibilityLabel={browser ? 'Điền bản nháp vào form người bán' : 'Đăng sản phẩm lên UTech Official'} disabled={busy} onPress={() => onDecide('publish')} style={[ui.primaryButton, { flex: 1.7, paddingHorizontal: 8 }, busy && { opacity: .55 }]}>{saving ? <ActivityIndicator color="#FFF" size="small" /> : <Ionicons name="cloud-upload-outline" size={18} color="#FFF" />}<Text style={ui.primaryText}>{browser ? 'Điền vào form' : 'Đăng sản phẩm'}</Text></Pressable> : null}
+      {draft.status === 'ready' ? <Pressable accessibilityRole="button" accessibilityLabel={browser ? 'Điền bản nháp vào form người bán' : 'Đăng sản phẩm lên UTech Official'} disabled={busy} onPress={() => onDecide('publish')} style={[ui.primaryButton, { flex: 1.7, paddingHorizontal: 8 }, busy && { opacity: .55 }]}>{saving ? <ActivityIndicator color="#FFF" size="small" /> : <SystemIcon name="cloud-upload-outline" size={18} color="#FFF" />}<Text style={ui.primaryText}>{browser ? 'Điền vào form' : 'Đăng sản phẩm'}</Text></Pressable> : null}
     </View> : null}
   </View>;
 }

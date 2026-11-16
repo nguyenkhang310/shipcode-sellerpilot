@@ -59,7 +59,7 @@ và plugin Face ID đã có trong `frontend/app.json`. Lệnh `npm run build:ios
 chỉ xuất JavaScript, **không phải** tạo/cài ứng dụng có Face ID. Nếu chỉ có
 Command Line Tools, cần cài Xcode trước khi chạy `ios:native`.
 
-Tham khảo [Expo LocalAuthentication SDK 57](https://docs.expo.dev/versions/v57.0.0/sdk/local-authentication/)
+Tham khảo [Expo LocalAuthentication SDK 58](https://docs.expo.dev/versions/v58.0.0/sdk/local-authentication/)
 và mã native `expo-secure-store` đang khóa trong package-lock.
 
 ## Phiên và quyền truy cập API

@@ -1,13 +1,13 @@
 import { ProtectedImage } from '../../components/ui/ProtectedImage';
 import { dockContentInset } from '../../components/layout/dockGeometry';
-import { Ionicons } from '@expo/vector-icons';
+import { SystemIcon } from '../../components/ui/SystemIcon';
 import { InterfaceIcon } from '../../components/ui/InterfaceIcon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { forwardRef, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Share, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, ScrollViewInstance, Share, Text, TextInput, TextInputInstance, useWindowDimensions, View } from 'react-native';
 import { cancelChatRequest, createMessageId, isTerminalChatError, recoverChatRequest } from '../../api/chatRequests';
 import { API_URL, ApiError } from '../../api/client';
 import { inExtension, isShopeeExtension } from '../../integrations/extension';
@@ -19,6 +19,7 @@ import { BrandLogo } from '../../components/ui/BrandLogo';
 import { useTheme } from '../../theme/ThemeProvider';
 import { money } from '../dashboard/DashboardScreen';
 import { MessageText } from './MessageText';
+import { ChatReportCard } from './ChatReportCard';
 import { TypingIndicator } from './TypingIndicator';
 import { Message, assistantMessage, latestProductCards, restoreMessages, uploadedImageUris } from './chatMessages';
 import { HistoryRow } from './HistoryRow';
@@ -53,7 +54,7 @@ const fallbackLabel = (reason: ChatData['fallback_reason']) => reason === 'inval
   : reason === 'free_model_unavailable' ? 'Model miễn phí chưa sẵn sàng'
   : reason === 'provider_rejected' ? 'Dịch vụ AI từ chối yêu cầu' : 'Chế độ cơ bản';
 
-export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () => void; onToast?: (message: string) => void; keyboardVisible?: boolean; reduceMotion?: boolean }>(function AssistantChat({ onShopChanged, onToast, keyboardVisible = false, reduceMotion = false }, ref) {
+export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () => void; onToast?: (message: string) => void; keyboardVisible?: boolean; reduceMotion?: boolean; active?: boolean }>(function AssistantChat({ onShopChanged, onToast, keyboardVisible = false, reduceMotion = false, active = true }, ref) {
   const { ui, IOS, BRAND, desktop } = useTheme();
   const auth = useAuth();
   const STORAGE = STORAGE_BASE + (auth?.user ? ':' + auth.user.shop.slug + ':' + auth.user.user.id : '');
@@ -87,13 +88,15 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   const [editBusy, setEditBusy] = useState<number | null>(null);
   const [editErrors, setEditErrors] = useState<Record<number, string>>({});
   const [composerAreaHeight, setComposerAreaHeight] = useState(0);
-  const scroll = useRef<ScrollView>(null), input = useRef<TextInput>(null);
+  const scroll = useRef<ScrollViewInstance>(null), input = useRef<TextInputInstance>(null);
   const request = useRef<AbortController | null>(null), historyRequest = useRef<AbortController | null>(null);
   const generation = useRef(0), lock = useRef(false), decisionLock = useRef(false), nearBottom = useRef(true);
   const stopping = useRef(false);
   const dragging = useRef(false), userScrollUntil = useRef(0);
   const scrollFrame = useRef<number | null>(null);
   const immediateScroll = useRef(false);
+  const reportAnchor = useRef<string | null>(null), threadTop = useRef(0);
+  const readingReport = useRef(false);
   const pendingChat = useRef<PendingChat | null>(null);
   const draftHydrated = useRef(false);
   const conversationRef = useRef<string | null>(null);
@@ -125,18 +128,19 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     setMeasuredInputHeight(height);
   }, [draft, windowWidth, fontScale, desktop]);
   const followBottom = (animated = true) => {
-    if (!nearBottom.current) return;
+    if (!nearBottom.current || reportAnchor.current) return;
     if (!animated) immediateScroll.current = true;
     if (scrollFrame.current !== null) return;
     scrollFrame.current = requestAnimationFrame(() => {
       scrollFrame.current = null;
       const smooth = !immediateScroll.current && !reduceMotion;
       immediateScroll.current = false;
-      if (nearBottom.current) scroll.current?.scrollToEnd({ animated: smooth });
+      if (nearBottom.current && !reportAnchor.current) scroll.current?.scrollToEnd({ animated: smooth });
     });
   };
-  const goBottom = () => { userScrollUntil.current = 0; nearBottom.current = true; setShowLatest(false); followBottom(); };
+  const goBottom = () => { reportAnchor.current = null; readingReport.current = false; userScrollUntil.current = 0; nearBottom.current = true; setShowLatest(false); followBottom(); };
   const remember = (id: string | null) => {
+    if (id !== conversationRef.current) reportAnchor.current = null;
     conversationRef.current = id; setConversationId(id);
     void (id ? AsyncStorage.setItem(STORAGE, id) : AsyncStorage.removeItem(STORAGE)).catch(() => {});
   };
@@ -146,9 +150,24 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     if (pendingChat.current?.id === entry.id) pendingChat.current = null;
   }
   function appendAnswer(data: ChatData) {
-    setMessages(items => items.some(item => item.response?.run_id === data.run_id) ? items :
-      [...items, assistantMessage(data)]);
+    setMessages(items => {
+      if (items.some(item => item.response?.run_id === data.run_id)) return items;
+      readingReport.current = false;
+      if (data.report && nearBottom.current) reportAnchor.current = data.run_id + ':a';
+      return [...items, assistantMessage(data)];
+    });
     if (data.product_draft?.status === 'published') onShopChanged?.();
+  }
+  function focusReport(id: string, top: number) {
+    if (reportAnchor.current !== id) return;
+    readingReport.current = true;
+    nearBottom.current = false;
+    requestAnimationFrame(() => {
+      if (reportAnchor.current !== id) return;
+      reportAnchor.current = null;
+      scroll.current?.scrollTo({ y: Math.max(0, threadTop.current + top), animated: !reduceMotion });
+      setShowLatest(false);
+    });
   }
   const stop = async (showResult = true): Promise<boolean> => {
     if (stopping.current) return false;
@@ -178,6 +197,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   const newConversation = async () => {
     if (!await stop(false)) return;
     draftHydrated.current = true;
+    reportAnchor.current = null;
     remember(null); setMessages([]); setDraft(''); setPendingImages([]); setError(''); setFailedMessage('');
     setHistoryOpen(false); setQuickOpen(false); setDecisionErrors({}); nearBottom.current = true;
     setProductErrors({});
@@ -303,6 +323,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     setMessages(items => items.some(item => item.id === userId) ||
       (retry && items.at(-2)?.text === text && items.at(-1)?.role === 'assistant')
       ? items : [...items, { id: userId, role: 'user', text }]);
+    reportAnchor.current = null;
     userScrollUntil.current = 0; nearBottom.current = true; setShowLatest(false);
     try {
       // Persist identity before sending, including the first turn of a new chat.
@@ -377,8 +398,17 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     // Content growth emits scroll events too. Only a real drag/wheel changes
     // following intent; otherwise a long answer incorrectly marks us "scrolled up".
     if (Platform.OS !== 'web') return;
-    const node = scroll.current?.getScrollableNode() as HTMLElement | undefined;
-    const intent = () => { userScrollUntil.current = Date.now() + 1500; };
+    // The native contract returns a numeric handle; React Native Web returns
+    // the DOM node. Narrow the web-only adapter instead of using legacy refs.
+    const node = scroll.current?.getScrollableNode() as unknown as HTMLElement | undefined;
+    const intent = () => {
+      userScrollUntil.current = Date.now() + 1500;
+      // A queued animation must yield immediately, before the throttled scroll
+      // event arrives; otherwise it can undo the seller's wheel/touch movement.
+      nearBottom.current = false;
+      readingReport.current = false;
+      reportAnchor.current = null;
+    };
     node?.addEventListener('wheel', intent, { passive: true });
     node?.addEventListener('touchmove', intent, { passive: true });
     return () => {
@@ -390,6 +420,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     followBottom();
   }, [messages, busy, restoring]);
   useEffect(() => () => {
+    reportAnchor.current = null;
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
   }, []);
   async function decide(proposal: PriceProposal, choice: 'confirm' | 'reject') {
@@ -599,6 +630,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       onMomentumScrollEnd={() => { dragging.current = false; userScrollUntil.current = 0; }}
       onScroll={event => {
         if (!dragging.current && Date.now() > userScrollUntil.current) return;
+        readingReport.current = false;
         const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
         nearBottom.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 100;
         setShowLatest(!nearBottom.current);
@@ -606,40 +638,41 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       onContentSizeChange={() => {
         if (!messages.length) scroll.current?.scrollTo({ y: 0, animated: false });
         else if (nearBottom.current) followBottom();
-        else setShowLatest(true);
+        else if (!readingReport.current) setShowLatest(true);
       }}>
       {!messages.length && !restoring ? <>
         <View style={ui.welcome}><BrandLogo size={desktop ? 40 : keyboardVisible ? 40 : 56} /><Text accessibilityRole="header" style={[ui.welcomeTitle, { marginTop: desktop ? 16 : compact ? 16 : 24 }, !desktop && compact && { fontSize: 28, lineHeight: 36 }, keyboardVisible && { fontSize: 23, lineHeight: 30, letterSpacing: -.6 }]}>Mình giúp gì{ '\n' }cho shop hôm nay?</Text></View>
         {!keyboardVisible ? <View style={[ui.promptGrid, compact && { marginTop: 22 }]}>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" accessibilityLabel={prompt.title} onPress={() => void send(prompt.message)} style={({ pressed }) => [ui.prompt, !desktop && compact && { minHeight: 84, padding: 12, gap: 8 }, pressed && { opacity: .65 }]}><InterfaceIcon name={prompt.icon} size={desktop ? 18 : compact ? 20 : 22} color={BRAND.navy} /><Text style={ui.promptText}>{prompt.title}</Text></Pressable>)}</View> : null}
       </> : null}
-      {restoring ? <View style={ui.thinking}><ActivityIndicator color={BRAND.navy} /><Text style={ui.thinkingText}>Đang mở hội thoại…</Text></View> : <View style={ui.thread}>{messages.map(message => message.role === 'user'
+      {restoring ? <View style={ui.thinking}><ActivityIndicator color={BRAND.navy} /><Text style={ui.thinkingText}>Đang mở hội thoại…</Text></View> : <View style={ui.thread} onLayout={event => { threadTop.current = event.nativeEvent.layout.y; }}>{messages.map(message => message.role === 'user'
         ? <MessageEntrance key={message.id} style={ui.userMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion}><View testID="user-message" style={[ui.userBubble, Boolean(message.imageUris?.length) && ui.userBubbleMedia]}>{message.imageUris?.length === 1 ? <ProtectedImage testID="user-image-single" source={{ uri: message.imageUris[0] }} style={ui.userImageSingle} resizeMode="cover" /> : message.imageUris?.length ? <ScrollView testID="user-image-gallery" horizontal style={ui.userImageScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.userImageRow}>{message.imageUris.map((uri, index) => <ProtectedImage key={uri + index} source={{ uri }} style={ui.userImageMultiple} resizeMode="cover" />)}</ScrollView> : null}<Text selectable style={[ui.userText, Boolean(message.imageUris?.length) && ui.userTextWithMedia]}>{message.text}</Text></View></MessageEntrance>
-        : <MessageEntrance key={message.id} style={ui.assistantMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion}><View style={ui.assistantContent}><View style={[ui.row, { gap: 7, marginBottom: 8 }]}><BrandLogo size={20} /><Text style={ui.assistantName}>SellerPilot</Text></View><View style={ui.assistantBubble}><MessageText text={message.text} /></View>
+        : <MessageEntrance key={message.id} style={ui.assistantMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion} onLayout={message.response?.report ? event => focusReport(message.id, event.nativeEvent.layout.y) : undefined}><View style={ui.assistantContent}><View style={[ui.row, { gap: 7, marginBottom: 8 }]}><BrandLogo size={20} /><Text style={ui.assistantName}>SellerPilot</Text></View><View style={ui.assistantBubble}><MessageText text={message.text} /></View>
           {message.response?.product_edit_proposal ? <ProductEditCard proposal={message.response.product_edit_proposal} busy={actionsDisabled} error={editErrors[message.response.product_edit_proposal.id]} onDecide={choice => void decideEdit(message.response!.product_edit_proposal!, choice)} /> : null}
+          {message.response?.report && !isShopeeExtension() ? <ChatReportCard report={message.response.report} /> : null}
           {!isShopeeExtension() ? <OrderChatAction action={message.response?.facts.order_action} onOpen={id => { input.current?.blur(); setOrderId(id); }} /> : null}
           {message.response?.proposal ? <View style={ui.proposal}>
-            <View style={ui.proposalBody}><Text style={ui.proposalKicker}>{proposalLabel[message.response.proposal.status]}</Text><Text style={ui.listTitle}>{message.response.proposal.product_name}</Text><Text style={ui.caption}>SKU {message.response.proposal.sku}</Text><View style={ui.priceRow}><Text style={ui.oldPrice}>{money(message.response.proposal.old_price_vnd)}</Text><Ionicons name="arrow-forward" size={17} color={IOS.secondary} /><Text style={ui.newPrice}>{money(message.response.proposal.new_price_vnd)}</Text></View>
+            <View style={ui.proposalBody}><Text style={ui.proposalKicker}>{proposalLabel[message.response.proposal.status]}</Text><Text style={ui.listTitle}>{message.response.proposal.product_name}</Text><Text style={ui.caption}>SKU {message.response.proposal.sku}</Text><View style={ui.priceRow}><Text style={ui.oldPrice}>{money(message.response.proposal.old_price_vnd)}</Text><SystemIcon name="arrow-forward" size={17} color={IOS.secondary} /><Text style={ui.newPrice}>{money(message.response.proposal.new_price_vnd)}</Text></View>
               {decisionErrors[message.response.proposal.id] ? <Text style={ui.error}>{decisionErrors[message.response.proposal.id]}</Text> : null}</View>
-            {message.response.proposal.status === 'pending' ? <View style={ui.proposalActions}><Pressable accessibilityRole="button" disabled={actionsDisabled} onPress={() => void decide(message.response!.proposal!, 'reject')} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={ui.secondaryText}>Bỏ qua</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={'Xác nhận đổi giá SKU ' + message.response.proposal.sku} disabled={actionsDisabled} onPress={() => void decide(message.response!.proposal!, 'confirm')} style={[ui.primaryButton, { flex: 1.6, paddingHorizontal: 8 }, actionsDisabled && { opacity: .55 }]}>{decision === message.response.proposal.id ? <ActivityIndicator color="#FFF" size="small" /> : <Ionicons name="checkmark" size={18} color="#FFF" />}<Text style={ui.primaryText}>Xác nhận đổi giá</Text></Pressable></View> : null}
+            {message.response.proposal.status === 'pending' ? <View style={ui.proposalActions}><Pressable accessibilityRole="button" disabled={actionsDisabled} onPress={() => void decide(message.response!.proposal!, 'reject')} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={ui.secondaryText}>Bỏ qua</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={'Xác nhận đổi giá SKU ' + message.response.proposal.sku} disabled={actionsDisabled} onPress={() => void decide(message.response!.proposal!, 'confirm')} style={[ui.primaryButton, { flex: 1.6, paddingHorizontal: 8 }, actionsDisabled && { opacity: .55 }]}>{decision === message.response.proposal.id ? <ActivityIndicator color="#FFF" size="small" /> : <SystemIcon name="checkmark" size={18} color="#FFF" />}<Text style={ui.primaryText}>Xác nhận đổi giá</Text></Pressable></View> : null}
           </View> : null}
           {productCardMessageIds.has(message.id) && message.response?.product_draft ? <ProductDraftCard draft={message.response.product_draft} busy={actionsDisabled} saving={productDecision === message.response.product_draft.id} error={productErrors[message.response.product_draft.id]} browser={isShopeeExtension()} onDecide={choice => void decideDraft(message.response!.product_draft!, choice)} /> : null}
-          <View style={ui.messageActions}><Pressable accessibilityRole="button" accessibilityLabel={Platform.OS === 'web' ? 'Sao chép câu trả lời' : 'Chia sẻ câu trả lời'} onPress={() => void share(message.text)} style={ui.messageAction}><Ionicons name={Platform.OS === 'web' ? 'copy-outline' : 'share-outline'} size={17} color={IOS.secondary} /></Pressable>{message.response?.mode === 'fallback' ? <Text style={ui.sourceText}>{fallbackLabel(message.response.fallback_reason)}</Text> : null}</View>
+          <View style={ui.messageActions}><Pressable accessibilityRole="button" accessibilityLabel={Platform.OS === 'web' ? 'Sao chép câu trả lời' : 'Chia sẻ câu trả lời'} onPress={() => void share(message.text)} style={ui.messageAction}><SystemIcon name={Platform.OS === 'web' ? 'copy-outline' : 'share-outline'} size={17} color={IOS.secondary} /></Pressable>{message.response?.mode === 'fallback' ? <Text style={ui.sourceText}>{fallbackLabel(message.response.fallback_reason)}</Text> : null}</View>
         </View></MessageEntrance>)}</View>}
-      {busy ? <TypingIndicator /> : null}
-      {error ? <View accessibilityLiveRegion="polite" style={ui.errorCard}><Text style={ui.error}>{error}</Text>{failedMessage ? <Pressable accessibilityRole="button" accessibilityLabel="Thử lại" disabled={busy} onPress={() => void send(failedMessage, true)} style={ui.secondaryButton}><Ionicons name="refresh" color={BRAND.navy} size={17} /><Text style={ui.secondaryText}>Thử lại</Text></Pressable> : null}{pendingChat.current && !busy ? <Pressable accessibilityRole="button" accessibilityLabel="Dừng yêu cầu" onPress={() => void stop()} style={ui.secondaryButton}><Text style={ui.secondaryText}>Dừng yêu cầu</Text></Pressable> : null}</View> : null}
-      {!busy && !restoring && !keyboardVisible && last?.response?.suggestions?.length ? <ScrollView testID="chat-follow-ups" horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, height: Math.ceil(48 * fontScale + 28), maxHeight: Math.ceil(48 * fontScale + 28), marginTop: 12 }} contentContainerStyle={{ gap: 8, paddingBottom: 2, alignItems: 'center' }}>{last.response.suggestions.slice(0, 3).map(suggestion => <Pressable key={suggestion} accessibilityRole="button" onPress={() => void send(suggestion)} style={[ui.followUp, { minHeight: 44, maxWidth: 260, paddingVertical: 10 }]}><Text numberOfLines={2} style={[ui.followUpText, { flex: 0, flexShrink: 1 }]}>{suggestion}</Text><Ionicons name="arrow-up-outline" size={15} color={BRAND.navy} /></Pressable>)}</ScrollView> : null}
+      {busy ? <TypingIndicator active={active} /> : null}
+      {error ? <View accessibilityLiveRegion="polite" style={ui.errorCard}><Text style={ui.error}>{error}</Text>{failedMessage ? <Pressable accessibilityRole="button" accessibilityLabel="Thử lại" disabled={busy} onPress={() => void send(failedMessage, true)} style={ui.secondaryButton}><SystemIcon name="refresh" color={BRAND.navy} size={17} /><Text style={ui.secondaryText}>Thử lại</Text></Pressable> : null}{pendingChat.current && !busy ? <Pressable accessibilityRole="button" accessibilityLabel="Dừng yêu cầu" onPress={() => void stop()} style={ui.secondaryButton}><Text style={ui.secondaryText}>Dừng yêu cầu</Text></Pressable> : null}</View> : null}
+      {!busy && !restoring && !keyboardVisible && last?.response?.suggestions?.length ? <ScrollView testID="chat-follow-ups" horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, height: Math.ceil(48 * fontScale + 28), maxHeight: Math.ceil(48 * fontScale + 28), marginTop: 12 }} contentContainerStyle={{ gap: 8, paddingBottom: 2, alignItems: 'center' }}>{last.response.suggestions.slice(0, 3).map(suggestion => <Pressable key={suggestion} accessibilityRole="button" onPress={() => void send(suggestion)} style={[ui.followUp, { minHeight: 44, maxWidth: 260, paddingVertical: 10 }]}><Text numberOfLines={2} style={[ui.followUpText, { flex: 0, flexShrink: 1 }]}>{suggestion}</Text><SystemIcon name="arrow-up-outline" size={15} color={BRAND.navy} /></Pressable>)}</ScrollView> : null}
     </ScrollView>
-    {showLatest && messages.length ? <Pressable accessibilityRole="button" accessibilityLabel="Cuộn đến tin nhắn mới nhất" onPress={goBottom} style={[ui.circleButton, { position: 'absolute', right: 22, bottom: Math.max(12, composerAreaHeight + 12) }]}><Ionicons name="arrow-down" size={20} color={BRAND.navy} /></Pressable> : null}
+    {showLatest && messages.length ? <Pressable accessibilityRole="button" accessibilityLabel="Cuộn đến tin nhắn mới nhất" onPress={goBottom} style={[ui.circleButton, { position: 'absolute', right: 22, bottom: Math.max(12, composerAreaHeight + 12) }]}><SystemIcon name="arrow-down" size={20} color={BRAND.navy} /></Pressable> : null}
     <View testID="chat-composer" onLayout={event => { const height = Math.ceil(event.nativeEvent.layout.height); setComposerAreaHeight(current => Math.abs(current - height) > 1 ? height : current); }} style={[ui.composerArea, { paddingBottom: desktop || keyboardVisible ? 8 : dockContentInset(insets.bottom), flexShrink: 0 }]}>
-      {pendingImages.length ? <ScrollView testID="attachment-strip" horizontal style={ui.attachmentScroller} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={ui.attachmentRow}>{pendingImages.map((pendingImage, index) => <View key={pendingImage.uri + index} style={ui.attachmentPreview}><ProtectedImage source={{ uri: pendingImage.uri }} style={ui.attachmentImage} resizeMode="cover" /><Pressable accessibilityRole="button" accessibilityLabel={`Bỏ ảnh số ${index + 1}`} hitSlop={10} onPress={() => setPendingImages(items => items.filter((_item, itemIndex) => itemIndex !== index))} style={ui.attachmentRemove}><Ionicons name="close" size={17} color="#FFF" /></Pressable></View>)}{pendingImages.length < MAX_PRODUCT_IMAGES ? <Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh sản phẩm" onPress={() => void pickProductImage()} style={ui.attachmentAdd}><Ionicons name="add" size={25} color={BRAND.navy} /><Text style={ui.attachmentCount}>{pendingImages.length}/{MAX_PRODUCT_IMAGES}</Text></Pressable> : null}</ScrollView> : null}
-      {quickOpen ? <ScrollView testID="quick-actions" keyboardShouldPersistTaps="handled" style={[ui.grouped, { marginBottom: 10, maxHeight: keyboardVisible ? 180 : 290, flexGrow: 0 }]}><Pressable accessibilityRole="button" accessibilityLabel="Chọn ảnh để đăng sản phẩm" onPress={() => void pickProductImage()} style={[ui.task, { minHeight: 52 }]}><Ionicons name="images-outline" size={21} color={BRAND.navy} /><Text style={ui.taskTitle}>Chọn tối đa 6 ảnh sản phẩm</Text></Pressable>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" onPress={() => { setDraft(prompt.message); setQuickOpen(false); input.current?.focus(); }} style={[ui.task, { minHeight: 47 }]}><InterfaceIcon name={prompt.icon} size={19} color={BRAND.navy} /><Text style={ui.taskTitle}>{prompt.title}</Text></Pressable>)}</ScrollView> : null}
-      <View style={ui.composer}><Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh hoặc mở gợi ý" accessibilityState={{ expanded: quickOpen }} onPress={() => setQuickOpen(value => !value)} style={ui.composerPlus}><Ionicons name={quickOpen ? 'close' : 'add'} size={27} color={BRAND.navy} /></Pressable>
+      {pendingImages.length ? <ScrollView testID="attachment-strip" horizontal style={ui.attachmentScroller} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={ui.attachmentRow}>{pendingImages.map((pendingImage, index) => <View key={pendingImage.uri + index} style={ui.attachmentPreview}><ProtectedImage source={{ uri: pendingImage.uri }} style={ui.attachmentImage} resizeMode="cover" /><Pressable accessibilityRole="button" accessibilityLabel={`Bỏ ảnh số ${index + 1}`} hitSlop={10} onPress={() => setPendingImages(items => items.filter((_item, itemIndex) => itemIndex !== index))} style={ui.attachmentRemove}><SystemIcon name="close" size={17} color="#FFF" /></Pressable></View>)}{pendingImages.length < MAX_PRODUCT_IMAGES ? <Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh sản phẩm" onPress={() => void pickProductImage()} style={ui.attachmentAdd}><SystemIcon name="add" size={25} color={BRAND.navy} /><Text style={ui.attachmentCount}>{pendingImages.length}/{MAX_PRODUCT_IMAGES}</Text></Pressable> : null}</ScrollView> : null}
+      {quickOpen ? <ScrollView testID="quick-actions" keyboardShouldPersistTaps="handled" style={[ui.grouped, { marginBottom: 10, maxHeight: keyboardVisible ? 180 : 290, flexGrow: 0 }]}><Pressable accessibilityRole="button" accessibilityLabel="Chọn ảnh để đăng sản phẩm" onPress={() => void pickProductImage()} style={[ui.task, { minHeight: 52 }]}><SystemIcon name="images-outline" size={21} color={BRAND.navy} /><Text style={ui.taskTitle}>Chọn tối đa 6 ảnh sản phẩm</Text></Pressable>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" onPress={() => { setDraft(prompt.message); setQuickOpen(false); input.current?.focus(); }} style={[ui.task, { minHeight: 47 }]}><InterfaceIcon name={prompt.icon} size={19} color={BRAND.navy} /><Text style={ui.taskTitle}>{prompt.title}</Text></Pressable>)}</ScrollView> : null}
+      <View style={ui.composer}><Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh hoặc mở gợi ý" accessibilityState={{ expanded: quickOpen }} onPress={() => setQuickOpen(value => !value)} style={ui.composerPlus}><SystemIcon name={quickOpen ? 'close' : 'add'} size={27} color={BRAND.navy} /></Pressable>
         <View style={ui.composerInputFrame}><TextInput ref={input} accessibilityLabel="Nhắn cho SellerPilot" placeholder={pendingImages.length ? 'Thêm yêu cầu…' : 'Hỏi SellerPilot…'} placeholderTextColor={IOS.secondary} value={draft} onChangeText={value => { setDraft(value); if (!value) setInputHeight(INPUT_MIN_HEIGHT); }} multiline maxLength={4000} scrollEnabled={inputHeight >= INPUT_MAX_HEIGHT - 1} returnKeyType="default" blurOnSubmit={false} onFocus={() => setTimeout(() => { if (nearBottom.current) scroll.current?.scrollToEnd({ animated: false }); }, 80)} style={[ui.composerInput, { height: inputHeight }]} editable={!restoring} />
           {Platform.OS !== 'web' ? <Text pointerEvents="none" accessible={false} aria-hidden onTextLayout={event => resizeComposerFromLines(event.nativeEvent.lines.length)} style={ui.composerMeasure}>{draft + '\u200B'}</Text> : null}</View>
-        <Pressable accessibilityRole="button" accessibilityLabel={busy ? 'Dừng chờ phản hồi' : 'Gửi tin nhắn'} disabled={!busy && ((!draft.trim() && !pendingImages.length) || restoring || decisionPending || selectingImages)} onPress={() => { if (busy) { void stop(); } else void send(); }} style={({ pressed }) => [ui.send, !busy && ((!draft.trim() && !pendingImages.length) || restoring) && ui.sendDisabled, pressed && { opacity: .7 }]}><Ionicons name={busy ? 'stop' : 'arrow-up'} size={23} color={busy || draft.trim() || pendingImages.length ? '#FFF' : IOS.tertiary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={busy ? 'Dừng chờ phản hồi' : 'Gửi tin nhắn'} disabled={!busy && ((!draft.trim() && !pendingImages.length) || restoring || decisionPending || selectingImages)} onPress={() => { if (busy) { void stop(); } else void send(); }} style={({ pressed }) => [ui.send, !busy && ((!draft.trim() && !pendingImages.length) || restoring) && ui.sendDisabled, pressed && { opacity: .7 }]}><SystemIcon name={busy ? 'stop' : 'arrow-up'} size={23} color={busy || draft.trim() || pendingImages.length ? '#FFF' : IOS.tertiary} /></Pressable>
       </View>
     </View>
-    <ChatHistoryDrawer visible={historyOpen} onClose={() => setHistoryOpen(false)} reduceMotion={reduceMotion}><View style={ui.sheetHeader}><Text style={ui.sheetTitle}>Lịch sử</Text><Pressable accessibilityRole="button" accessibilityLabel="Đóng lịch sử trò chuyện" onPress={() => setHistoryOpen(false)} style={ui.circleButton}><Ionicons name="close" color={IOS.label} size={22} /></Pressable></View><ScrollView contentContainerStyle={ui.sheetScroll} keyboardShouldPersistTaps="handled"><Pressable accessibilityRole="button" accessibilityLabel="Cuộc trò chuyện mới" onPress={newConversation} style={[ui.primaryButton, { marginBottom: 20 }]}><Ionicons name="add" color="#FFF" size={20} /><Text style={ui.primaryText}>Cuộc trò chuyện mới</Text></Pressable>
+    <ChatHistoryDrawer visible={historyOpen} onClose={() => setHistoryOpen(false)} reduceMotion={reduceMotion}><View style={ui.sheetHeader}><Text style={ui.sheetTitle}>Lịch sử</Text><Pressable accessibilityRole="button" accessibilityLabel="Đóng lịch sử trò chuyện" onPress={() => setHistoryOpen(false)} style={ui.circleButton}><SystemIcon name="close" color={IOS.label} size={22} /></Pressable></View><ScrollView contentContainerStyle={ui.sheetScroll} keyboardShouldPersistTaps="handled"><Pressable accessibilityRole="button" accessibilityLabel="Cuộc trò chuyện mới" onPress={newConversation} style={[ui.primaryButton, { marginBottom: 20 }]}><SystemIcon name="add" color="#FFF" size={20} /><Text style={ui.primaryText}>Cuộc trò chuyện mới</Text></Pressable>
       {historyLoading ? <ActivityIndicator color={BRAND.navy} /> : null}
       {historyError ? <View style={ui.errorCard}><Text style={ui.error}>{historyError}</Text><Pressable accessibilityRole="button" onPress={() => void loadHistory()} style={ui.secondaryButton}><Text style={ui.secondaryText}>Thử lại</Text></Pressable></View> : null}
       {!historyLoading && !historyError && !history.length ? <Text style={[ui.loadingText, { marginVertical: 30 }]}>Chưa có cuộc trò chuyện</Text> : null}

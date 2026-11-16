@@ -60,6 +60,22 @@ export type ChatData = {
   product_edit_proposal?: ProductEditProposal | null;
   integration_mode: 'local_store' | 'shopee_browser';
   suggestions: string[];
+  report?: ChatReport | null;
+};
+
+export type ReportUnit = 'vnd' | 'count' | 'percent';
+export type ReportChart = {
+  kind: 'line' | 'bar'; title: string; unit: ReportUnit;
+  points: { label: string; value: number }[];
+};
+export type ReportTable = {
+  title: string; columns: { label: string; unit: 'text' | 'count' | 'vnd' }[];
+  rows: (string | number | null)[][];
+};
+export type ChatReport = {
+  title: string; subtitle: string; source: 'local_store'; as_of: string | null; timezone: string | null;
+  metrics: { label: string; value: number | null; unit: ReportUnit; change_percent: number | null }[];
+  charts: ReportChart[]; table: ReportTable | null; notes: string[];
 };
 
 export type StoreProduct = {

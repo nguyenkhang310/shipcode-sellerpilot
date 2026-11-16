@@ -51,13 +51,14 @@ node frontend/tests/chat-scroll.cjs
 node frontend/tests/chat-history.cjs
 node frontend/tests/dashboard-live.cjs
 node frontend/tests/chat-motion.cjs
+node frontend/tests/chat-reports.cjs
 ```
 
 Nếu Playwright không nằm trong dependency cục bộ, đặt `PLAYWRIGHT_MODULE` tới module đã cài và `CHROME_EXECUTABLE` tới Chrome. `QA_APP_URL` và `QA_API_ORIGIN` có thể đổi địa chỉ test. Không dùng API shop thật cho các test có tạo/sửa dữ liệu.
 
 - `app-audit`: năm tab ở 320/375/430 px, ảnh sản phẩm, tìm kiếm, đơn, input co giãn, keyboard viewport, biểu đồ rỗng, lỗi đồng bộ và giao diện tối.
 - `dashboard-periods`: đổi Hôm nay/7/30 ngày khi API chậm, bấm liên tục, phản hồi về trễ, cache 60 giây, khung không co giật, đồng bộ lỗi và phản hồi sai kỳ.
-- `dock-themes`: 16 lần đổi sáng/tối ở 320/390/430/520px; kiểm tra material theo đúng theme, độ mờ, viền, backdrop, tab hiện tại, bản nháp chat và theme lưu sau reload. Chụp cả phần hiệu suất và thanh điều hướng. API bị chặn hoàn toàn bằng fixture, không cần 8123.
+- `dock-themes`: 16 lần đổi sáng/tối ở 320/390/430/520px; kiểm tra material, viền, backdrop, vùng chạm 44px, logo nhô lên, thanh chọn khi bấm nhanh, bản nháp chat và bàn phím. Kiểm tra thêm thẻ sản phẩm/đơn dài và nút cuối tab Shop với màn hình cao 640px ở cả hai theme. API bị chặn hoàn toàn bằng fixture, không cần 8123.
 - `management-editing`: chọn ngày, chuyển nhanh trước/sau, phản hồi muộn, lỗi ngày và phục hồi; lịch ở 320/390/520px; form sửa tên/mô tả/giá/tồn, nhập tiền có phân cách, tồn 0, review, retry cùng UUID sau khi server đã lưu, bỏ thay đổi và 409. Xác minh `/qa/identity` trước khi chạy và chỉ ghi shop tạm tại 8123. Chạy **sau app-audit**; chạy lại cần khởi động lại đúng server QA để có dữ liệu gốc.
 - `order-tracking`: thao tác đơn QA #10 ngay trong app, review trước khi ghi, chọn hãng, vận đơn, sao chép mã, timeline, cập nhật trạng thái từ phiên khác, giữ bản đang nhập và xử lý 409; không mở tab web. Có ảnh 320/390/520px, dark và reduced motion. Cần API QA sạch; có thể chạy sau `order-editor` (bài đó dùng đơn #5), nhưng không chạy hai bài đồng thời.
 - `order-chat`: tra đơn #3 từ chat, mở chi tiết ngay trong app, hỏi tiếp bằng câu ngắn; đơn đã giao cũ có trạng thái khớp lịch sử mà không dựng giờ giao. Kiểm tra 320/390/520px và không có lệnh ghi hay popup.
@@ -65,7 +66,11 @@ Nếu Playwright không nằm trong dependency cục bộ, đặt `PLAYWRIGHT_MO
 - `chat-scroll`: hiệu ứng ba chấm đang gõ, câu trả lời dài tự cuộn, giữ vị trí khi đang đọc tin cũ, nút về cuối và composer co giãn.
 - `chat-history`: vuốt trái thực tế, ghim/bỏ ghim, lưu qua reload, hủy/xác nhận xóa hội thoại đang mở và vùng chạm ở 320px.
 - `dashboard-live`: số đơn/doanh thu tự cập nhật, khung giữ nguyên, tạm ngừng khi rời Quản lý, cập nhật ngay khi quay lại và phục hồi sau lỗi kết nối.
-- `chat-motion`: chuyển tab/mở đóng lịch sử liên tục, giữ bản nháp, input 55 dòng giữ con trỏ ở dòng cuối và tùy chọn Giảm chuyển động.
+- `chat-motion`: chuyển tab hiện nội dung đầy đủ ngay, không fade/trượt cả trang; chỉ một tab tương tác, giữ vị trí cuộn sản phẩm, không tải lại danh mục vừa xem và vẫn làm mới sau đồng bộ thủ công. Kiểm tra bản nháp, mở/đóng lịch sử, input 55 dòng và Giảm chuyển động. Chặn toàn bộ API bằng fixture; không cần 8123.
+- `chat-reports`: gọi API QA thật để đối chiếu biểu đồ với facts, chạm chọn mốc,
+  mở/thu bảng, tồn kho và kỳ không phát sinh. Kiểm tra sáng/tối ở 320/390/520px.
+  Cần server QA 8123 và web 5174 ở trên; có thể đổi bằng `QA_APP_URL`.
+  Không dùng shop thật; thông tin đăng nhập được chặn bằng fixture.
 
 Ảnh và JSON kết quả nằm trong `docs/evaluations/`, được gitignore. Khi xong, dừng hai server QA và chạy lại `npm run build` để bỏ địa chỉ API thử khỏi bundle web.
 
@@ -127,25 +132,33 @@ khi hồi phục; kiểm tra thêm cache, phản hồi sai kỳ, dữ liệu r�
 thay snapshot khi số liệu giữ nguyên. Có thể cài bộ chạy riêng ngoài repo:
 
 ```sh
-npm install --prefix /tmp/sellerpilot-qa --no-save react@19.2.3 react-test-renderer@19.2.3
+npm install --prefix /tmp/sellerpilot-qa --no-save react@19.3.0 react-test-renderer@19.3.0
 QA_NODE_MODULES=/tmp/sellerpilot-qa/node_modules node --test frontend/tests/dashboard-state.cjs
+QA_NODE_MODULES=/tmp/sellerpilot-qa/node_modules node --test frontend/tests/navigation-state.cjs
 ```
 
 React phát cảnh báo `react-test-renderer is deprecated`; bộ chạy này chỉ phục vụ
 QA, không phải dependency của app. Hook test không mô phỏng hiệu ứng cuộn native.
 
+`navigation-state.cjs` đếm render của các tab: cập nhật dashboard không dựng lại
+hội thoại, danh sách và lớp kính không liên quan; đổi tab giữ bản nháp và không
+tạo opacity/transform trên cả trang. Kiểm tra vòng lặp ba chấm dừng ở tab ẩn,
+tuân theo Giảm chuyển động và không giữ native interaction handle.
+
 `dashboard-native.cjs` dùng cùng React renderer để kiểm tra số tiền không phụ
 thuộc native auto-fit/khung rộng 0, cùng lớp tint luôn nằm trên GlassView/BlurView
-và nhánh Giảm độ trong suốt. Đây là kiểm tra cây component, không giả lập UIKit.
+và nhánh Giảm độ trong suốt. Kiểm tra khoảng hở home indicator iPhone, giữ đủ
+inset điều hướng Android và khoảng trống nội dung dùng chung với dock 86pt.
+Đây là kiểm tra cây component/hình học, không giả lập UIKit.
 `dashboard-visibility.cjs` chặn toàn bộ API bằng fixture, đăng nhập tổng hợp,
 kiểm tra số 0/số tiền dài ở 320/390/430/520px sáng/tối, logo 192px ở Trợ lý và
 sau đăng xuất. Chạy với bundle QA tại 5174; kết quả trong `docs/evaluations/`.
 `dashboard-periods`, `dashboard-live`, `dock-themes` cũng dùng đăng nhập fixture;
 không dùng tài khoản người bán thật.
 
-`app-audit`, `chat-scroll` và `chat-motion` chuyển các yêu cầu API/ảnh qua
-`qa-server.cjs` tới server giả lập 8123, kể cả khi bundle đang chứa địa chỉ API
-phát triển. Vì vậy ba bài này không cần xuất lại bundle với địa chỉ 8123.
+`app-audit` và `chat-scroll` chuyển các yêu cầu API/ảnh qua `qa-server.cjs` tới
+server giả lập 8123, kể cả khi bundle đang chứa địa chỉ API phát triển. Hai bài
+này không cần xuất lại bundle với địa chỉ 8123. `chat-motion` dùng fixture riêng.
 
 ## Sửa và xử lý đơn ngay trong app
 
@@ -165,7 +178,7 @@ nằm tại `docs/evaluations/order-editor/` và không commit.
 ## Độ dễ đọc và bản nháp dài
 
 `node frontend/tests/readability.cjs` chặn toàn bộ API bằng fixture; không ghi shop.
-Kiểm tra nút trợ lý 72px nhô lên, đường khoét cong, bấm được phần phía trên, bốn
+Kiểm tra nút trợ lý 62px nhô lên, đường khoét cong, bấm được phần phía trên, bốn
 tab đủ 44px và chữ không bị thu xuống 10px; ảnh bấm đổi, tên/giá/tồn dài,
 đọc toàn bộ mô tả và tải lịch sử đến muộn sau khi chuyển sang hội thoại mới.
 Kiểm tra ở 320/390/430/520px; ảnh và JSON lưu tại `docs/evaluations/readability/`.

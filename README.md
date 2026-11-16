@@ -14,6 +14,85 @@ tab hoặc thử lại đồng bộ lỗi; đồng bộ chạy lúc liên kết 
 Bộ đọc còn phụ thuộc bố cục/phân trang Shopee, chưa đạt đủ
 nghiệp vụ app hoặc xác minh lưu/đăng trên Shopee thật.
 
+## Chuyển sang shop Shopee thật trên app
+
+Mục tiêu triển khai được chốt ngày **10/11/2026**: người bán dùng SellerPilot
+như một hệ thống quản lý shop thật, cấp quyền một lần rồi xem dữ liệu, phân tích
+bằng AI và duyệt đăng sản phẩm ngay trong app. Extension và việc mở Seller Centre
+trong WebView không đáp ứng đầy đủ mục tiêu này. **Phần tích hợp bên dưới là
+thiết kế chuyển đổi, chưa có connector Shopee production trong mã hiện tại.**
+
+BigSeller xác nhận kết nối Shopee qua API chính thức; họ có cả hướng dẫn kết nối
+shop thông thường trên app. Không đồng nhất điều kiện của shop được kết nối với
+điều kiện xét duyệt ứng dụng tích hợp. Chưa kiểm chứng được quy định hiện hành
+cho hồ sơ SellerPilot vì cổng tài liệu Shopee trả 403 trong lần tra cứu này.
+[Hướng dẫn kết nối BigSeller](https://help.bigseller.com/vi/detailPage/how-to-connect-a-shopee-store.393),
+[kết nối shop thông thường trên app](https://help.bigseller.com/vi/detailPage/how-to-connect-regular-shopee-shop-on-bigseller-app.4624).
+
+Hai đường triển khai cần quyền truy cập thực tế:
+
+| Phương án | Điều kiện cần | Giới hạn cần xác minh |
+| --- | --- | --- |
+| SellerPilot tích hợp trực tiếp Shopee Open Platform | Ứng dụng được Shopee chấp thuận cho môi trường thật, thông tin ứng dụng và shop ủy quyền | Các nhóm quyền sản phẩm, đơn, tồn, vận chuyển, thanh toán; thời gian lịch sử có thể đọc |
+| SellerPilot tích hợp qua BigSeller | Tài khoản BigSeller đã liên kết shop, dịch vụ API được duyệt và tài liệu riêng | Chi phí; quyền đăng sản phẩm/sửa giá/tồn và từng thao tác đơn phải được BigSeller xác nhận, không suy từ tính năng trên giao diện |
+
+BigSeller cung cấp API **trả phí**, tài liệu riêng sau khi duyệt; không phải một
+API miễn phí có thể sử dụng chỉ bằng tài khoản đăng nhập. MCP của họ hiện mô tả
+truy vấn dữ liệu, không phải bằng chứng hỗ trợ đăng bán.
+[API BigSeller](https://www.bigseller.com/blog/articleDetails/does-bigseller-support-api-integration.4689.htm),
+[MCP BigSeller](https://help.bigseller.com/vi/detailPage/h%C6%B0%E1%BB%9Bng-d%E1%BA%ABn-s%E1%BB%AD-d%E1%BB%A5ng-bigseller-mcp.9409).
+
+Thiết kế đề xuất cho tích hợp trực tiếp:
+
+```mermaid
+flowchart LR
+    App[SellerPilot trên iPhone / Android] --> API[Backend SellerPilot]
+    App --> Auth[Trang Shopee cấp quyền]
+    Auth --> Callback[Callback xác minh phiên cấp quyền]
+    Callback --> Tokens[Kho token mã hóa theo tài khoản và shop]
+    API --> Queue[Hàng đợi đồng bộ và thao tác đã duyệt]
+    Queue --> Connector[Connector Shopee được cấp quyền]
+    Tokens --> Connector
+    Connector <--> Shopee[Shopee Open Platform]
+    Connector --> Mirror[Kho dữ liệu theo shop và nguồn]
+    Mirror --> API
+    API --> Reports[Thống kê và công cụ dữ liệu cho AI]
+```
+
+Các điểm cần thay trong repo, theo thứ tự triển khai:
+
+1. Tách tài khoản SellerPilot khỏi xác thực shop nội bộ. Hiện
+   `backend/app/services/auth.py` kiểm tra người dùng qua database UTE MALL;
+   phiên app phải gắn quyền truy cập shop thật do người dùng đã ủy quyền.
+2. Thay `get_shop()` và repository toàn cục bằng kết nối theo người dùng/shop
+   đang chọn. Định danh dữ liệu bằng nguồn + shop + ID từ nền tảng; cache, hội
+   thoại, ảnh và bản nháp cũng phải theo cùng phạm vi. Không đổi một biến URL
+   rồi dùng database nội bộ làm dữ liệu Shopee.
+3. Xây luồng cấp quyền, xác minh callback dùng một lần, đổi/làm mới token và thu
+   hồi liên kết. Khóa ứng dụng/token chỉ lưu phía backend; không gửi mật khẩu
+   Shopee cho AI hay đặt khóa bí mật trong bundle Expo.
+4. Đồng bộ sản phẩm, biến thể, tồn và đơn theo phân trang; lưu mốc cập nhật riêng
+   từng loại. Hàng đợi chạy trên server khi app đóng, chống trùng và đối soát sau
+   lỗi; chỉ bật webhook theo contract được cấp. Báo cáo ghi phạm vi lịch sử và
+   thời điểm cập nhật, thiếu dữ liệu không tự điền 0.
+5. Giữ giao diện native năm tab; chuyển các truy vấn và công cụ AI sang kho dữ
+   liệu shop thật. Không cộng doanh thu/đơn/tồn của hai nguồn với nhau. Trạng thái
+   đơn và tiền thu/phí phải ánh xạ từ dữ liệu thực tế, không áp quy tắc local.
+6. Tách bản nháp AI khỏi bước đăng thật. Connector xử lý ảnh, ngành hàng, thuộc
+   tính, biến thể và vận chuyển theo yêu cầu Shopee. Sau khi người bán duyệt,
+   gửi tác vụ, lưu ID nền tảng và đọc lại kết quả; mất phản hồi phải đối soát
+   trước khi gửi lại để tránh đăng trùng. Đã tiếp nhận chưa đồng nghĩa đang bán.
+
+Nghiệm thu trước khi thay nguồn mặc định: cấp/thu hồi quyền, hai shop và đổi tài
+khoản, token hết hạn, phân trang đầy đủ, SKU/biến thể trùng tên, đơn hủy/hoàn,
+đối chiếu kỳ thống kê theo giờ Việt Nam, mất mạng sau ghi, đăng trùng và trạng
+thái chờ duyệt/từ chối. Phạm vi “đầy đủ” phải dựa trên API được cấp, không cam
+kết mọi thông tin hoặc lịch sử vô hạn.
+
+Điểm đang thiếu để chạy shop thật: **quyền tích hợp production và tài liệu/API
+credentials tương ứng**. Tài khoản người bán hiện có chưa đủ để kiểm thử các
+nghiệp vụ này. Chưa chuyển nguồn mặc định hay chạy thao tác ghi lên Shopee.
+
 ## Sản phẩm
 
 | Thành phần | Công nghệ | Vai trò |
@@ -56,19 +135,48 @@ bán chạy lũy kế vẫn là thông tin toàn shop, không phải lịch sử
 
 Khi đang xem **Quản lý**, app kiểm tra số liệu mới mỗi 5 giây và cập nhật tại chỗ. Việc kiểm tra tạm dừng khi app chạy nền hoặc chuyển tab; quay về Quản lý sẽ lấy lại dữ liệu. Mất kết nối giữ số liệu đã lấy gần nhất và báo chưa đồng bộ.
 
+Chuyển tab hiển thị nội dung ngay, không làm mờ/trượt cả trang hoặc chạy spring
+trên từng nút; chỉ thanh chọn di chuyển trong 140ms, tắt khi bật Giảm chuyển động.
+Các tab giữ bản nháp và vị trí cuộn. Danh mục sản phẩm vừa tải được giữ tối đa
+30 giây trong phiên; thêm/sửa sản phẩm qua app hoặc chat và đồng bộ thủ công sẽ
+buộc tải lại. Dashboard vẫn đọc dữ liệu mới ở nền khi quay lại, không bật hiệu
+ứng kéo làm mới. Vòng lặp ba chấm tạm dừng khi rời Trợ lý; yêu cầu AI tiếp tục.
+
 Ví dụ, chọn ảnh rồi nhắn: `Mình bán bàn phím Nova K75 màu trắng, giá vốn 500k, bán 990k, kho còn 20 cái. Đăng giúp mình.` AI chuẩn bị bản nháp để duyệt. Nhắn tiếp `Để 850 nghìn thôi, còn 12 chiếc nhé` sẽ sửa bản nháp hiện tại. Sản phẩm chỉ được đăng sau khi chủ shop xác nhận; giá/tồn không được tự đoán từ ảnh.
 
 ## Yêu cầu môi trường
 
-- **Node.js 22.13 trở lên**, npm đi kèm Node.
+- **Node.js 22 LTS từ 22.13**, hoặc 24 từ 24.3 / 26 trở lên; npm đi kèm Node. Repo có `.nvmrc` cho Node 22.
 - **Python 3.11**; nên dùng bản từ python.org hoặc Homebrew thay Python hệ thống macOS.
 - Git.
-- iPhone cài Expo Go tương thích Expo SDK 57; hoặc Xcode + iOS Simulator trên macOS. Android và web cũng dùng được để phát triển.
+- iPhone cài Expo Go tương thích **Expo SDK 58**; hoặc Xcode + iOS Simulator trên macOS. Android và web cũng dùng được để phát triển.
 - Gemini API key cho cấu hình mặc định; CLI/OpenCode/Ollama chỉ cần khi chọn provider tương ứng.
 
 Cài công cụ từ nguồn chính thức: [Node.js](https://nodejs.org/), [Python](https://www.python.org/downloads/), [Expo Go](https://expo.dev/go), [Antigravity CLI](https://www.antigravity.google/docs/cli/install/), [OpenCode](https://opencode.ai/docs/), [Ollama](https://ollama.com/download).
 
 > Backend API và UTE MALL dùng **hai virtualenv riêng**. Không dùng lẫn vì phiên bản dependency khác nhau. Mỗi lệnh bên dưới ghi rõ thư mục chạy.
+
+### Cập nhật từ SDK 57 lên SDK 58
+
+Từ thư mục gốc repo, dùng Node phù hợp rồi cài đúng lockfile:
+
+```sh
+nvm use
+npm ci
+npm exec --workspace frontend -- expo install --check
+npm run demo
+```
+
+`nvm use` chỉ cần khi đã cài nvm; nếu dùng Homebrew/Node installer, kiểm tra
+`node --version` là Node 22.13+ trước khi chạy. Sau khi dừng terminal demo cũ,
+`npm run demo` khởi động Expo với cache mới. Đóng màn báo SDK 57 trong Expo Go,
+quét lại QR của terminal mới; Reload một bundle cũ không đổi SDK máy chủ.
+
+Phiên bản hiện tại: Expo 58, React 19.3, React Native 0.88. Native refs đã chuyển
+sang strict API; splash dùng plugin `expo-splash-screen`. Nếu đã cài development
+build thì cần build lại native sau khi đổi SDK. Face ID cần native build phù hợp,
+không được kiểm chứng chỉ bằng Expo Go.
+[Hướng dẫn nâng SDK của Expo](https://docs.expo.dev/workflow/upgrading-expo-sdk-walkthrough/).
 
 ### Chuẩn bị trên Ubuntu
 

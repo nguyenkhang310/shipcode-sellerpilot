@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Animated, Easing, KeyboardAvoidingView, Platform, Pressable, ScrollView,
-  StyleSheet, Text, TextInput, useWindowDimensions, View,
+  StyleSheet, Text, TextInput, TextInputInstance, useWindowDimensions, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,7 +23,7 @@ export function LoginScreen({ locked: lockedMode, revealed = true }: { locked?: 
   const [submitted, setSubmitted] = useState(false);
   const [hideServerError, setHideServerError] = useState(false);
   const [focused, setFocused] = useState<'login' | 'password' | null>(null);
-  const passwordInput = useRef<TextInput>(null);
+  const passwordInput = useRef<TextInputInstance>(null);
   const locked = lockedMode ?? auth.phase === 'locked';
   const success = auth.phase === 'signed_in';
   const reduced = useReducedMotion();
@@ -113,7 +113,7 @@ export function LoginScreen({ locked: lockedMode, revealed = true }: { locked?: 
                     onPress={() => setHelp(value => !value)} style={({ pressed }) => [s.helpAction, pressed && s.pressed]}>
                     <Text style={s.link}>Quên mật khẩu?</Text>
                   </Pressable>
-                  {help ? <View style={s.help}><Text style={s.helpText}>Dùng tài khoản Kênh Người Bán của shop đã liên kết. Nếu quên mật khẩu, khôi phục qua Kênh Người Bán hoặc liên hệ người quản lý hệ thống.</Text></View> : null}
+                  {help ? <View style={s.help}><Text style={s.helpText}>Dùng tài khoản SellerPilot của shop nội bộ. Nếu quên mật khẩu, liên hệ người quản lý hệ thống để khôi phục. Đây chưa phải bước đăng nhập hoặc cấp quyền Shopee.</Text></View> : null}
                   <LoginSubmit label="Đăng nhập" busy={auth.busy} success={success} onPress={submit} />
                   {auth.biometric && auth.capability.available && Platform.OS !== 'web' ? (
                     <Pressable accessibilityRole="button" accessibilityLabel={'Đăng nhập bằng ' + auth.capability.label}

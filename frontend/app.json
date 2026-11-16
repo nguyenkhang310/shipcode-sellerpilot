@@ -6,20 +6,38 @@
     "orientation": "portrait",
     "icon": "./assets/shipcode-logo.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/shipcode-logo.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FFFFFF"
-    },
     "plugins": [
-      ["expo-local-authentication", {"faceIDPermission": "Cho phép SellerPilot dùng Face ID để mở khóa tài khoản của bạn."}],
-      ["expo-secure-store", {"faceIDPermission": "Cho phép SellerPilot dùng Face ID để mở khóa tài khoản của bạn.", "configureAndroidBackup": true}],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Cho phép SellerPilot dùng Face ID để mở khóa tài khoản của bạn."
+        }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Cho phép SellerPilot dùng Face ID để mở khóa tài khoản của bạn.",
+          "configureAndroidBackup": true
+        }
+      ],
       [
         "expo-image-picker",
         {
           "photosPermission": "Cho phép SellerPilot chọn ảnh sản phẩm để tạo bản nháp đăng bán.",
           "cameraPermission": false,
           "microphonePermission": false
+        }
+      ],
+      "expo-asset",
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/shipcode-logo.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF",
+          "dark": { "backgroundColor": "#FFFFFF" }
         }
       ]
     ],

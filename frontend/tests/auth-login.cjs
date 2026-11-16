@@ -32,7 +32,7 @@ let browser,page;
  await page.getByRole('alert').filter({hasText:'Nhập email hoặc tên đăng nhập của bạn.'}).waitFor();
  assert.equal(loginPosts,0);
  await page.getByRole('button',{name:'Trợ giúp đăng nhập',exact:true}).click();
- await page.getByText(/Dùng tài khoản Kênh Người Bán của shop đã liên kết/).waitFor();
+ await page.getByText(/Dùng tài khoản SellerPilot của shop nội bộ/).waitFor();
  await page.getByRole('button',{name:'Trợ giúp đăng nhập',exact:true}).click();
  await name.fill('qa-seller');await password.fill('wrong');
  await page.getByRole('button',{name:'Hiện mật khẩu',exact:true}).click();assert.equal(await password.evaluate(field=>field.type),'text');
