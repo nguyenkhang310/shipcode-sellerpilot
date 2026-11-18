@@ -60,3 +60,38 @@ test('dock and chart gradient values survive the native SVG parser without warni
   assert.deepEqual(nativeOffsets(offsets), [...offsets].sort((a, b) => a - b));
   assert.deepEqual(warnings, []);
 });
+
+test('animated logo paths strip the native collapsable flag on web and preserve native SVG props', () => {
+  const {renderToStaticMarkup} = require('react-dom/server');
+  const filename = path.join(__dirname, '../src/features/auth/BrandIntro.tsx');
+  const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
+  }).outputText;
+  for (const platform of ['web', 'ios', 'android']) {
+    const paths = [], fragment = ({children}) => React.createElement(React.Fragment, null, children);
+    const Path = React.forwardRef((props, _ref) => { paths.push(props); return null; });
+    class Value { interpolate() { return 25; } }
+    const Animated = { Value, View: fragment, Text: fragment, Image: () => null,
+      createAnimatedComponent: Component => props => React.createElement(Component, { ...props, collapsable: false }),
+    };
+    const modules = {
+      react: React, 'react/jsx-runtime': require('react/jsx-runtime'),
+      'react-native': { Animated, Easing: {}, Platform: { OS: platform }, StyleSheet: { absoluteFill: {}, create: value => value } },
+      'react-native-svg': { __esModule: true, default: fragment, Line: () => null, Path },
+      '../../components/layout/useReducedMotion': { useReducedMotion: () => false },
+      './shipcodeTraces': { SHIPCODE_TRACES: [{ d: 'M0 0L20 20', length: 30, part: 'ship' }, { d: 'M0 0L30 30', length: 40, part: 'code' }] },
+      '../../components/ui/brandAssets': { SHIPCODE_INTRO: 1 },
+    };
+    const module = { exports: {} };
+    vm.runInNewContext('(function(require,module,exports){' + code + '\n})')(
+      name => { if (!(name in modules)) throw Error('Unexpected import: ' + name); return modules[name]; }, module, module.exports);
+    renderToStaticMarkup(React.createElement(module.exports.BrandIntro, { ready: true, onComplete() {} }));
+    assert.equal(paths.length, 2);
+    assert.equal(paths[0].d, 'M0 0L20 20'); assert.equal(paths[1].d, 'M0 0L30 30');
+    assert.equal(paths[0].strokeDashoffset, 25); assert.deepEqual(Array.from(paths[0].strokeDasharray), [30, 30]);
+    for (const props of paths) {
+      if (platform === 'web') assert.equal('collapsable' in props, false, 'A native layout flag cannot reach the DOM path');
+      else assert.equal(props.collapsable, false, 'Native Animated keeps its original layout handling');
+    }
+  }
+});

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Pressable, Text, View, ViewInstance } from 'react-native';
+import { Platform, Pressable, Text, View, ViewInstance } from 'react-native';
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 import { ReportChart as Chart, ReportUnit } from '../../api/types';
 import { count, money } from '../dashboard/formatters';
@@ -72,7 +72,8 @@ export function ReportChart({ chart }: { chart: Chart }) {
             setSelected(Math.max(0, Math.min(points.length - 1, Math.round(((x - left) / width * 320 - 50) / 254 * (points.length - 1)))));
           });
         }}>
-        <Svg width="100%" height={166} viewBox="0 0 320 166" accessible={false}>
+        <Svg width="100%" height={166} viewBox="0 0 320 166"
+          {...(Platform.OS === 'web' ? { 'aria-hidden': true as const, focusable: false } : { accessible: false })}>
           {[0, 0.5, 1].map(part => <Line key={part} x1={50} x2={304} y1={124 - part * 100} y2={124 - part * 100} stroke={IOS.separator} strokeDasharray="3 5" />)}
           {[0, 1].map(part => <SvgText key={part} x={0} y={128 - part * 100} fontSize={11} fill={IOS.secondary}>{axisValue(max === 1 && !points.some(p => p.value) ? 0 : max * part)}</SvgText>)}
           {positions.length > 1 ? <Path d={path + ' L304,124 L50,124 Z'} fill={BRAND.orange} fillOpacity={0.08} /> : null}

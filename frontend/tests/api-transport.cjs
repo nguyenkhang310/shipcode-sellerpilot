@@ -36,6 +36,9 @@ test('explicit API address wins over Metro; LAN, IPv6 and tunnel fallbacks are p
   assert.equal(resolveApiUrls({...base, metroHost: '[::1]:8081'}).api, 'http://[::1]:8000/api/v1');
   assert.equal(resolveApiUrls({...base, metroHost: 'abcd.exp.direct:8081'}).api, 'http://127.0.0.1:8000/api/v1');
   assert.equal(resolveApiUrls({...base, nativeDevelopment: false, android: true}).api, 'http://10.0.2.2:8000/api/v1');
+  assert.equal(resolveApiUrls({...base, nativeDevelopment: false, webHost: '172.16.30.187'}).api, 'http://172.16.30.187:8000/api/v1');
+  assert.equal(resolveApiUrls({...base, nativeDevelopment: false, webHost: '[::1]'}).api, 'http://[::1]:8000/api/v1');
+  assert.equal(resolveApiUrls({...base, webHost: '192.168.1.5', configuredApi: 'https://api.example.test/api/v1'}).api, 'https://api.example.test/api/v1');
 });
 
 test('retry after lost response retrieves saved answer without another POST', async () => {

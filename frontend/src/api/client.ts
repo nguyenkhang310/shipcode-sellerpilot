@@ -11,6 +11,7 @@ const urls = resolveApiUrls({
   metroHost: Constants.expoConfig?.hostUri ?? Constants.expoGoConfig?.debuggerHost,
   nativeDevelopment: __DEV__ && Platform.OS !== 'web',
   android: Platform.OS === 'android',
+  webHost: Platform.OS === 'web' && typeof location !== 'undefined' ? location.hostname : undefined,
 });
 export const API_URL = urls.api;
 export const API_ORIGIN = urls.origin;

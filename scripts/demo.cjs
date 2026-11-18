@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // One terminal owns the three demo services. No installs, DB seeding or forced port kills.
 const {spawn, spawnSync} = require('node:child_process');
-const {existsSync} = require('node:fs');
+const {existsSync, readFileSync, realpathSync} = require('node:fs');
+const {createRequire} = require('node:module');
 const path = require('node:path');
 const net = require('node:net');
 const os = require('node:os');
@@ -11,6 +12,32 @@ const windows = process.platform === 'win32';
 const python = folder => path.join(root, folder, '.venv', windows ? 'Scripts/python.exe' : 'bin/python');
 const children = new Set();
 let stopping = false;
+
+function checkFrontend(directory = root) {
+  directory = realpathSync(directory);
+  const frontendFile = path.join(directory, 'frontend/package.json');
+  const frontend = JSON.parse(readFileSync(frontendFile, 'utf8'));
+  const lock = JSON.parse(readFileSync(path.join(directory, 'package-lock.json'), 'utf8'));
+  const resolve = createRequire(frontendFile);
+  for (const name of Object.keys(frontend.dependencies)) {
+    if (lock.packages?.frontend?.dependencies?.[name] !== frontend.dependencies[name])
+      throw new Error(`package.json và package-lock.json không cùng bản (${name}). Cập nhật nhánh main rồi chạy npm ci.`);
+    let file;
+    try { file = resolve.resolve(name + '/package.json'); }
+    catch { throw new Error(`Thiếu thư viện ${name}. Chạy npm ci ở thư mục gốc repo.`); }
+    const installed = JSON.parse(readFileSync(file, 'utf8')).version;
+    const key = path.relative(directory, path.dirname(file)).split(path.sep).join('/');
+    const expected = lock.packages?.[key]?.version;
+    if (!expected || installed !== expected)
+      throw new Error(`Thư viện ${name} đang là ${installed}, không khớp package-lock.json (${expected || 'không có'}). Chạy npm ci ở thư mục gốc repo, dừng Expo cũ rồi quét lại QR.`);
+  }
+  const expoFile = resolve.resolve('expo/package.json');
+  const version = JSON.parse(readFileSync(expoFile, 'utf8')).version;
+  const app = JSON.parse(readFileSync(path.join(directory, 'frontend/app.json'), 'utf8')).expo;
+  if (app.sdkVersion && app.sdkVersion.split('.')[0] !== version.split('.')[0])
+    throw new Error('sdkVersion trong app.json không khớp Expo đang cài. Cập nhật nhánh main và chạy npm ci.');
+  return {version, cli: path.join(path.dirname(expoFile), 'bin/cli')};
+}
 
 function lanAddress() {
   const interfaces = Object.entries(os.networkInterfaces());
@@ -92,7 +119,9 @@ async function main() {
   const [major, minor] = process.versions.node.split('.').map(Number);
   if (!(major === 22 && minor >= 13 || major === 24 && minor >= 3 || major >= 26))
     throw new Error('Expo SDK 58 cần Node.js 22.13+ (22 LTS), 24.3+ hoặc 26+. Nếu dùng nvm, chạy nvm use ở thư mục gốc repo.');
-  const expo = path.join(root, 'node_modules/expo/bin/cli');
+  const frontend = checkFrontend();
+  const expo = frontend.cli;
+  console.log(`Expo SDK ${frontend.version} · Node ${process.versions.node}`);
   for (const file of [python('backend'), python('UTE MALL'), expo]) {
     if (!existsSync(file)) throw new Error(`Thiếu ${path.relative(root, file)}. Cài môi trường theo README trước.`);
   }
@@ -106,6 +135,10 @@ async function main() {
     check.on('error', reject);
     check.on('exit', code => code === 0 ? resolve() : reject(new Error('Chưa khởi động vì nguồn dữ liệu app và Kênh Người Bán không khớp.')));
   });
+  const migration = spawnSync(python('backend'), ['-m', 'app.scripts.migrate', '--check'], {
+    cwd: path.join(root, 'backend'), env: process.env, stdio: 'inherit',
+  });
+  if (migration.status !== 0) throw new Error('Migration chưa sẵn sàng. Làm theo hướng dẫn phía trên rồi chạy lại npm run demo.');
   // An external STORE_DATABASE_PATH is supported; the store/API startup validates it.
   for (const port of [5011, 8000, 8081]) await portAvailable(port);
   if (process.argv.includes('--check')) { console.log('Môi trường và cổng 5011/8000/8081 sẵn sàng.'); return; }
@@ -115,7 +148,7 @@ async function main() {
   const backend = path.join(root, 'backend');
   // Run migrations before API startup, just like backend/run_api.sh.
   await new Promise((resolve, reject) => {
-    const child = spawn(python('backend'), ['-m', 'alembic', 'upgrade', 'head'], {cwd: backend, env, stdio: 'inherit'});
+    const child = spawn(python('backend'), ['-m', 'app.scripts.migrate'], {cwd: backend, env, stdio: 'inherit'});
     children.add(child);
     child.on('error', reject);
     child.on('exit', code => { children.delete(child); code === 0 ? resolve() : reject(new Error('Migration chưa thành công.')); });
@@ -134,8 +167,9 @@ async function main() {
   await ready('http://127.0.0.1:8081/status');
   console.log(`\nSẵn sàng · Shopee Demo http://localhost:5011 · API http://localhost:8000/docs`);
   console.log(`iPhone cùng Wi-Fi: exp://${address}:8081`);
+  console.log('Web SellerPilot: http://localhost:8081 · Dùng Expo Go hỗ trợ SDK 58 và quét QR mới của terminal này.');
   console.log('Quét QR Expo ở trên. Ctrl+C một lần để dừng cả ba dịch vụ.\n');
 }
 
 if (require.main === module) main().catch(error => { if (!stopping) { console.error('\n' + error.message); process.exitCode = 1; stop(); } });
-module.exports = {lanAddress, portAvailable};
+module.exports = {lanAddress, portAvailable, checkFrontend};

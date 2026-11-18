@@ -161,16 +161,45 @@ Cài công cụ từ nguồn chính thức: [Node.js](https://nodejs.org/), [Pyt
 Từ thư mục gốc repo, dùng Node phù hợp rồi cài đúng lockfile:
 
 ```sh
+git fetch origin
+git switch main
+git pull --ff-only origin main
 nvm use
 npm ci
 npm exec --workspace frontend -- expo install --check
+npm run doctor
 npm run demo
 ```
+
+Nếu terminal đang ở nhánh `checkpoint-before-pull` hoặc nhánh cũ, cần chuyển
+sang `main` trước. Git sẽ dừng nếu còn thay đổi xung đột; lưu công việc đó vào
+nhánh riêng trước khi chuyển, không dùng `reset --hard` để bỏ qua. Chỉ `git pull`
+trên nhánh cũ không bảo đảm mã nguồn và database đang cùng phiên bản.
+
+`npm run doctor` kiểm tra dependency thực tế với lockfile, môi trường Python,
+nguồn shop, lịch sử migration và cổng, không ghi vào database. Lần đầu clone
+vẫn cần hoàn thành bước 2–3 bên dưới trước khi chạy doctor/demo.
+
+Lỗi `Can't locate revision identified by '20261021_12'` nghĩa là database đã
+ghi nhận revision xác thực nhưng checkout đang dùng thiếu file migration tương
+ứng. File chuẩn nằm ở `backend/alembic/versions/20261021_12_seller_auth.py` trên
+`main`. Cập nhật **toàn bộ repo**, giữ nguyên `.env` và database; không xóa DB,
+không chạy `alembic stamp head`, không sửa tay bảng `alembic_version`. Launcher
+mới kiểm tra trường hợp này và dừng với hướng dẫn trước khi nâng schema.
 
 `nvm use` chỉ cần khi đã cài nvm; nếu dùng Homebrew/Node installer, kiểm tra
 `node --version` là Node 22.13+ trước khi chạy. Sau khi dừng terminal demo cũ,
 `npm run demo` khởi động Expo với cache mới. Đóng màn báo SDK 57 trong Expo Go,
 quét lại QR của terminal mới; Reload một bundle cũ không đổi SDK máy chủ.
+Launcher in phiên bản Expo thực tế và từ chối chạy nếu `node_modules` còn SDK cũ
+hoặc không khớp lockfile. Dùng Expo Go hỗ trợ SDK 58; development build có native
+SDK khác cần build lại. Không chạy thêm một Metro cũ ở terminal khác.
+
+Web SellerPilot mở tại **http://localhost:8081** khi chạy `npm run demo`;
+`npm run web` dùng **5173** và cần backend đang chạy. API giữ cổng **8000**.
+Trong demo, CORS cho phép localhost/IP LAN riêng ở hai cổng web trên. Không copy
+`EXPO_PUBLIC_API_URL` chứa IP Wi-Fi của thành viên khác: launcher tự chọn IP máy
+đang chạy; web không cấu hình URL riêng sẽ dùng hostname của trang hiện tại.
 
 Phiên bản hiện tại: Expo 58, React 19.3, React Native 0.88. Native refs đã chuyển
 sang strict API; splash dùng plugin `expo-splash-screen`. Nếu đã cài development

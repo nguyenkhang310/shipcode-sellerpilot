@@ -1,9 +1,10 @@
 export function resolveApiUrls(options: {
   configuredApi?: string; configuredStore?: string;
-  metroHost?: string; nativeDevelopment: boolean; android: boolean;
+  metroHost?: string; webHost?: string; nativeDevelopment: boolean; android: boolean;
 }) {
   const explicit = options.configuredApi?.trim().replace(/\/+$/, '');
   let host = options.android ? '10.0.2.2' : '127.0.0.1';
+  if (options.webHost) host = options.webHost;
   if (options.nativeDevelopment && options.metroHost) {
     try {
       const metro = new URL(/^https?:\/\//.test(options.metroHost) ? options.metroHost : `http://${options.metroHost}`);

@@ -6,7 +6,7 @@ from app.db.session import build_engine
 import app.models  # noqa: F401 - expose models to Alembic metadata
 
 target_metadata = Base.metadata
-engine = build_engine(Settings().database_url)
+engine = build_engine(context.config.attributes.get('database_url') or Settings().database_url)
 try:
     if context.is_offline_mode():
         context.configure(url=engine.url, target_metadata=target_metadata, literal_binds=True)

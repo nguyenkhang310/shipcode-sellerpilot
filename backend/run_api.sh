@@ -2,7 +2,7 @@
 set -eu
 
 cd "$(dirname "$0")"
-.venv/bin/alembic upgrade head
+.venv/bin/python -m app.scripts.migrate
 
 if [ "${SKIP_OLLAMA_WARMUP:-0}" != "1" ]; then
   if ! .venv/bin/python -u -m app.scripts.warm_model; then
