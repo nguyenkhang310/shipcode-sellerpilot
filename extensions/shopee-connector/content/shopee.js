@@ -14,7 +14,7 @@
   };
   const visible = el => Boolean(el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
   const editable = el => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el?.isContentEditable;
-  const text = el => (typeof el?.innerText === 'string' ? el.innerText : el?.textContent || '').normalize('NFC').trim().replace(/\s+/g, ' ');
+  const text = el => (el?.innerText || el?.textContent || '').normalize('NFC').trim().replace(/\s+/g, ' ');
   const label = el => {
     let lbl = el.getAttribute('aria-label') || [...(el.labels || [])].map(text).join(' ');
     if (!lbl || /^(?:nhập vào|input|0|[₫đ]|vnd)$/i.test(lbl.trim())) {
@@ -37,25 +37,16 @@
       && (el.textContent || '').trim().length <= 160 && visible(el)
       && text(el).length > 0 && text(el).length <= 80
       && ![...el.children].some(child => visible(child) && text(child) === text(el)));
-  function accountLabels() {
-    const identities = identityNodes();
-    const candidates = [...document.querySelectorAll('header [class*="user-name"],header [class*="shop-name"],header [class*="account-name"],[class*="header"] [class*="user-name"],[class*="header"] [class*="shop-name"]')]
-      .filter(el => visible(el) && identities.includes(el));
-    return [...new Set(candidates.map(text))];
-  }
   function autoDetectTarget() {
-    const labels = accountLabels();
+    const candidates = [...document.querySelectorAll('header [class*="user-name"],header [class*="shop-name"],header [class*="account-name"],[class*="header"] [class*="user-name"],[class*="header"] [class*="shop-name"]')]
+      .filter(el => visible(el) && identityNodes().includes(el));
+    const labels = [...new Set(candidates.map(text))];
     return labels.length === 1 ? labels[0] : null;
   }
   function checkTarget(target) {
     if (!target?.label || typeof target.label !== 'string') throw Error('Chọn tài khoản Shopee trước khi đọc dữ liệu hoặc điền form.');
-    const labels = accountLabels();
-    if (labels.length === 1 && labels[0] === target.label) return;
-    const matches = labels.length ? 0 : identityNodes().filter(el => text(el) === target.label).length;
-    if (matches !== 1) {
-      throw Object.assign(Error('Chưa xác minh được tài khoản trên trang này. Chờ trang tải xong hoặc kiểm tra tên shop.'),
-        {code: labels.length ? 'target_mismatch' : 'target_unverified'});
-    }
+    if (identityNodes().filter(el => text(el) === target.label).length !== 1)
+      throw Error('Không xác nhận được tài khoản đã chọn trên trang này. Kiểm tra đăng nhập rồi chọn lại tài khoản.');
   }
   function selectTarget(nonce) {
     if (typeof nonce !== 'string' || !/^[a-z0-9-]{36}$/i.test(nonce)) throw Error('Yêu cầu chọn tài khoản không hợp lệ.');
@@ -570,10 +561,9 @@
         paging.control.click(); return {navigated: true};
       }
       if (message.kind === 'target_status') {
-        let matches = false, check = 'unverified';
-        try {allowed(); checkTarget(message.target); matches = true; check = 'matched';}
-        catch (error) {if (error.code === 'target_mismatch') check = 'mismatch';}
-        return {target_matches: matches, target_check: check, document_id: documentId, page_context: pageContext()};
+        let matches = false;
+        try {allowed(); checkTarget(message.target); matches = true;} catch { /* A label is not an API identity. */ }
+        return {target_matches: matches, document_id: documentId, page_context: pageContext()};
       }
       if (message.kind === 'auto_detect_target') {
         allowed();
@@ -585,7 +575,7 @@
       if (message.kind === 'fill') return fill(message);
       if (message.kind === 'scan_required') {allowed(); checkTarget(message.target); return scanRequiredFields();}
       throw Error('Thao tác không hỗ trợ.');
-    }).then(data => reply({ok: true, data}), error => reply({ok: false, error: error.message, code: error.code}));
+    }).then(data => reply({ok: true, data}), error => reply({ok: false, error: error.message}));
     return true;
   });
   // Continuation is authorized and scoped in the worker; this page never reads

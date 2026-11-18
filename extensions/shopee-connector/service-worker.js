@@ -16,7 +16,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return true;
   }
   if (message?.kind === 'autofill_continue' && sender.id === chrome.runtime.id && sender.tab) {
-    Promise.resolve().then(() => continueFormFill(sender))
+    Promise.resolve().then(() => handleStep2Completed(message.scan))
       .then(data => reply({ok: true, data}), error => reply({ok: false, error: error.message}));
     return true;
   }
@@ -26,7 +26,6 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if (message.kind === 'connection') {const value = await state(); return {id: value.id, mode: value.mode, tab_id: value.tab_id};}
     if (message.kind === 'connection_status') return connectionStatus();
     if (message.kind === 'auto_connect') {
-      if (active.size) return null;
       const res = await autoConnectShopee();
       if (res?.id) void syncShopeeData(res.id).catch(() => {});
       return res;

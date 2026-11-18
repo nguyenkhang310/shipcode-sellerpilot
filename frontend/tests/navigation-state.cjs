@@ -87,9 +87,8 @@ test('typing loops pause in hidden tabs and never hold native list-render intera
 test('chat controls and tabs use SF Symbols on iOS, with bundled fallback glyphs on web/Android',()=>{
  const ios=compile('components/ui/NativeSymbol.ios.tsx',{'expo-symbols':{SymbolView:'Symbol'}});
  const fallback=compile('components/ui/NativeSymbol.tsx',{});
- for(const platform of ['ios','android','web']){
-  const native=platform==='ios'?ios:fallback;
-  const modules={'./NativeSymbol':native,'@expo/vector-icons':{Ionicons:'Glyph'},'react-native':{Platform:{OS:platform}},'react-native-svg':{__esModule:true,default:'Svg',Path:'Path',Rect:'Rect'}};
+ for(const native of [ios,fallback]){
+  const modules={'./NativeSymbol':native,'@expo/vector-icons':{Ionicons:'Glyph'},'react-native-svg':{__esModule:true,default:'Svg',Path:'Path',Rect:'Rect'}};
   const {SystemIcon}=compile('components/ui/SystemIcon.tsx',modules),{InterfaceIcon}=compile('components/ui/InterfaceIcon.tsx',modules);
   for(const [name,symbol] of Object.entries({'create-outline':'square.and.pencil','copy-outline':'doc.on.doc','share-outline':'square.and.arrow.up',add:'plus',stop:'stop.fill'})){
    const icon=SystemIcon({name,size:22,color:'#eee'}),result=icon.type(icon.props);
@@ -97,13 +96,7 @@ test('chat controls and tabs use SF Symbols on iOS, with bundled fallback glyphs
    else assert.equal(result.props.children.type,'Glyph');
   }
   const tab=InterfaceIcon({name:'products',color:'#123'}),result=tab.type(tab.props);
-  if(native===ios)assert.equal(result.props.name,'cube');else{
-   const svg=result.props.children;assert.equal(svg.type,'Svg');
-   if(platform==='web'){
-    assert.equal(svg.props['aria-hidden'],true);assert.equal(svg.props.focusable,false);
-    for(const prop of ['accessible','accessibilityElementsHidden','importantForAccessibility'])assert.equal(prop in svg.props,false,prop+' must not reach the web SVG');
-   }else{assert.equal(svg.props.accessible,false);assert.equal(svg.props.accessibilityElementsHidden,true);}
-  }
+  if(native===ios)assert.equal(result.props.name,'cube');else assert.equal(result.props.children.type,'Svg');
  }
 });
 

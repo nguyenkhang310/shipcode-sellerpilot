@@ -1,17 +1,10 @@
-import { forwardRef, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Platform, StyleSheet } from 'react-native';
-import Svg, { Line, Path, type PathProps } from 'react-native-svg';
+import Svg, { Line, Path } from 'react-native-svg';
 import { useReducedMotion } from '../../components/layout/useReducedMotion';
 import { SHIPCODE_TRACES } from './shipcodeTraces';
 import { SHIPCODE_INTRO } from '../../components/ui/brandAssets';
-// Animated adds a native layout flag. SVG paths on the web must receive SVG
-// props only; forwarding collapsable=false makes React log an error per path.
-const TracePath = Platform.OS === 'web'
-  ? forwardRef<Path, PathProps & { collapsable?: boolean }>(function WebTracePath({ collapsable: _collapsable, ...props }, ref) {
-    return <Path {...props} ref={ref} />;
-  })
-  : Path;
-const DrawPath = Animated.createAnimatedComponent(TracePath);
+const DrawPath = Animated.createAnimatedComponent(Path);
 
 /** One launch: trace the actual logo, reveal its colour, then open the form. */
 export function BrandIntro({ ready, onComplete }: { ready: boolean; onComplete: () => void }) {

@@ -18,16 +18,6 @@ from app.services.browser_connector import BrowserRequests
 
 logger = logging.getLogger(__name__)
 
-# Demo web runs on Expo's 8081 or the dedicated web server's 5173. DHCP may
-# change the computer's LAN address; still match only local/private hosts and
-# these frontend ports, rather than allowing every origin or an arbitrary port.
-_IP_OCTET = r'(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)'
-LOCAL_WEB_ORIGIN = (
-    rf'^https?://(?:localhost|127\.0\.0\.1|\[::1\]|10\.{_IP_OCTET}\.{_IP_OCTET}\.{_IP_OCTET}'
-    rf'|172\.(?:1[6-9]|2\d|3[01])\.{_IP_OCTET}\.{_IP_OCTET}|192\.168\.{_IP_OCTET}\.{_IP_OCTET})'
-    r':(?:5173|8081)$'
-)
-
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
@@ -66,7 +56,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_origin_regex=LOCAL_WEB_ORIGIN if settings.demo_mode else None,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "Authorization"],

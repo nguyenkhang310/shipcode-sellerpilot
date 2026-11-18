@@ -28,9 +28,8 @@ export async function connectionStatus() {
   const tab = await chrome.tabs.get(connection.tab_id).catch(() => null);
   if (tab && isSellerUrl(tab.url)) result.platform = TIKTOK_SOURCES.includes(new URL(tab.url).origin) ? 'tiktok' : 'shopee';
   if (tab && isSellerUrl(tab.url) && connection.target) {
-    if (tab.status === 'loading') return {...result, tab_status: 'linked', target_matches: false, target_check: 'checking'};
     try {return {...result, tab_status: 'linked', ...await pageMessage(connection, {kind: 'target_status'})};}
-    catch {return {...result, tab_status: 'linked', target_matches: false, target_check: 'checking'};}
+    catch {return {...result, tab_status: 'linked', target_matches: false};}
   }
   return {...result, tab_status: !tab ? 'closed' : isSellerUrl(tab.url) ? 'linked' : 'wrong_tab'};
 }
@@ -43,31 +42,20 @@ export async function boundTab(connection) {
 export const contentScriptForUrl = url => (url && String(url).includes('tiktok.com')) ? 'content/tiktok.js' : 'content/shopee.js';
 export async function autoConnectShopee() {
   const current = await state();
-  if (current.mode !== 'shopee' || current.target_selection?.expires > Date.now()) return null;
-  // Chrome tab IDs do not survive closing/reopening a tab. Reattach only the
-  // same verified account; keep its history, drafts and cache in the same scope.
-  if (current.target && current.tab_id) {
-    const bound = await chrome.tabs.get(current.tab_id).catch(() => null);
-    if (bound && isSellerUrl(bound.url)) return null;
-  }
+  if (current.mode !== 'shopee' || current.target) return null;
   const tabs = await chrome.tabs.query({active: true, lastFocusedWindow: true});
   const candidates = tabs.filter(tab => isSellerUrl(tab.url));
   if (candidates.length !== 1) return null;
   const tab = candidates[0];
-  // A coincidentally identical label on TikTok is not the old Shopee shop.
-  if (current.target && new URL(tab.url).origin !== (current.target.origin || SOURCE)) return null;
   await chrome.scripting.executeScript({target: {tabId: tab.id}, files: [contentScriptForUrl(tab.url)]});
   const result = await chrome.tabs.sendMessage(tab.id, {kind: 'auto_detect_target'});
   if (!result?.ok || !result.data?.label) return null;
   const label = result.data.label;
-  if (typeof label !== 'string' || !label.trim() || label.length > 80 || /[\r\n\x00-\x1f]/.test(label)) return null;
-  if (current.target && current.target.label !== label) return null;
   await pageMessage({...current, tab_id: tab.id, target: {label}}, {kind: 'read'});
   return mutate(value => {
-    if (value.id !== current.id || value.tab_id !== current.tab_id || value.target?.label !== current.target?.label
-      || value.target_selection?.expires > Date.now()) return null;
+    if (value.id !== current.id || value.target) throw Error('Kết nối đã đổi. Thử lại.');
     value.tab_id = tab.id;
-    value.target = {label, origin: new URL(tab.url).origin, verification: 'browser_label', selected_at: new Date().toISOString()};
+    value.target = {label, verification: 'browser_label', selected_at: new Date().toISOString()};
     return {id: value.id, target: value.target, tab_id: tab.id};
   });
 }
@@ -77,7 +65,7 @@ export async function pageMessage(connection, message) {
     throw Error('Chọn tài khoản Shop để bắt đầu. Mở Kết nối → Chọn tài khoản trên trang.');
   await chrome.scripting.executeScript({target: {tabId: tab.id}, files: [contentScriptForUrl(tab.url)]});
   const result = await chrome.tabs.sendMessage(tab.id, {...message, target: connection.target || null});
-  if (!result?.ok) throw Object.assign(Error(result?.error || 'Chưa đọc được trang Kênh Người Bán.'), {code: result?.code});
+  if (!result?.ok) throw Error(result?.error || 'Chưa đọc được trang Kênh Người Bán.');
   return result.data;
 }
 export async function selectTarget() {
@@ -103,7 +91,7 @@ export async function completeTarget(message, sender) {
     // Recheck the selected label in the live document before changing scopes.
     const page = await pageMessage({...value, target: {label}}, {kind: 'read'});
     if (page.document_id !== message.document_id) throw Error('Trang đã đổi. Chọn lại tài khoản.');
-    if (value.target?.label !== label || value.target && (value.target.origin || SOURCE) !== new URL(sender.url).origin) {
+    if (value.target?.label !== label) {
       if (Object.keys(value.conversations).length) {
         const archived = structuredClone(value); delete archived.target_selection;
         await chrome.storage.local.set({['scope:' + value.id]: archived});
@@ -111,7 +99,7 @@ export async function completeTarget(message, sender) {
       value.id = crypto.randomUUID(); value.conversations = {}; value.drafts = {}; value.results = {};
       value.deleted_conversations = []; value.image_requests = {}; value.created_at = new Date().toISOString();
     }
-    value.target = {label, origin: new URL(sender.url).origin, verification: 'browser_label', selected_at: new Date().toISOString()};
+    value.target = {label, verification: 'browser_label', selected_at: new Date().toISOString()};
     delete value.target_selection;
     return {id: value.id, target: value.target};
   });

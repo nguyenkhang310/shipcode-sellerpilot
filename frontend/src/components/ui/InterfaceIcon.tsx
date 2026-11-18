@@ -1,5 +1,4 @@
 import Svg, { Path, Rect } from 'react-native-svg';
-import { Platform } from 'react-native';
 import type { SymbolViewProps } from 'expo-symbols';
 import { NativeSymbol } from './NativeSymbol';
 
@@ -23,8 +22,5 @@ export function InterfaceIcon({ name, size = 24, color }: { name: InterfaceIconN
     search: <><Path d="M16.5 16.5 21 21" /><Path d="M18.5 10.5a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></>,
     plan: <><Rect x={4} y={5.5} width={16} height={15} rx={2} /><Path d="M8 3v5M16 3v5M4 10.5h16M8 14h3M8 17h6" /></>,
   }[name];
-  const accessibility = Platform.OS === 'web'
-    ? { 'aria-hidden': true as const, focusable: false }
-    : { accessible: false, accessibilityElementsHidden: true, importantForAccessibility: 'no' as const };
-  return <NativeSymbol name={SYMBOLS[name]} size={size} color={color} fallback={<Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.65} strokeLinecap="round" strokeLinejoin="round" {...accessibility}>{drawing}</Svg>} />;
+  return <NativeSymbol name={SYMBOLS[name]} size={size} color={color} fallback={<Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.65} strokeLinecap="round" strokeLinejoin="round" accessible={false} accessibilityElementsHidden importantForAccessibility="no">{drawing}</Svg>} />;
 }

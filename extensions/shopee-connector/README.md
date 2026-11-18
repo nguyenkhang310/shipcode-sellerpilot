@@ -104,9 +104,7 @@ chủ động dừng terminal đó rồi chạy lại `npm run demo` để nạp
 1. Chrome → `chrome://extensions` → **Developer mode** → **Load unpacked**.
 2. Chọn `extensions/shopee-connector/dist`, không chọn `frontend/dist/web`.
 3. Mở `https://banhang.shopee.vn/`, tự đăng nhập Shopee.
-4. Mở SellerPilot ngay trên tab Kênh Người Bán. Khi nhận diện duy nhất tên shop
-   trên thanh đầu trang, extension tự liên kết và bắt đầu đồng bộ. Nếu không
-   nhận diện được, bấm **Liên kết**, rồi bấm **tên tài khoản/shop trên thanh đầu
+4. Mở SellerPilot → **Liên kết**, rồi bấm **tên tài khoản/shop trên thanh đầu
    trang Shopee** trong 30 giây. Esc hủy chọn. Chỉ click trực tiếp được chấp nhận.
 5. Sau khi tên xuất hiện, SellerPilot tự đọc mục Sản phẩm/Tổng quan/Đơn hàng
    trên tab đã liên kết. Không mở tab nền; mỗi nguồn có phạm vi và thời gian cập nhật riêng.
@@ -128,16 +126,6 @@ biệt tự động. Không coi cơ chế này là xác thực bảo mật của
 Khi sửa code, chạy `npm run extension:build`, bấm **Reload** trên thẻ extension
 ở `chrome://extensions`, rồi mở lại side panel. Không cần đổi API key hay dừng
 các dịch vụ hiện có chỉ để cập nhật frontend/content script.
-
-`git pull` chỉ cập nhật mã nguồn, không cập nhật thư mục `dist` mà Chrome đang
-nạp. Bản hiện tại là **0.2.4**; sau khi build, kiểm tra phiên bản trên thẻ extension
-rồi Reload. Nếu tab Shopee đã đóng hoặc chuyển sang trang khác, mở lại đúng shop
-và mở panel trên tab đó: extension có thể liên kết lại cùng tài khoản, giữ lịch
-sử và bản nháp. Tài khoản khác cần chọn lại, không tự chuyển dữ liệu giữa shop.
-Khi chuyển sang form sản phẩm, tên shop hoặc content script có thể chưa tải
-xong. Panel giữ nguyên liên kết và hiển thị trạng thái chờ xác minh; tác vụ điền
-đã duyệt được giữ tối đa 5 phút, chỉ tiếp tục khi xác minh lại đúng shop. Header
-hiện tài khoản khác thì dừng điền; không tự chọn tài khoản mới hoặc xóa lịch sử.
 
 ## Dữ liệu và giới hạn
 

@@ -5,7 +5,7 @@ import { extensionCall } from './extension';
 import { useTheme } from '../theme/ThemeProvider';
 
 export type BrowserConnection = {id: string; mode: string; platform?: 'shopee' | 'tiktok'; target?: {label: string} | null;
-  target_selection_pending?: boolean; target_matches?: boolean; target_check?: 'checking' | 'unverified' | 'matched' | 'mismatch'; document_id?: string; page_context?: string;
+  target_selection_pending?: boolean; target_matches?: boolean; document_id?: string; page_context?: string;
   tab_status: 'unlinked' | 'linked' | 'closed' | 'wrong_tab' | 'local'};
 export type BrowserPage = {document_id: string; page_context: string; snapshot: {url: string; captured_at: string};
   metrics: {label: string; value: string}[]; tables: string[][][]; fields: {label: string; type: string}[]; target: {label: string};
@@ -26,19 +26,17 @@ const SYNC_REASONS: Record<string, string> = {
 };
 
 export function ExtensionBar({onPage, onConnection}: {onPage?: (page: BrowserPage) => void; onConnection?: (value: BrowserConnection) => void}) {
-  const { ui, IOS, BRAND } = useTheme();
+  const { ui, IOS, desktop } = useTheme();
   const [connection, setConnection] = useState<BrowserConnection | null>(null);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
   const [menu, setMenu] = useState(false), [scopes, setScopes] = useState<Scope[]>([]);
-  const [details, setDetails] = useState(false);
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const platform = connection?.platform === 'tiktok' ? 'TikTok Shop' : 'Shopee';
   const linked = connection?.tab_status === 'linked';
-  const verifying = linked && ['checking', 'unverified'].includes(connection?.target_check || '');
   const matched = linked && connection?.target && connection.target_matches !== false;
   const syncError = Object.values(sync?.resources || {}).find(value => value?.error || value?.reason);
   const issue = syncError?.error || syncError?.reason;
-  const syncIssue = issue ? SYNC_REASONS[issue] || issue : 'Chưa cập nhật đủ dữ liệu.';
+  const syncIssue = issue ? SYNC_REASONS[issue] || issue : 'Chưa đọc đủ dữ liệu. Bấm Cập nhật để thử lại.';
   useEffect(() => {
     let alive = true, running = false, lastScannedContext = '';
     async function refresh() {
@@ -97,43 +95,42 @@ export function ExtensionBar({onPage, onConnection}: {onPage?: (page: BrowserPag
   });
   const local = () => void execute(async () => {await extensionCall('bind_tab', {mode: 'local'}); location.reload();});
   const status = !connection ? 'Đang kiểm tra…' : connection.mode === 'local' ? 'Shop local'
-    : !linked ? 'Chưa liên kết tài khoản' : verifying ? connection.target?.label || 'Đang xác minh shop'
-      : connection.target_matches === false ? 'Kiểm tra lại tài khoản ' + platform : connection.target?.label || 'Chọn tài khoản ' + platform;
-  return <View style={{paddingHorizontal: 14, paddingTop: 2, paddingBottom: 8, backgroundColor: IOS.card, gap: 4}}>
+    : !linked ? 'Chưa liên kết tài khoản' : connection.target_matches === false ? 'Kiểm tra lại tài khoản ' + platform : connection.target?.label || 'Chọn tài khoản ' + platform;
+  return <View style={{paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1, borderColor: IOS.separator, backgroundColor: IOS.card, gap: 5}}>
     <View style={{flexDirection: 'row', alignItems: 'center', gap: 6}}>
-      <View accessibilityLabel={matched ? 'Đã liên kết shop' : 'Chưa xác minh shop'} style={{width: 6, height: 6, borderRadius: 3, backgroundColor: matched ? IOS.green : IOS.orange, marginRight: 2}}/>
+      <Ionicons name="storefront-outline" size={16} color={IOS.secondary} />
       <Pressable accessibilityRole="button" accessibilityLabel="Cài đặt kết nối" onPress={() => {
         setMenu(true); void extensionCall<Scope[]>('list_scopes').then(setScopes).catch(() => {});
-      }} style={{flex: 1, minWidth: 0, minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 5}}>
-        <Text numberOfLines={1} style={{fontSize: 13, lineHeight: 20, fontWeight: '500', color: IOS.label, flexShrink: 1}}>{status}</Text>
+      }} style={{flex: 1, minWidth: 0, minHeight: 30, flexDirection: 'row', alignItems: 'center', gap: 5}}>
+        <Text numberOfLines={1} style={[ui.caption, {fontWeight: '600', color: IOS.label, flexShrink: 1}]}>{status}</Text>
         <Ionicons name="chevron-down" size={12} color={IOS.secondary} />
       </Pressable>
-      {busy || sync?.syncing ? <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}><ActivityIndicator size="small" color={BRAND.orangeInk}/>{sync?.syncing ? <Pressable accessibilityRole="button" accessibilityLabel="Dừng đồng bộ" onPress={() => void execute(async () => {await extensionCall('sync_cancel');})} style={{padding: 8}}><Ionicons name="stop-circle-outline" size={19} color={IOS.secondary}/></Pressable> : null}</View> : <Pressable accessibilityRole="button" disabled={!connection} onPress={verifying ? () => void execute(async () => {setConnection(await extensionCall<BrowserConnection>('connection_status'));}) : matched ? scan : choose} style={{paddingHorizontal: 10, minHeight: 34, borderRadius: 10, backgroundColor: BRAND.orangeSoft, justifyContent: 'center'}}>
-        <Text style={[ui.caption, {color: BRAND.orangeInk, fontWeight: '600'}]}>{matched ? 'Cập nhật' : verifying ? 'Kiểm tra' : 'Liên kết'}</Text>
+      {busy || sync?.syncing ? <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}><ActivityIndicator size="small"/>{sync?.syncing ? <Pressable accessibilityRole="button" accessibilityLabel="Dừng đồng bộ" onPress={() => void execute(async () => {await extensionCall('sync_cancel');})} style={{padding: 5}}><Ionicons name="stop-circle-outline" size={19} color={IOS.secondary}/></Pressable> : null}</View> : <Pressable accessibilityRole="button" disabled={!connection} onPress={matched ? scan : choose} style={{paddingHorizontal: 8, minHeight: 30, justifyContent: 'center'}}>
+        <Text style={[ui.caption, {color: IOS.blue, fontWeight: '500'}]}>{matched ? 'Cập nhật' : 'Liên kết'}</Text>
       </Pressable>}
     </View>
-    {sync?.syncing ? <Text accessibilityLiveRegion="polite" style={ui.caption}>Đang đọc {sync.resource === 'products' ? 'sản phẩm' : sync.resource === 'orders' ? 'đơn hàng' : 'tổng quan'} · {sync.records_read || 0} dòng</Text> : sync && ['failed', 'partial', 'interrupted'].includes(sync.status) ? <Text numberOfLines={2} style={ui.caption}>{syncIssue}</Text> : null}
-    {verifying ? <Text accessibilityLiveRegion="polite" style={ui.caption}>Đang xác minh shop…</Text> : null}
+    {sync?.syncing ? <Text accessibilityLiveRegion="polite" style={ui.caption}>Đang đọc {sync.resource === 'products' ? 'sản phẩm' : sync.resource === 'orders' ? 'đơn hàng' : 'tổng quan'} · {sync.pages_read || 0} trang · {sync.records_read || 0} dòng</Text> : sync && ['failed', 'partial', 'interrupted'].includes(sync.status) ? <Text numberOfLines={3} style={ui.caption}>{syncIssue}</Text> : null}
     {message ? <Text accessibilityLiveRegion="polite" style={[ui.caption, {fontSize: 12, lineHeight: 17}]}>{message}</Text> : null}
+    {!desktop && connection?.mode === 'shopee' ? <Text style={ui.caption}>Dữ liệu trang hiện tại · Chưa kết nối Open API</Text> : null}
     <Modal visible={menu} transparent animationType="fade" onRequestClose={() => setMenu(false)}>
       <View style={{flex: 1, backgroundColor: '#0005', justifyContent: 'center', padding: 16}}>
-        <ScrollView showsVerticalScrollIndicator={false} style={{maxHeight: '90%', flexGrow: 0, width: '100%', maxWidth: 420, alignSelf: 'center', backgroundColor: IOS.card, borderRadius: 22}} contentContainerStyle={{padding: 18, gap: 12}}>
-          <View style={ui.between}><View style={{flex: 1, gap: 3}}><Text style={{fontSize: 20, fontWeight: '600', letterSpacing: -.4, color: IOS.label}}>Kết nối shop</Text><Text numberOfLines={1} style={ui.caption}>{connection?.target?.label || platform}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Đóng kết nối" onPress={() => setMenu(false)} style={ui.circleButton}><Ionicons name="close" size={20} color={IOS.label}/></Pressable></View>
+        <ScrollView style={{maxHeight: '90%', flexGrow: 0, width: '100%', maxWidth: 420, alignSelf: 'center', backgroundColor: IOS.card, borderRadius: 14}} contentContainerStyle={{padding: 16, gap: 10}}>
+          <View style={ui.between}><Text style={ui.listTitle}>{'Kết nối ' + platform}</Text><Pressable accessibilityRole="button" accessibilityLabel="Đóng kết nối" onPress={() => setMenu(false)} style={ui.circleButton}><Ionicons name="close" size={20} color={IOS.label}/></Pressable></View>
+          {connection?.target ? <Text style={ui.caption}>Tài khoản đã chọn: {connection.target.label}</Text> : null}
           <Pressable accessibilityRole="button" disabled={busy} onPress={choose} style={ui.primaryButton}><Text style={ui.primaryText}>Chọn tài khoản trên trang</Text></Pressable>
-          <Pressable accessibilityRole="button" disabled={busy} onPress={() => void execute(async () => {await extensionCall('backend_health'); setMessage('Kết nối AI sẵn sàng.'); setMenu(false);})} style={ui.secondaryButton}><Text style={ui.secondaryText}>Kiểm tra kết nối AI</Text></Pressable>
-          <Text style={[ui.listTitle, {marginTop: 6}]}>Gán ô sản phẩm</Text>
+          <Text style={ui.caption}>Dùng phiên người bán bạn đã đăng nhập. Tên được chọn để kiểm tra mục tiêu, chưa phải Shop ID do API xác thực. Không đọc mật khẩu hoặc cookie.</Text>
+          <Pressable accessibilityRole="button" disabled={busy} onPress={() => void execute(async () => {await extensionCall('backend_health'); setMessage('Endpoint ghép nối AI hoạt động.'); setMenu(false);})} style={ui.secondaryButton}><Text style={ui.secondaryText}>Kiểm tra backend AI</Text></Pressable>
+          <Text style={ui.listTitle}>Gán ô trên form sản phẩm</Text>
           <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 6}}>{([['name', 'Tên sản phẩm'], ['description', 'Mô tả'], ['price_vnd', 'Giá bán'], ['stock', 'Tồn kho']] as const).map(([field, label]) =>
             <Pressable key={field} accessibilityRole="button" disabled={busy} onPress={() => void execute(async () => {
               await extensionCall('bind_field', {field}); setMenu(false); setMessage('Trong 30 giây, bấm ô ' + label.toLowerCase() + ' trên ' + platform + '.');
-            })} style={[ui.secondaryButton, {width: '48%', flexGrow: 1, minWidth: 0}]}><Text style={ui.secondaryText}>{label}</Text></Pressable>)}</View>
-          <Text style={ui.caption}>Điền form chưa phải đăng bán.</Text>
+            })} style={ui.secondaryButton}><Text style={ui.secondaryText}>{label}</Text></Pressable>)}</View>
+          <Text style={ui.caption}>Kiểm tra ảnh, ngành hàng và biến thể trên trang người bán. Điền form chưa phải lưu/đăng.</Text>
           {scopes.length ? <Text style={ui.listTitle}>Phiên đã lưu</Text> : null}
           {scopes.map(scope => <Pressable key={scope.id} accessibilityRole="button" disabled={busy} onPress={() => void execute(async () => {
             await extensionCall('restore_scope', {scope_id: scope.id}); location.reload();
           })} style={ui.secondaryButton}><Text style={ui.secondaryText}>{scope.mode === 'local' ? 'Shop local' : scope.target?.label || 'Phiên Shopee cũ'} · {scope.turns} cuộc trò chuyện</Text></Pressable>)}
-          <Pressable accessibilityRole="button" accessibilityLabel="Thông tin kết nối" accessibilityState={{expanded: details}} onPress={() => setDetails(value => !value)} style={[ui.between, {minHeight: 40}]}><Text style={ui.caption}>Thông tin kết nối</Text><Ionicons name={details ? 'chevron-up' : 'chevron-down'} color={IOS.secondary} size={15}/></Pressable>
-          {details ? <Text style={ui.caption}>{platform} · Kết nối qua trình duyệt, chưa cấp quyền Open API. Không thu thập mật khẩu hoặc cookie. Tên shop là nhãn xác minh trên trang.</Text> : null}
-          <Pressable accessibilityRole="button" disabled={busy} onPress={local} style={ui.secondaryButton}><Text style={ui.secondaryText}>Dùng shop nội bộ</Text></Pressable>
+          <Pressable accessibilityRole="button" disabled={busy} onPress={local} style={ui.secondaryButton}><Text style={ui.secondaryText}>Chuyển sang shop local</Text></Pressable>
         </ScrollView>
       </View>
     </Modal>
