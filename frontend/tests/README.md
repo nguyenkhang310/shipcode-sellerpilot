@@ -17,6 +17,8 @@ TypeScript bật strict và kiểm tra biến/tham số không dùng. `api-trans
 `react-native-svg` đang cài. Bài này tái hiện cảnh báo `offset=".55"`, rồi kiểm
 tra giá trị Stop của dock/biểu đồ không cảnh báo và vẫn giữ mốc 0.55. Browser có
 thể chấp nhận chuỗi này nên riêng kiểm tra web không phát hiện được lỗi native.
+Bài này cũng kiểm tra đường vẽ logo loại bỏ `collapsable` trên web và giữ nguyên
+thuộc tính Animated trên iOS/Android.
 
 ## API UI giả lập
 
@@ -99,6 +101,18 @@ với `auth-login.cjs`; khởi động lại **server QA** giữa hai bài để
 và bộ đếm đăng nhập. Không chạy song song vì bài hết hạn phiên ảnh hưởng cả shop QA.
 Ảnh/JSON nằm trong `docs/evaluations/auth-transition/`. Đo Chrome không đại diện
 cho tốc độ khung hình trên iPhone thật.
+
+Để bắt cảnh báo React/SVG chỉ có ở chế độ phát triển, dùng **server QA 8124 sạch**
+và web Expo đang chạy ở 8081, rồi chạy:
+
+```sh
+QA_APP_URL=http://localhost:8081 node frontend/tests/auth-web.cjs
+```
+
+Bài này chặn các request của app sang fixture, kiểm tra thêm CORS trực tiếp bằng
+trình duyệt, vẽ logo, đăng nhập/đăng xuất với chuyển động thường và Giảm chuyển
+động; yêu cầu không có `console.error` hoặc lỗi JavaScript. Không dùng tài khoản
+shop thật. Ảnh/JSON nằm trong `docs/evaluations/auth-web/`.
 
 Kiểm tra vòng đời phiên với React renderer riêng đã cài như hướng dẫn ở dưới:
 

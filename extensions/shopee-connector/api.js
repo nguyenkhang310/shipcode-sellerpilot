@@ -183,7 +183,14 @@ export async function continueFormFill(sender) {
     const missing = coreFields.filter(field => !result?.report?.some(row => row.field === field && row.status === 'filled'));
     if (result?.submitted === false && !missing.length) {await finishForm(connection, draft, result); await clearFormJob(job); return {status: 'filled'};}
     return {status: 'waiting', missing_fields: missing};
-  } catch { await clearFormJob(job); return {status: 'needs_review'}; }
+  } catch {
+    // The header/content script may temporarily disappear across a full-page
+    // navigation. Do not discard the approved job before the account can be
+    // checked again. No write runs while identity is unverified.
+    const status = await pageMessage(connection, {kind: 'target_status'}).catch(() => null);
+    if (!status || ['checking', 'unverified'].includes(status.target_check)) return {status: 'waiting'};
+    await clearFormJob(job); return {status: 'needs_review'};
+  }
   finally { formJobs.delete(job.id); }
 }
 

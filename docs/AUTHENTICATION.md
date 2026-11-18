@@ -101,6 +101,13 @@ tiết theo từng chức danh hoặc cổng đăng ký nhiều shop. Khi triể
 cần HTTPS cho API/web, CORS đúng origin, bảo vệ máy chủ/database và proxy rate
 limit. Không coi CORS hay Face ID là thay thế cho xác thực server.
 
+Web chạy từ `npm run demo` dùng cổng **8081**; lệnh web riêng dùng **5173**.
+Trong `DEMO_MODE=true`, API nhận hai cổng này từ localhost, loopback IPv6 và
+địa chỉ LAN riêng `10.*`, `172.16–31.*`, `192.168.*`, nên đổi Wi-Fi không cần
+sửa danh sách origin cho từng IP. Origin bên ngoài hoặc cổng khác vẫn cần khai
+báo trong `CORS_ORIGINS`. Khi `DEMO_MODE=false`, chỉ danh sách khai báo đó được
+chấp nhận. Đừng sửa URL API thành cổng 8081: backend vẫn dùng cổng **8000**.
+
 Khi khởi động, app vẽ viền logo gồm cả SHIP và CODE, chuyển sang ảnh logo gốc,
 giữ ảnh đầy đủ một nhịp rồi mở form. Chỉ phần nét SVG dùng cập nhật JS; phần
 hiện ảnh và phóng/mờ dùng native driver trên iOS/Android. Không chạy intro lại
