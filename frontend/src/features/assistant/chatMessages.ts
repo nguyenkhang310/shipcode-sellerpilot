@@ -1,7 +1,13 @@
 import { ChatData, ConversationDetail } from '../../api/types';
 import { productDraftImageUrl } from '../../api/sellerPilot';
+import { liveMessageKey } from './live/timeline';
 
-export type Message = { id: string; role: 'user' | 'assistant'; text: string; imageUris?: string[]; response?: ChatData };
+export type Message = { id: string; role: 'user' | 'assistant'; text: string; imageUris?: string[]; response?: ChatData; livePending?: boolean };
+
+export function messageKey(data: ChatData, role: Message['role']) {
+  const id = data.facts?.live_turn_id;
+  return typeof id === 'string' ? liveMessageKey(id, role) : data.run_id + (role === 'user' ? ':u' : ':a');
+}
 
 /** Decode only a complete answer envelope, including replies saved by older backends. */
 export function assistantText(value: string): string {
@@ -26,7 +32,7 @@ export function assistantText(value: string): string {
 
 export function assistantMessage(data: ChatData): Message {
   const text = assistantText(data.answer);
-  return { id: data.run_id + ':a', role: 'assistant', text,
+  return { id: messageKey(data, 'assistant'), role: 'assistant', text,
     response: text === data.answer ? data : { ...data, answer: text } };
 }
 
@@ -80,7 +86,7 @@ export function restoreMessages(turns: ConversationDetail['turns']): Message[] {
         ? draft.preview_urls.map(productDraftImageUrl) : undefined;
     if (draft && imageUris?.length) shown.add(draft.id);
     return [
-      { id: turn.response.run_id + ':u', role: 'user', text: turn.message, imageUris },
+      { id: messageKey(turn.response, 'user'), role: 'user', text: turn.message, imageUris },
       assistantMessage(turn.response),
     ];
   });

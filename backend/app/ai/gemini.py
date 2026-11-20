@@ -22,7 +22,7 @@ from app.ai.client import ADVISOR_SYSTEM_PROMPT, CLASSIFIER_SYSTEM_PROMPT, LISTI
 from app.ai.context import bounded_history
 from app.ai.contracts import AIProviderError, ClassificationResult, ModelCommand, ParsedCommand, ProviderHealth
 from app.ai.listing_contracts import ListingCopy, listing_validation_context
-from app.ai.key_pool import GeminiKeyPool
+from app.ai.key_pool import GeminiKeyPool, rejected_gemini_key, retry_delay
 from app.ai.money import money_hints, plain
 from app.ai.text import assistant_text, reply_format_issue
 from app.ai.edit_contracts import ProductEditCopy
@@ -112,10 +112,9 @@ async def post_json(http, url, headers, body, timeout):
         error = AIProviderError(reason, stage='api_http', retryable=code == 429 or code >= 500)
         error.http_status = code
         if code == 429:
-            try:
-                error.retry_after_seconds = max(1, min(86400, float(response.headers.get('retry-after', '60'))))
-            except ValueError:
-                error.retry_after_seconds = 60
+            error.retry_after_seconds = retry_delay(response.headers.get('retry-after'))
+        elif code == 400 and url.startswith(GEMINI_URL):
+            error.rejected_key = invalid_key_response(response)
         raise error
     try:
         if len(response.content) > MAX_RESPONSE_BYTES:
@@ -126,6 +125,16 @@ async def post_json(http, url, headers, body, timeout):
         return result
     except (ValueError, TypeError) as error:
         raise AIProviderError('invalid_response', stage='api_envelope') from error
+
+
+def invalid_key_response(response):
+    if response.status_code != 400 or len(response.content) > 32_768:
+        return False
+    try:
+        envelope = response.json()
+    except (ValueError, TypeError):
+        return False
+    return isinstance(envelope, dict) and rejected_gemini_key(envelope.get('error'))
 
 
 class GroqBackup:
@@ -240,7 +249,7 @@ class GeminiClient:
                 checked.add(credential.slot)
                 response = await self.http.get(GEMINI_URL + self.model,
                     headers={'x-goog-api-key': credential.secret}, timeout=5, follow_redirects=False)
-                if response.status_code in (401, 403):
+                if response.status_code in (401, 403) or invalid_key_response(response):
                     self.keys.disable(credential)
                     continue
                 data = response.json() if response.status_code == 200 else {}
@@ -408,8 +417,9 @@ class GeminiClient:
                 self._health_until = monotonic() + 30
                 if not error.retryable or not can_backup:
                     raise
-                logger.warning('Gemini using configured Groq backup: reason=%s stage=%s elapsed_ms=%s model=%s images=%s',
-                               error.reason, error.stage, round((perf_counter() - started) * 1000), self.backup.model, len(parts))
+                logger.warning('Gemini using configured Groq backup: task=%s reason=%s stage=%s http_status=%s elapsed_ms=%s model=%s images=%s',
+                               task, error.reason, error.stage, getattr(error, 'http_status', None),
+                               round((perf_counter() - started) * 1000), self.backup.model, len(parts))
                 remaining = min(self.remaining_seconds(), self.timeout - (perf_counter() - started))
                 if remaining <= 0:
                     raise
@@ -471,7 +481,7 @@ class GeminiClient:
                 elif error.reason == 'provider_rejected' and error.stage == 'api_http':
                     # Only authentication/authorization errors are key-specific.
                     # A malformed request must not spend requests on every key.
-                    if getattr(error, 'http_status', None) not in (401, 403):
+                    if getattr(error, 'http_status', None) not in (401, 403) and not getattr(error, 'rejected_key', False):
                         raise
                     self.keys.disable(credential)
                 else:

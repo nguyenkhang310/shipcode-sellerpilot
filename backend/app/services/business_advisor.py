@@ -5,14 +5,24 @@ from app.ai.fallback import extract_sku
 from app.ai.money import plain
 from app.integrations.business import business_snapshot
 from app.integrations.ute_mall import ShopItemNotFoundError
+from app.services.conversations import ASK_PRODUCT, has_product_reference
 
 
 def planning_request(message, history=()):
     text = plain(message).lower()
-    mode = ('business_plan' if re.search(r'ke hoach|len plan|lap plan|lo trinh|chien luoc', text) else
+    ads = re.search(r'\b(?:tu van quang cao|chien luoc quang cao|ke hoach quang cao|chien dich quang cao|'
+                    r'chay (?:ads|quang cao)|ngan sach (?:ads|quang cao)|do (?:hieu qua|roas) quang cao)\b', text)
+    mode = ('ad_plan' if ads and not re.search(r'\b(?:gia von|lai bao nhieu|tinh loi)\b', text) else
+            'business_plan' if re.search(r'ke hoach|len plan|lap plan|lo trinh|chien luoc', text) else
             'measurement_plan' if re.search(r'cach do|do hieu qua|cach theo doi|don tu tiktok|hieu qua tung video', text) and not re.search(r'kich ban|quay video|lam video', text) else
             'video_script' if re.search(r'tiktok|tik tok|kich ban|quay video|lam video|video ngan|reels|cau mo dau|hook|hieu qua tung video', text) else
-            'performance_analysis' if re.search(r'phan tich (?:so lieu|shop|kinh doanh|hieu suat|doanh)|tang doanh thu|tang don|ra don|ban cham|ban chay|xep hang san pham', text) else None)
+            'performance_analysis' if re.search(
+                r'phan tich (?:so lieu|shop|kinh doanh|hieu suat|doanh)|tang doanh (?:thu|so)|tang don|ra don|'
+                r'ban cham|ban chay|xep hang san pham|lam sao (?:de )?ban|(?:how to|how (?:can|should) i) sell|increase sales',
+                text) else None)
+    if mode is None and has_product_reference(message) and re.search(r'\b(?:ban|tiep thi|quang ba)\b', text):
+        if re.search(r'lam sao|sao cho|ra sao|the nao', text):
+            mode = 'performance_analysis'
     contextual = re.fullmatch(r'(?:vay |roi |hay )?(?:cu the hon|chi tiet hon|di sau hon|lam ro hon|buoc tiep theo)(?: di| nhe| giup minh)?[.!? ]*', text.strip())
     contextual = contextual or (len(text) < 220 and re.search(r'chi quay|lam mot minh|mot nguoi|1 nguoi|khong co thoi gian|do hieu qua|giu chan|it nhap', text))
     if mode is None and contextual:
@@ -54,7 +64,7 @@ def attach_business_brief(shop, facts, *, message, history=(), preferences=None)
                     selected = {'sku': sku, 'found': False}
                 break
     draft = facts.get('draft_context')
-    draft_reference = bool(draft and re.search(r'san pham nay|mau nay|ban nhap|mon nay|hang nay', plain(message).lower()))
+    draft_reference = bool(draft and (has_product_reference(message) or 'ban nhap' in plain(message).lower()))
     if draft_reference and not extract_sku(message.lower()):
         focus = {'product_id': None, 'sku': None, 'name': draft.get('name'),
                  'price_vnd': draft.get('selling_price_vnd'), 'available_stock': draft.get('stock'),
@@ -68,7 +78,7 @@ def attach_business_brief(shop, facts, *, message, history=(), preferences=None)
         reason = 'Sản phẩm chủ shop đang hỏi; không tự chuyển sang mẫu khác.'
     else:
         explicit_sku = extract_sku(message.lower())
-        if explicit_sku or (selected and selected.get('found') is False):
+        if explicit_sku or facts.get('product_reference_missing') or (selected and selected.get('found') is False):
             focus = None
             reason = 'Cần xác minh SKU được yêu cầu; không thay bằng sản phẩm khác.'
         else:
@@ -187,6 +197,9 @@ def planning_fallback(facts):
     period = snapshot['period']
     money = lambda value: f'{value:,}'.replace(',', '.') + 'đ'
     focus = brief['focus_product']
+    if focus is None and (facts.get('product_reference_missing')
+                          or (facts.get('selected_product') or {}).get('found') is False):
+        return ASK_PRODUCT
     if focus:
         label = focus.get('name') or 'sản phẩm trong bản nháp'
         sku = f"SKU {focus['sku']}, " if focus.get('sku') else ''
@@ -203,6 +216,14 @@ def planning_fallback(facts):
                 '5. Chưa có đơn: kiểm tra đã đo được nhấp chưa; giữ chân kém thì thử hook, có nhấp ít đơn thì kiểm tra trang hàng/giá/giao. Đây là các giả thuyết cần thử, chưa đủ để kết luận nguyên nhân.')
     answer = (f"Từ {period['from_date']} đến {period['to_date']}, shop có **{cur['order_count']} đơn hợp lệ**, "
               f"giá trị **{money(cur['order_value_vnd'])}**. Đây là khung thử nghiệm, chưa phải dự báo doanh số.\n\n")
+    if brief['mode'] == 'ad_plan':
+        return answer + (
+            f'**Thử quảng cáo cho {product}**\n'
+            '1. Kiểm tra tồn kho và biên lời mỗi đơn sau phí. Dùng biên lời làm cơ sở đặt trần chi phí cho một đơn từ quảng cáo.\n'
+            '2. Chọn hai mẫu quảng cáo cho cùng sản phẩm, chỉ đổi câu mở đầu. Chủ shop chốt ngân sách tối đa và chạy thử trong cùng cửa sổ đo.\n'
+            '3. Ghi chi quảng cáo, lượt nhấp, đơn và giá trị đơn được gán nguồn. Khi có đủ mẫu, so sánh chi phí mỗi đơn và ROAS trước khi tăng ngân sách.\n\n'
+            'SellerPilot chưa nhận số liệu trực tiếp từ hệ thống quảng cáo. Cần số đơn gán nguồn và giá vốn để đánh giá lời lỗ.'
+        )
     if brief['mode'] != 'video_script':
         answer += (f"**Kế hoạch {brief['horizon_days']} ngày**\n"
                    f"• Đầu kỳ: xử lý đơn chờ, chọn {product}; kiểm tra trang hàng, giá vốn và khả năng giao.\n"

@@ -9,6 +9,7 @@ from app.api.v1.endpoints.management import router as management_router
 from app.api.v1.endpoints.product_drafts import router as product_drafts_router
 from app.api.v1.endpoints.product_edits import router as product_edits_router
 from app.api.v1.endpoints.browser_connector import router as browser_connector_router
+from app.api.v1.endpoints.live import router as live_router
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(health_router)
@@ -16,3 +17,4 @@ router.include_router(auth_router)
 for secured in (chat_router, seller_tools_router, management_router, product_drafts_router, product_edits_router):
     router.include_router(secured, dependencies=[Depends(require_seller)])
 router.include_router(browser_connector_router)
+router.include_router(live_router)

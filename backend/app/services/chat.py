@@ -25,7 +25,10 @@ from app.ai.text import assistant_text, reply_format_issue
 from app.ai.small_talk import social_reply
 from app.integrations.ute_mall import ShopItemNotFoundError, UTEMallRepository
 from app.integrations import management
-from app.services.conversations import recent_runs, resolve_message, history_messages
+from app.services.conversations import (
+    ASK_PRODUCT, conversation_memory, conversation_product, has_product_reference, history_messages,
+    refers_to_published_product, resolve_message,
+)
 from app.models.agent_run import AgentRun
 from app.services.advisor import (enrich_advice, forget_memory, is_forget_request,
                                   read_memory, pricing_reply, shop_context)
@@ -38,7 +41,7 @@ from app.services.seller_voice import read_reply
 from app.services.order_assistant import order_answer
 from app.services.chat_reports import build_chat_report
 from app.services.business_advisor import (attach_business_brief, planning_fallback,
-                                          business_reply_issue, business_correction)
+                                          business_reply_issue, business_correction, planning_request)
 
 logger = logging.getLogger(__name__)
 
@@ -106,14 +109,7 @@ async def handle_chat(
     model_name: str | None = None
     fallback_reason: str | None = None
     prepared_answer = None
-    runs = recent_runs(session, shop, conversation_id, limit=24)
-    reset_at = read_memory(session, shop, 'system').get('reset_at')
-    if reset_at:
-        runs = [run for run in runs if run.created_at >= datetime.fromisoformat(reset_at)]
-    last_reset = next((i for i in range(len(runs) - 1, -1, -1)
-                       if runs[i].tool_name == 'forget_assistant_memory'), None)
-    if last_reset is not None:
-        runs = runs[last_reset + 1:]
+    runs, since = conversation_memory(session, shop, conversation_id)
     conversation_id = str(conversation_id or uuid4())
     resolved = resolve_message(message, runs)
     # A complete shop-wide read must not inherit a SKU merely because its
@@ -123,6 +119,18 @@ async def handle_chat(
         resolved = message
     history = history_messages(runs)
     order_read = order_answer(shop, message, runs)
+    contextual_plan = not order_read and has_product_reference(message) and planning_request(message, history)
+    product_context = {}
+    if contextual_plan:
+        if extract_sku(normalize_text(message)):
+            resolved = message
+        else:
+            product_context = conversation_product(session, shop, conversation_id, runs, since,
+                published_only=refers_to_published_product(message))
+            selected = product_context.get('selected_product')
+            resolved = f"{message}\nSKU {selected['sku']}" if selected else message
+            if not product_context:
+                product_context = {'product_reference_missing': True}
     order_generation = order_read.pop('_generate', False) if order_read else False
     simple = simple_reply(message, runs)
     classifier_input = resolved
@@ -131,9 +139,12 @@ async def handle_chat(
                             + "\n\nTIN NHẮN HIỆN TẠI:\n" + resolved)
 
     direct = parse_fallback(resolved, today=today)
+    if contextual_plan:
+        direct = ParsedCommand(intent='sales_advice', sku=extract_sku(normalize_text(resolved)),
+                               days=reporting_days(message))
     forgetting = is_forget_request(message)
     catalog_read = direct.intent == 'product_search' and catalog_lookup(message) is not None
-    skip_classifier = bool(order_read) or bool(simple) or catalog_read or callable(getattr(ai_provider, "respond", None)) and (
+    skip_classifier = bool(order_read or contextual_plan) or bool(simple) or catalog_read or callable(getattr(ai_provider, "respond", None)) and (
         direct.intent == "sales_advice"
         or natural_responses and direct.intent in (
             "shop_summary", "inventory_query", "product_search"
@@ -179,13 +190,16 @@ async def handle_chat(
         if days:
             command = command.model_copy(update={'days': days})
     result = ({**order_read, 'proposal': None} if order_read else execute_command(session, shop, command))
+    result['facts'].update(product_context)
     preferences = read_memory(session, shop, 'shop')
     if preferences:
         result['facts']['seller_preferences'] = preferences
     if command.intent == 'sales_advice' and not order_read:
         # Evidence and reports are useful even without an available LLM.
-        attach_business_brief(shop, result['facts'], message=message, history=history,
-                              preferences=preferences)
+        brief = attach_business_brief(shop, result['facts'], message=message, history=history,
+                                      preferences=preferences)
+        if contextual_plan and brief:
+            result['answer'] = planning_fallback(result['facts'])
     if getattr(ai_provider, 'prefer_direct_facts', False):
         rendered = read_reply(result, today=today, preferences=preferences)
         if rendered is not None:
@@ -195,6 +209,9 @@ async def handle_chat(
         command = ParsedCommand(intent='unknown')
         result = response('Mình đã xóa bộ nhớ cá nhân hóa và các chi phí đã ghi nhớ của shop. Lịch sử chat vẫn còn; từ giờ mình sẽ hỏi lại thông tin cần thiết.',
                           'forget_assistant_memory', {}, {'seller_preferences': {}})
+    elif product_context.get('product_reference_missing'):
+        result['answer'] = ASK_PRODUCT
+        direct_reply = True
     elif not order_read and callable(getattr(ai_provider, 'respond', None)) and command.intent in ('sales_advice', 'unknown') and not simple and not is_casual_message(message):
         if command.intent == 'unknown':
             result['facts'].pop('supported_intents', None)
@@ -208,6 +225,9 @@ async def handle_chat(
                 facts=result['facts'])
             prepared_answer = advisor.pop('_prepared_answer', None)
             result['facts'].update({key: value for key, value in advisor.items() if value is not None})
+            if contextual_plan and (product_context.get('selected_product') or direct.sku):
+                result['facts'].pop('draft_context', None)
+            result['facts'].update(product_context)
             prior_focus = result['facts'].get('business_advisory', {}).get('focus_product')
             brief = attach_business_brief(shop, result['facts'], message=message, history=history,
                                           preferences=advisor['seller_preferences'])

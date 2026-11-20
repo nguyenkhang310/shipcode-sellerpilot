@@ -19,6 +19,7 @@ from app.ai.contracts import AIProviderError, ProviderHealth
 from app.ai.opencode import OpenCodeClient
 from app.ai.antigravity import AntigravityClient
 from app.ai.gemini import GeminiClient, GroqBackup
+from app.ai.key_pool import gemini_credentials
 
 logger = logging.getLogger(__name__)
 NO_TOOLS = (
@@ -173,9 +174,7 @@ async def create_provider(settings):
                 limits=httpx.Limits(max_connections=8, max_keepalive_connections=4)) as http:
             backup = (GroqBackup(http, settings.groq_api_key, settings.groq_model,
                        max_tokens=settings.gemini_max_output_tokens) if settings.groq_fallback_enabled else None)
-            credentials = [(settings.gemini_api_key, settings.gemini_project_id),
-                (settings.gemini_api_key_2, settings.gemini_project_id_2),
-                (settings.gemini_api_key_3, settings.gemini_project_id_3)]
+            credentials = gemini_credentials(settings)
             if not any(key.get_secret_value().strip() for key, _ in credentials):
                 logger.warning('Gemini API key missing: add GEMINI_API_KEY to root .env; see docs/GEMINI_API_SETUP.md')
             yield GeminiClient(http, settings.gemini_api_key, settings.gemini_model,

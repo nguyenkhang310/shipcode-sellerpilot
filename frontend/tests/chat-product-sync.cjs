@@ -30,9 +30,8 @@ let browser, page;
     return (await (await response).json()).data;
   }
   async function photo(filename = 'shipcode-logo-app.png') {
-    await page.getByRole('button', {name: 'Thêm ảnh hoặc mở gợi ý'}).click();
     const selected = page.waitForEvent('filechooser');
-    await page.getByRole('button', {name: 'Chọn ảnh để đăng sản phẩm'}).click();
+    await page.getByRole('button', {name: 'Mở thư viện ảnh'}).click();
     await (await selected).setFiles([path.resolve(__dirname, '../assets', filename)]);
     await page.getByTestId('attachment-strip').waitFor();
     await page.waitForFunction(() => document.querySelector('[aria-label="Gửi tin nhắn"]')?.getAttribute('aria-disabled') !== 'true');
@@ -102,9 +101,8 @@ let browser, page;
   assert.equal(await userPhotos.count(), 2);
   checks.push('Reopening history keeps separately uploaded photos under their own captions');
   await page.getByRole('button', {name: 'Tạo cuộc trò chuyện mới', exact: true}).click();
-  await page.getByRole('button', {name: 'Thêm ảnh hoặc mở gợi ý'}).click();
   const late = page.waitForEvent('filechooser');
-  await page.getByRole('button', {name: 'Chọn ảnh để đăng sản phẩm'}).click();
+  await page.getByRole('button', {name: 'Mở thư viện ảnh'}).click();
   const chooser = await late;
   await page.getByRole('button', {name: 'Tạo cuộc trò chuyện mới', exact: true}).click();
   await chooser.setFiles([path.resolve(__dirname, '../assets/shipcode-logo-app.png')]);

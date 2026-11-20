@@ -3,11 +3,9 @@ import { dockContentInset } from '../../components/layout/dockGeometry';
 import { SystemIcon } from '../../components/ui/SystemIcon';
 import { InterfaceIcon } from '../../components/ui/InterfaceIcon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { forwardRef, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, ScrollViewInstance, Share, Text, TextInput, TextInputInstance, useWindowDimensions, View } from 'react-native';
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, Platform, Pressable, ScrollView, ScrollViewInstance, Share, Text, TextInput, TextInputInstance, useWindowDimensions, View } from 'react-native';
 import { cancelChatRequest, createMessageId, isTerminalChatError, recoverChatRequest } from '../../api/chatRequests';
 import { API_URL, ApiError } from '../../api/client';
 import { inExtension, isShopeeExtension } from '../../integrations/extension';
@@ -28,10 +26,14 @@ import { ChatHistoryDrawer } from './ChatHistoryDrawer';
 import { OrderEditor } from '../dashboard/OrderEditor';
 import { OrderChatAction } from './OrderChatAction';
 import { useAuth } from '../auth/AuthProvider';
+import { LiveConversation, type LiveCaption, type LiveConversationHandle, type LiveShopResult } from './live/LiveConversation';
+import { LiveOrb } from './live/LiveOrb';
+import { useLivePreferences } from './live/preferences';
+import { liveMessageKey } from './live/timeline';
+import { encodeProductImage, pickProductImages, type PendingImage } from './productImages';
 
 export type AssistantHandle = { newConversation: () => void; openHistory: () => void; ask: (message: string) => void };
 type PendingChat = { id: string; conversationId: string; text: string; phase: 'uploading' | 'sending' | 'cancelling'; uploadId?: string };
-type PendingImage = { uri: string; fileName: string; mimeType: string; base64?: string };
 const MAX_PRODUCT_IMAGES = 6;
 const INPUT_MIN_HEIGHT = 46;
 const INPUT_MAX_HEIGHT = 128;
@@ -73,6 +75,14 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   const [error, setError] = useState('');
   const [failedMessage, setFailedMessage] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [liveOpen, setLiveOpen] = useState(false);
+  const [liveCaptions, setLiveCaptions] = useState<LiveCaption[]>([]);
+  const livePreferences = useLivePreferences();
+  const [liveResults, setLiveResults] = useState<LiveShopResult[]>([]);
+  const live = useRef<LiveConversationHandle>(null);
+  const liveGeneration = useRef(0);
+  const liveProgress = useRef(new Animated.Value(0)).current;
+  const composerOpacity = useMemo(() => liveProgress.interpolate({ inputRange: [0, .65, 1], outputRange: [1, 0, 0] }), [liveProgress]);
   const [orderId, setOrderId] = useState<number | null>(null);
   const [history, setHistory] = useState<ConversationSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -80,7 +90,6 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   const [revealedHistoryId, setRevealedHistoryId] = useState<string | null>(null);
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   const historyActionLock = useRef(false);
-  const [quickOpen, setQuickOpen] = useState(false);
   const [decision, setDecision] = useState<number | null>(null);
   const [productDecision, setProductDecision] = useState<number | null>(null);
   const [decisionErrors, setDecisionErrors] = useState<Record<number, string>>({});
@@ -93,14 +102,21 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   const generation = useRef(0), lock = useRef(false), decisionLock = useRef(false), nearBottom = useRef(true);
   const stopping = useRef(false);
   const dragging = useRef(false), userScrollUntil = useRef(0);
+  const lastScroll = useRef({ y: 0, content: 0, viewport: 0 });
   const scrollFrame = useRef<number | null>(null);
   const immediateScroll = useRef(false);
   const reportAnchor = useRef<string | null>(null), threadTop = useRef(0);
   const readingReport = useRef(false);
+  const holdReport = useCallback(() => {
+    readingReport.current = true;
+    reportAnchor.current = null;
+    nearBottom.current = false;
+  }, []);
   const pendingChat = useRef<PendingChat | null>(null);
   const draftHydrated = useRef(false);
   const conversationRef = useRef<string | null>(null);
   const [showLatest, setShowLatest] = useState(false);
+  useEffect(() => { if (!active) setLiveOpen(false); }, [active]);
   const setMeasuredInputHeight = (measuredHeight: number) => {
     const nextHeight = Math.max(
       INPUT_MIN_HEIGHT,
@@ -198,8 +214,8 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     if (!await stop(false)) return;
     draftHydrated.current = true;
     reportAnchor.current = null;
-    remember(null); setMessages([]); setDraft(''); setPendingImages([]); setError(''); setFailedMessage('');
-    setHistoryOpen(false); setQuickOpen(false); setDecisionErrors({}); nearBottom.current = true;
+    remember(null); setMessages([]); setLiveCaptions([]); setLiveResults([]); setDraft(''); setPendingImages([]); setError(''); setFailedMessage('');
+    setHistoryOpen(false); setLiveOpen(false); setDecisionErrors({}); nearBottom.current = true;
     setProductErrors({});
     void AsyncStorage.removeItem(STORAGE + ':draft').catch(() => {});
   };
@@ -212,6 +228,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       const { data } = await getConversation(id, controller.signal);
       if (generation.current !== version) return;
       setMessages(restoreMessages(data.turns));
+      setLiveCaptions([]); setLiveResults([]);
       remember(data.id); setHistoryOpen(false); setFailedMessage(''); nearBottom.current = true;
     } catch (e) {
       if (controller.signal.aborted || version !== generation.current) return;
@@ -230,7 +247,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     catch (e) { if (!controller.signal.aborted) setHistoryError(readableError(e)); }
     finally { if (!controller.signal.aborted) setHistoryLoading(false); }
   }
-  const openHistory = () => { setRevealedHistoryId(null); setHistoryOpen(true); void loadHistory(); };
+  const openHistory = () => { setLiveOpen(false); setRevealedHistoryId(null); setHistoryOpen(true); void loadHistory(); };
   async function togglePin(item: ConversationSummary) {
     if (historyActionLock.current) return;
     historyActionLock.current = true; setHistoryBusy(item.id); setHistoryError('');
@@ -313,7 +330,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     lock.current = true; setBusy(true);
     draftHydrated.current = true;
     if (!retry) setDraft('');
-    setError(''); setFailedMessage(''); setQuickOpen(false);
+    setError(''); setFailedMessage('');
     const version = generation.current, controller = new AbortController(); request.current = controller;
     const entry: PendingChat = pendingChat.current || {
       id: createMessageId(), conversationId: conversationRef.current || createMessageId(), text, phase: 'sending',
@@ -466,49 +483,18 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   async function pickProductImage() {
     if (lock.current || decisionLock.current || imageSelection.current) return;
     const version = generation.current;
-    setQuickOpen(false); setError('');
+    setError('');
     const remaining = MAX_PRODUCT_IMAGES - pendingImages.length;
     if (remaining <= 0) {
       setError(`Mỗi sản phẩm chọn tối đa ${MAX_PRODUCT_IMAGES} ảnh.`);
       return;
     }
     imageSelection.current = true; setSelectingImages(true);
+    input.current?.blur();
     try {
-      if (Platform.OS !== 'web') {
-        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (version !== generation.current) return;
-        if (!permission.granted) {
-          setError('SellerPilot cần quyền truy cập thư viện để bạn chọn ảnh sản phẩm.');
-          return;
-        }
-      }
-      const selected = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsMultipleSelection: true,
-        selectionLimit: remaining,
-        orderedSelection: true,
-        quality: .85,
-      });
-      if (version !== generation.current) return;
-      if (selected.canceled || !selected.assets.length) return;
-      const normalizedImages: PendingImage[] = [];
-      for (const [index, asset] of selected.assets.slice(0, remaining).entries()) {
-        const context = ImageManipulator.manipulate(asset.uri);
-        if (Math.max(asset.width, asset.height) > 1800) context.resize(asset.width >= asset.height ? { width: 1800 } : { height: 1800 });
-        const rendered = await context.renderAsync();
-        const normalized = await rendered.saveAsync({ compress: .8, format: SaveFormat.JPEG, base64: true });
-        if (version !== generation.current) return;
-        if (!normalized.base64) throw new Error('image_base64_unavailable');
-        normalizedImages.push({
-          uri: normalized.uri,
-          fileName: `sellerpilot-${Date.now()}-${index + 1}.jpg`,
-          mimeType: 'image/jpeg',
-          base64: normalized.base64,
-        });
-      }
+      const normalizedImages = await pickProductImages(remaining);
+      if (version !== generation.current || !normalizedImages.length) return;
       setPendingImages(current => [...current, ...normalizedImages].slice(0, MAX_PRODUCT_IMAGES));
-      setQuickOpen(false);
-      setTimeout(() => { if (version === generation.current) input.current?.focus(); }, 80);
     } catch {
       if (version === generation.current) setError('Chưa xử lý được ảnh. Bạn thử chọn lại giúp mình nhé.');
     } finally { imageSelection.current = false; setSelectingImages(false); }
@@ -516,7 +502,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   async function sendProductImages(uploadAssets: PendingImage[], text: string) {
     if (lock.current) return;
     lock.current = true; setBusy(true); setFailedMessage('');
-    setError(''); setQuickOpen(false); setPendingImages([]); setDraft('');
+    setError(''); setPendingImages([]); setDraft('');
     const version = generation.current, controller = new AbortController(); request.current = controller;
     const listingRequest = text || 'Tạo bản nháp sản phẩm từ các ảnh này. Tự viết tiêu đề và mô tả, hỏi lại nếu chưa rõ sản phẩm.';
     const entry: PendingChat = { id: createMessageId(), uploadId: createMessageId(),
@@ -530,16 +516,8 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       // Fast Refresh can preserve an attachment selected by an older app build.
       // Re-read attachments here so every image uses the reliable JSON route.
       if (preparedAssets.some(asset => !asset.base64)) {
-        const encodedAssets: PendingImage[] = [];
-        for (const asset of preparedAssets) {
-          if (asset.base64) { encodedAssets.push(asset); continue; }
-          const context = ImageManipulator.manipulate(asset.uri);
-          const rendered = await context.renderAsync();
-          const encoded = await rendered.saveAsync({ compress: .8, format: SaveFormat.JPEG, base64: true });
-          if (!encoded.base64) throw new Error('image_base64_unavailable');
-          encodedAssets.push({ ...asset, uri: encoded.uri, base64: encoded.base64 });
-        }
-        preparedAssets = encodedAssets;
+        preparedAssets = await Promise.all(preparedAssets.map(encodeProductImage));
+        if (generation.current !== version) return;
       }
       await AsyncStorage.multiSet([[STORAGE, entry.conversationId], [STORAGE + ':pending', JSON.stringify(entry)]]);
       if (generation.current !== version) return;
@@ -617,59 +595,155 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   }
   const last = messages[messages.length - 1];
   const decisionPending = decision !== null || productDecision !== null || editBusy !== null;
-  const actionsDisabled = busy || restoring || decisionPending || selectingImages;
+  const actionsDisabled = busy || restoring || decisionPending || selectingImages || liveOpen;
+  const liveAvailable = Boolean(active && auth?.user && !inExtension() && livePreferences?.ready);
+  const showLiveButton = liveAvailable && !draft.trim() && !pendingImages.length && !busy;
+  const threadMessages = liveCaptions.length ? [...messages, ...liveCaptions.flatMap<Message>(caption => {
+    const id = liveMessageKey(caption.turnId, caption.role);
+    if (caption.role === 'assistant' && !liveCaptions.some(item => item.turnId === caption.turnId && item.role === 'user')) return [];
+    return messages.some(message => message.id === id) ? [] : [
+      { id, text: caption.text, role: caption.role, livePending: true },
+    ];
+  })] : messages;
+  const hasThread = threadMessages.length > 0 || liveResults.length > 0;
+  const savedReportIds = new Set(messages.flatMap(message => {
+    const results = message.response?.facts.live_results;
+    return Array.isArray(results) ? (results as LiveShopResult[]).map(result => result.id) : [];
+  }));
+  const showOrderFromChat = (id: number) => {
+    if (liveOpen) live.current?.openOrder(id);
+    else { input.current?.blur(); setOrderId(id); }
+  };
+  const liveReportRow = (result: LiveShopResult, fallbackKey: string) => (
+    <View key={result.id || fallbackKey} style={ui.assistantMessageRow} testID="live-shop-result">
+      <View style={ui.assistantContent}>
+        {result.report ? <ChatReportCard report={result.report} language={result.language} snapshotKey={result.id} onInteract={holdReport} />
+          : result.language !== 'en' ? <View style={ui.assistantBubble}><MessageText text={result.answer} /></View> : null}
+        {result.order_id ? <OrderChatAction action={{ id: result.order_id }} onOpen={showOrderFromChat} language={result.language} /> : null}
+      </View>
+    </View>
+  );
   const productCardMessageIds = useMemo(() => latestProductCards(messages), [messages]);
   const proposalLabel = { approved: 'Đã cập nhật trên shop', rejected: 'Đã bỏ qua · Giá giữ nguyên', conflict: 'Giá đã thay đổi · Cần tạo đề xuất mới', pending: 'Chờ xác nhận' };
 
   return <View style={ui.chat}>
     <ScrollView ref={scroll} testID="chat-scroll" style={{ flex: 1 }} automaticallyAdjustKeyboardInsets={false} contentInsetAdjustmentBehavior="never" showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive"
-      contentContainerStyle={[ui.chatScroll, !messages.length && ui.chatEmpty]}
-      onLayout={() => { if (messages.length) followBottom(false); }}
-      onScrollBeginDrag={() => { dragging.current = true; }}
+      contentContainerStyle={[ui.chatScroll, !hasThread && ui.chatEmpty]}
+      onLayout={() => { if (hasThread) followBottom(false); }}
+      onScrollBeginDrag={() => {
+        dragging.current = true;
+        nearBottom.current = false;
+        reportAnchor.current = null;
+      }}
       onScrollEndDrag={() => { dragging.current = false; userScrollUntil.current = Date.now() + 1500; }}
       onMomentumScrollEnd={() => { dragging.current = false; userScrollUntil.current = 0; }}
       onScroll={event => {
-        if (!dragging.current && Date.now() > userScrollUntil.current) return;
-        readingReport.current = false;
         const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+        const previous = lastScroll.current;
+        lastScroll.current = { y: contentOffset.y, content: contentSize.height, viewport: layoutMeasurement.height };
+        // Browser wheel/trackpad scrolling doesn't always emit drag events.
+        const liveWebScroll = Platform.OS === 'web' && liveOpen && contentSize.height >= previous.content
+          && layoutMeasurement.height === previous.viewport && (contentOffset.y < previous.y - 2 || !nearBottom.current && contentOffset.y > previous.y);
+        if (!liveWebScroll && !dragging.current && Date.now() > userScrollUntil.current) return;
+        readingReport.current = false;
         nearBottom.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 100;
         setShowLatest(!nearBottom.current);
       }} scrollEventThrottle={32}
       onContentSizeChange={() => {
-        if (!messages.length) scroll.current?.scrollTo({ y: 0, animated: false });
-        else if (nearBottom.current) followBottom();
+        if (!hasThread) scroll.current?.scrollTo({ y: 0, animated: false });
+        else if (nearBottom.current) followBottom(!liveOpen && !dragging.current);
         else if (!readingReport.current) setShowLatest(true);
       }}>
-      {!messages.length && !restoring ? <>
+      {!hasThread && liveOpen ? <Animated.View style={[ui.welcome, {
+        opacity: liveProgress.interpolate({ inputRange: [0, .25, 1], outputRange: [0, 0, 1] }),
+        transform: [{ scale: liveProgress.interpolate({ inputRange: [0, 1], outputRange: [.84, 1] }) }],
+      }]}>
+        <View style={{ width: 94, height: 94, borderRadius: 47, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
+          <LiveOrb round animate={!reduceMotion} />
+          <SystemIcon name="pulse-outline" size={27} color="#F4F6FF" />
+        </View>
+        <Text accessibilityRole="header" style={[ui.listTitle, { marginTop: 14 }]}>SellerPilot Live</Text>
+      </Animated.View> : null}
+      {!hasThread && !restoring && !liveOpen ? <>
         <View style={ui.welcome}><BrandLogo size={desktop ? 40 : keyboardVisible ? 40 : 56} /><Text accessibilityRole="header" style={[ui.welcomeTitle, { marginTop: desktop ? 16 : compact ? 16 : 24 }, !desktop && compact && { fontSize: 28, lineHeight: 36 }, keyboardVisible && { fontSize: 23, lineHeight: 30, letterSpacing: -.6 }]}>Mình giúp gì{ '\n' }cho shop hôm nay?</Text></View>
         {!keyboardVisible ? <View style={[ui.promptGrid, compact && { marginTop: 22 }]}>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" accessibilityLabel={prompt.title} onPress={() => void send(prompt.message)} style={({ pressed }) => [ui.prompt, !desktop && compact && { minHeight: 84, padding: 12, gap: 8 }, pressed && { opacity: .65 }]}><InterfaceIcon name={prompt.icon} size={desktop ? 18 : compact ? 20 : 22} color={BRAND.navy} /><Text style={ui.promptText}>{prompt.title}</Text></Pressable>)}</View> : null}
       </> : null}
-      {restoring ? <View style={ui.thinking}><ActivityIndicator color={BRAND.navy} /><Text style={ui.thinkingText}>Đang mở hội thoại…</Text></View> : <View style={ui.thread} onLayout={event => { threadTop.current = event.nativeEvent.layout.y; }}>{messages.map(message => message.role === 'user'
-        ? <MessageEntrance key={message.id} style={ui.userMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion}><View testID="user-message" style={[ui.userBubble, Boolean(message.imageUris?.length) && ui.userBubbleMedia]}>{message.imageUris?.length === 1 ? <ProtectedImage testID="user-image-single" source={{ uri: message.imageUris[0] }} style={ui.userImageSingle} resizeMode="cover" /> : message.imageUris?.length ? <ScrollView testID="user-image-gallery" horizontal style={ui.userImageScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.userImageRow}>{message.imageUris.map((uri, index) => <ProtectedImage key={uri + index} source={{ uri }} style={ui.userImageMultiple} resizeMode="cover" />)}</ScrollView> : null}<Text selectable style={[ui.userText, Boolean(message.imageUris?.length) && ui.userTextWithMedia]}>{message.text}</Text></View></MessageEntrance>
-        : <MessageEntrance key={message.id} style={ui.assistantMessageRow} animate={message.id === last?.id} reduceMotion={reduceMotion} onLayout={message.response?.report ? event => focusReport(message.id, event.nativeEvent.layout.y) : undefined}><View style={ui.assistantContent}><View style={[ui.row, { gap: 7, marginBottom: 8 }]}><BrandLogo size={20} /><Text style={ui.assistantName}>SellerPilot</Text></View><View style={ui.assistantBubble}><MessageText text={message.text} /></View>
+      {restoring ? <View style={ui.thinking}><ActivityIndicator color={BRAND.navy} /><Text style={ui.thinkingText}>Đang mở hội thoại…</Text></View> : <View style={ui.thread} onLayout={event => { threadTop.current = event.nativeEvent.layout.y; }}>{[
+        ...threadMessages.flatMap(message => {
+          const results = Array.isArray(message.response?.facts.live_results) ? message.response.facts.live_results as LiveShopResult[] : [];
+          return [message.role === 'user'
+        ? <MessageEntrance key={message.id} style={ui.userMessageRow} animate={!message.livePending && message.id === last?.id} reduceMotion={reduceMotion}><View testID="user-message" style={[ui.userBubble, Boolean(message.imageUris?.length) && ui.userBubbleMedia]}>{message.imageUris?.length === 1 ? <ProtectedImage testID="user-image-single" source={{ uri: message.imageUris[0] }} style={ui.userImageSingle} resizeMode="cover" /> : message.imageUris?.length ? <ScrollView testID="user-image-gallery" horizontal style={ui.userImageScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.userImageRow}>{message.imageUris.map((uri, index) => <ProtectedImage key={uri + index} source={{ uri }} style={ui.userImageMultiple} resizeMode="cover" />)}</ScrollView> : null}<Text selectable style={[ui.userText, Boolean(message.imageUris?.length) && ui.userTextWithMedia]}>{message.text}</Text></View></MessageEntrance>
+        : <MessageEntrance key={message.id} style={ui.assistantMessageRow} animate={!message.livePending && !message.response?.facts.voice && message.id === last?.id} reduceMotion={reduceMotion} onLayout={message.response?.report && !message.response.facts.voice ? event => focusReport(message.id, event.nativeEvent.layout.y) : undefined}><View style={ui.assistantContent}><View style={[ui.row, { gap: 7, marginBottom: 8 }]}><BrandLogo size={20} /><Text style={ui.assistantName}>SellerPilot</Text></View><View style={ui.assistantBubble}><MessageText text={message.text} /></View>
           {message.response?.product_edit_proposal ? <ProductEditCard proposal={message.response.product_edit_proposal} busy={actionsDisabled} error={editErrors[message.response.product_edit_proposal.id]} onDecide={choice => void decideEdit(message.response!.product_edit_proposal!, choice)} /> : null}
-          {message.response?.report && !isShopeeExtension() ? <ChatReportCard report={message.response.report} /> : null}
-          {!isShopeeExtension() ? <OrderChatAction action={message.response?.facts.order_action} onOpen={id => { input.current?.blur(); setOrderId(id); }} /> : null}
+          {message.response?.report && !isShopeeExtension() && !results.some(result => result.report
+            && result.report.title === message.response?.report?.title
+            && result.report.subtitle === message.response.report.subtitle) ? <ChatReportCard report={message.response.report} onInteract={holdReport} /> : null}
+          {!isShopeeExtension() && !results.some(result => result.order_id) ?
+            <OrderChatAction action={message.response?.facts.order_action} onOpen={showOrderFromChat} /> : null}
           {message.response?.proposal ? <View style={ui.proposal}>
             <View style={ui.proposalBody}><Text style={ui.proposalKicker}>{proposalLabel[message.response.proposal.status]}</Text><Text style={ui.listTitle}>{message.response.proposal.product_name}</Text><Text style={ui.caption}>SKU {message.response.proposal.sku}</Text><View style={ui.priceRow}><Text style={ui.oldPrice}>{money(message.response.proposal.old_price_vnd)}</Text><SystemIcon name="arrow-forward" size={17} color={IOS.secondary} /><Text style={ui.newPrice}>{money(message.response.proposal.new_price_vnd)}</Text></View>
               {decisionErrors[message.response.proposal.id] ? <Text style={ui.error}>{decisionErrors[message.response.proposal.id]}</Text> : null}</View>
             {message.response.proposal.status === 'pending' ? <View style={ui.proposalActions}><Pressable accessibilityRole="button" disabled={actionsDisabled} onPress={() => void decide(message.response!.proposal!, 'reject')} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={ui.secondaryText}>Bỏ qua</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={'Xác nhận đổi giá SKU ' + message.response.proposal.sku} disabled={actionsDisabled} onPress={() => void decide(message.response!.proposal!, 'confirm')} style={[ui.primaryButton, { flex: 1.6, paddingHorizontal: 8 }, actionsDisabled && { opacity: .55 }]}>{decision === message.response.proposal.id ? <ActivityIndicator color="#FFF" size="small" /> : <SystemIcon name="checkmark" size={18} color="#FFF" />}<Text style={ui.primaryText}>Xác nhận đổi giá</Text></Pressable></View> : null}
           </View> : null}
           {productCardMessageIds.has(message.id) && message.response?.product_draft ? <ProductDraftCard draft={message.response.product_draft} busy={actionsDisabled} saving={productDecision === message.response.product_draft.id} error={productErrors[message.response.product_draft.id]} browser={isShopeeExtension()} onDecide={choice => void decideDraft(message.response!.product_draft!, choice)} /> : null}
-          <View style={ui.messageActions}><Pressable accessibilityRole="button" accessibilityLabel={Platform.OS === 'web' ? 'Sao chép câu trả lời' : 'Chia sẻ câu trả lời'} onPress={() => void share(message.text)} style={ui.messageAction}><SystemIcon name={Platform.OS === 'web' ? 'copy-outline' : 'share-outline'} size={17} color={IOS.secondary} /></Pressable>{message.response?.mode === 'fallback' ? <Text style={ui.sourceText}>{fallbackLabel(message.response.fallback_reason)}</Text> : null}</View>
-        </View></MessageEntrance>)}</View>}
+          <View style={[ui.messageActions, message.livePending && { minHeight: 44 }]}>
+            {!message.livePending ? <Pressable accessibilityRole="button" accessibilityLabel={Platform.OS === 'web' ? 'Sao chép câu trả lời' : 'Chia sẻ câu trả lời'} onPress={() => void share(message.text)} style={ui.messageAction}><SystemIcon name={Platform.OS === 'web' ? 'copy-outline' : 'share-outline'} size={17} color={IOS.secondary} /></Pressable> : null}
+            {message.response?.mode === 'fallback' ? <Text style={ui.sourceText}>{fallbackLabel(message.response.fallback_reason)}</Text> : null}
+          </View>
+        </View></MessageEntrance>, ...results.map((result, index) => liveReportRow(result, message.id + ':report:' + index))];
+        }),
+        ...liveResults.flatMap((result, index) => result.id && savedReportIds.has(result.id)
+          ? [] : [liveReportRow(result, 'live:report:' + index)]),
+      ]}
+      </View>}
       {busy ? <TypingIndicator active={active} /> : null}
       {error ? <View accessibilityLiveRegion="polite" style={ui.errorCard}><Text style={ui.error}>{error}</Text>{failedMessage ? <Pressable accessibilityRole="button" accessibilityLabel="Thử lại" disabled={busy} onPress={() => void send(failedMessage, true)} style={ui.secondaryButton}><SystemIcon name="refresh" color={BRAND.navy} size={17} /><Text style={ui.secondaryText}>Thử lại</Text></Pressable> : null}{pendingChat.current && !busy ? <Pressable accessibilityRole="button" accessibilityLabel="Dừng yêu cầu" onPress={() => void stop()} style={ui.secondaryButton}><Text style={ui.secondaryText}>Dừng yêu cầu</Text></Pressable> : null}</View> : null}
-      {!busy && !restoring && !keyboardVisible && last?.response?.suggestions?.length ? <ScrollView testID="chat-follow-ups" horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, height: Math.ceil(48 * fontScale + 28), maxHeight: Math.ceil(48 * fontScale + 28), marginTop: 12 }} contentContainerStyle={{ gap: 8, paddingBottom: 2, alignItems: 'center' }}>{last.response.suggestions.slice(0, 3).map(suggestion => <Pressable key={suggestion} accessibilityRole="button" onPress={() => void send(suggestion)} style={[ui.followUp, { minHeight: 44, maxWidth: 260, paddingVertical: 10 }]}><Text numberOfLines={2} style={[ui.followUpText, { flex: 0, flexShrink: 1 }]}>{suggestion}</Text><SystemIcon name="arrow-up-outline" size={15} color={BRAND.navy} /></Pressable>)}</ScrollView> : null}
+      {!liveOpen && !busy && !restoring && !keyboardVisible && last?.response?.suggestions?.length ? <ScrollView testID="chat-follow-ups" horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, height: Math.ceil(48 * fontScale + 28), maxHeight: Math.ceil(48 * fontScale + 28), marginTop: 12 }} contentContainerStyle={{ gap: 8, paddingBottom: 2, alignItems: 'center' }}>{last.response.suggestions.slice(0, 3).map(suggestion => <Pressable key={suggestion} accessibilityRole="button" onPress={() => void send(suggestion)} style={[ui.followUp, { minHeight: 44, maxWidth: 260, paddingVertical: 10 }]}><Text numberOfLines={2} style={[ui.followUpText, { flex: 0, flexShrink: 1 }]}>{suggestion}</Text><SystemIcon name="arrow-up-outline" size={15} color={BRAND.navy} /></Pressable>)}</ScrollView> : null}
     </ScrollView>
-    {showLatest && messages.length ? <Pressable accessibilityRole="button" accessibilityLabel="Cuộn đến tin nhắn mới nhất" onPress={goBottom} style={[ui.circleButton, { position: 'absolute', right: 22, bottom: Math.max(12, composerAreaHeight + 12) }]}><SystemIcon name="arrow-down" size={20} color={BRAND.navy} /></Pressable> : null}
+    {showLatest && hasThread ? <Pressable accessibilityRole="button" accessibilityLabel="Cuộn đến tin nhắn mới nhất" onPress={goBottom} style={[ui.circleButton, { position: 'absolute', right: 22, bottom: Math.max(12, composerAreaHeight + 12) }]}><SystemIcon name="arrow-down" size={20} color={BRAND.navy} /></Pressable> : null}
     <View testID="chat-composer" onLayout={event => { const height = Math.ceil(event.nativeEvent.layout.height); setComposerAreaHeight(current => Math.abs(current - height) > 1 ? height : current); }} style={[ui.composerArea, { paddingBottom: desktop || keyboardVisible ? 8 : dockContentInset(insets.bottom), flexShrink: 0 }]}>
+      <View>
+      <Animated.View pointerEvents={liveOpen ? 'none' : 'auto'} accessibilityElementsHidden={liveOpen} aria-hidden={liveOpen}
+        importantForAccessibility={liveOpen ? 'no-hide-descendants' : 'auto'}
+        style={liveOpen ? { position: 'absolute', bottom: 0, left: 0, right: 0, opacity: composerOpacity } : undefined}>
       {pendingImages.length ? <ScrollView testID="attachment-strip" horizontal style={ui.attachmentScroller} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={ui.attachmentRow}>{pendingImages.map((pendingImage, index) => <View key={pendingImage.uri + index} style={ui.attachmentPreview}><ProtectedImage source={{ uri: pendingImage.uri }} style={ui.attachmentImage} resizeMode="cover" /><Pressable accessibilityRole="button" accessibilityLabel={`Bỏ ảnh số ${index + 1}`} hitSlop={10} onPress={() => setPendingImages(items => items.filter((_item, itemIndex) => itemIndex !== index))} style={ui.attachmentRemove}><SystemIcon name="close" size={17} color="#FFF" /></Pressable></View>)}{pendingImages.length < MAX_PRODUCT_IMAGES ? <Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh sản phẩm" onPress={() => void pickProductImage()} style={ui.attachmentAdd}><SystemIcon name="add" size={25} color={BRAND.navy} /><Text style={ui.attachmentCount}>{pendingImages.length}/{MAX_PRODUCT_IMAGES}</Text></Pressable> : null}</ScrollView> : null}
-      {quickOpen ? <ScrollView testID="quick-actions" keyboardShouldPersistTaps="handled" style={[ui.grouped, { marginBottom: 10, maxHeight: keyboardVisible ? 180 : 290, flexGrow: 0 }]}><Pressable accessibilityRole="button" accessibilityLabel="Chọn ảnh để đăng sản phẩm" onPress={() => void pickProductImage()} style={[ui.task, { minHeight: 52 }]}><SystemIcon name="images-outline" size={21} color={BRAND.navy} /><Text style={ui.taskTitle}>Chọn tối đa 6 ảnh sản phẩm</Text></Pressable>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" onPress={() => { setDraft(prompt.message); setQuickOpen(false); input.current?.focus(); }} style={[ui.task, { minHeight: 47 }]}><InterfaceIcon name={prompt.icon} size={19} color={BRAND.navy} /><Text style={ui.taskTitle}>{prompt.title}</Text></Pressable>)}</ScrollView> : null}
-      <View style={ui.composer}><Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh hoặc mở gợi ý" accessibilityState={{ expanded: quickOpen }} onPress={() => setQuickOpen(value => !value)} style={ui.composerPlus}><SystemIcon name={quickOpen ? 'close' : 'add'} size={27} color={BRAND.navy} /></Pressable>
+      <View style={ui.composer}><Pressable accessibilityRole="button" accessibilityLabel="Mở thư viện ảnh" disabled={actionsDisabled}
+        onPress={() => void pickProductImage()} style={ui.composerPlus}><SystemIcon name="add" size={27} color={BRAND.navy} /></Pressable>
         <View style={ui.composerInputFrame}><TextInput ref={input} accessibilityLabel="Nhắn cho SellerPilot" placeholder={pendingImages.length ? 'Thêm yêu cầu…' : 'Hỏi SellerPilot…'} placeholderTextColor={IOS.secondary} value={draft} onChangeText={value => { setDraft(value); if (!value) setInputHeight(INPUT_MIN_HEIGHT); }} multiline maxLength={4000} scrollEnabled={inputHeight >= INPUT_MAX_HEIGHT - 1} returnKeyType="default" blurOnSubmit={false} onFocus={() => setTimeout(() => { if (nearBottom.current) scroll.current?.scrollToEnd({ animated: false }); }, 80)} style={[ui.composerInput, { height: inputHeight }]} editable={!restoring} />
           {Platform.OS !== 'web' ? <Text pointerEvents="none" accessible={false} aria-hidden onTextLayout={event => resizeComposerFromLines(event.nativeEvent.lines.length)} style={ui.composerMeasure}>{draft + '\u200B'}</Text> : null}</View>
-        <Pressable accessibilityRole="button" accessibilityLabel={busy ? 'Dừng chờ phản hồi' : 'Gửi tin nhắn'} disabled={!busy && ((!draft.trim() && !pendingImages.length) || restoring || decisionPending || selectingImages)} onPress={() => { if (busy) { void stop(); } else void send(); }} style={({ pressed }) => [ui.send, !busy && ((!draft.trim() && !pendingImages.length) || restoring) && ui.sendDisabled, pressed && { opacity: .7 }]}><SystemIcon name={busy ? 'stop' : 'arrow-up'} size={23} color={busy || draft.trim() || pendingImages.length ? '#FFF' : IOS.tertiary} /></Pressable>
+        {showLiveButton ? <Pressable accessibilityRole="button" accessibilityLabel="Trò chuyện Live" disabled={actionsDisabled || Boolean(pendingChat.current)} onPress={() => { input.current?.blur(); live.current?.start(); }} style={({pressed}) => [ui.send, pressed && { transform: [{ scale: .95 }] }]}>
+          <LiveOrb round />
+          <SystemIcon name="pulse-outline" size={21} color="#FFF" />
+        </Pressable> :
+          <Pressable accessibilityRole="button" accessibilityLabel={busy ? 'Dừng chờ phản hồi' : 'Gửi tin nhắn'} disabled={!busy && ((!draft.trim() && !pendingImages.length) || restoring || decisionPending || selectingImages)} onPress={() => { if (busy) { void stop(); } else void send(); }} style={({ pressed }) => [ui.send, !busy && ((!draft.trim() && !pendingImages.length) || restoring) && ui.sendDisabled, pressed && { opacity: .7 }]}><SystemIcon name={busy ? 'stop' : 'arrow-up'} size={23} color={busy || draft.trim() || pendingImages.length ? '#FFF' : IOS.tertiary} /></Pressable>}
+      </View>
+      </Animated.View>
+      {liveAvailable && livePreferences ? <LiveConversation ref={live} visible={liveOpen} conversationId={conversationId} progress={liveProgress}
+        preferences={livePreferences.value} reduceMotion={reduceMotion}
+        onCaptions={setLiveCaptions} onResult={result => setLiveResults(items => result ? [...items, result] : [])} onShopChanged={onShopChanged}
+        onSaved={turn => {
+          if (generation.current !== liveGeneration.current) return;
+          if (turn.response.conversation_id && conversationRef.current !== turn.response.conversation_id) remember(turn.response.conversation_id);
+          setMessages(items => items.some(item => item.response?.run_id === turn.response.run_id) ? items : [...items, ...restoreMessages([turn])]);
+          const results = turn.response.facts.live_results;
+          if (Array.isArray(results)) {
+            const ids = new Set((results as LiveShopResult[]).map(result => result.id));
+            setLiveResults(items => items.filter(result => !ids.has(result.id)));
+          }
+        }}
+        onOpen={() => { liveGeneration.current = generation.current; setLiveOpen(true); goBottom(); }}
+        onExit={(orderId, recoverId) => {
+          setLiveOpen(false);
+          if (recoverId && (recoverId !== conversationRef.current || liveCaptions.length || liveResults.length)) {
+            const version = liveGeneration.current;
+            void getConversation(recoverId).then(({data}) => {
+              if (generation.current !== version || lock.current || (conversationRef.current && conversationRef.current !== data.id)) return;
+              remember(data.id);
+              setMessages(restoreMessages(data.turns)); setLiveCaptions([]); setLiveResults([]);
+            }).catch(() => {});
+          }
+          if (orderId) setOrderId(orderId);
+        }} /> : null}
       </View>
     </View>
     <ChatHistoryDrawer visible={historyOpen} onClose={() => setHistoryOpen(false)} reduceMotion={reduceMotion}><View style={ui.sheetHeader}><Text style={ui.sheetTitle}>Lịch sử</Text><Pressable accessibilityRole="button" accessibilityLabel="Đóng lịch sử trò chuyện" onPress={() => setHistoryOpen(false)} style={ui.circleButton}><SystemIcon name="close" color={IOS.label} size={22} /></Pressable></View><ScrollView contentContainerStyle={ui.sheetScroll} keyboardShouldPersistTaps="handled"><Pressable accessibilityRole="button" accessibilityLabel="Cuộc trò chuyện mới" onPress={newConversation} style={[ui.primaryButton, { marginBottom: 20 }]}><SystemIcon name="add" color="#FFF" size={20} /><Text style={ui.primaryText}>Cuộc trò chuyện mới</Text></Pressable>
@@ -684,5 +758,6 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       </View>)}
     </ScrollView></ChatHistoryDrawer>
     <OrderEditor id={orderId} initialView="tracking" onClose={() => setOrderId(null)} onUpdated={updated => { onShopChanged?.(); onToast?.('Đã cập nhật đơn #' + updated.id); }} />
+
   </View>;
 });

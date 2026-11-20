@@ -41,7 +41,11 @@ def test_disabled_key_does_not_disable_a_valid_key_in_same_project():
     assert pool.available(reserve=True).slot==2
 
 
-def test_live_request_rotation_and_project_cooldown_are_bounded(caplog):
+@pytest.mark.parametrize('projects, expected', [
+    (('same', 'same', 'other'), ['synthetic-a', 'synthetic-c', 'synthetic-c']),
+    (('', '', ''), ['synthetic-a', 'synthetic-b', 'synthetic-c']),
+])
+def test_chat_rotation_handles_quota_with_or_without_project_ids(caplog, projects, expected):
     calls=[]
     def handler(request):
         key=request.headers['x-goog-api-key']
@@ -51,12 +55,13 @@ def test_live_request_rotation_and_project_cooldown_are_bounded(caplog):
         return httpx.Response(200,json=completed('Mình đã nhận dữ liệu shop.'))
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-            p=GeminiClient(http,'',credentials=[('synthetic-a','same'),('synthetic-b','same'),('synthetic-c','other')])
+            credentials = [('synthetic-' + letter, project) for letter, project in zip('abc', projects)]
+            p=GeminiClient(http,'',credentials=credentials)
             assert await p.respond('Tư vấn',history=[],facts={})=='Mình đã nhận dữ liệu shop.'
             assert p.response_provider=='gemini'
             await p.respond('Tư vấn tiếp',history=[],facts={})
     asyncio.run(run())
-    assert calls==['synthetic-a','synthetic-c','synthetic-c']
+    assert calls==expected
     assert all(secret not in caplog.text for secret in calls)
 
 
@@ -120,3 +125,25 @@ def test_health_can_use_second_key_when_first_key_is_invalid():
             assert (await p.check_health()).model_available
     asyncio.run(run())
     assert calls==['a','b']
+
+
+def test_gemini_invalid_key_response_is_distinct_from_a_bad_chat_request():
+    calls = []
+
+    def handler(request):
+        key = request.headers['x-goog-api-key']
+        calls.append(key)
+        if key == 'a':
+            return httpx.Response(400, json={'error': {'status': 'INVALID_ARGUMENT', 'details': [{
+                '@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'API_KEY_INVALID',
+            }]}})
+        return httpx.Response(200, json=completed())
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            provider = GeminiClient(http, '', credentials=[('a', ''), ('b', '')])
+            await provider.respond('Tư vấn', history=[], facts={})
+            await provider.respond('Tư vấn tiếp', history=[], facts={})
+
+    asyncio.run(run())
+    assert calls == ['a', 'b', 'b']

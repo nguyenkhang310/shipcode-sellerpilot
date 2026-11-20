@@ -55,9 +55,8 @@ let browser,page;
  checks.push('Reload resumes saved request and renders one user message and answer');
  // Upload a gallery, drop the response after it was committed, then recover it.
  await page.getByRole('button',{name:'Tạo cuộc trò chuyện mới'}).click();
- await page.getByRole('button',{name:'Thêm ảnh hoặc mở gợi ý'}).click();
  const chooserPromise=page.waitForEvent('filechooser');
- await page.getByRole('button',{name:'Chọn ảnh để đăng sản phẩm'}).click();
+ await page.getByRole('button',{name:'Mở thư viện ảnh'}).click();
  const chooser=await chooserPromise;
  await chooser.setFiles([path.resolve(__dirname,'../assets/shipcode-logo-app.png')]);
  await page.getByTestId('attachment-strip').waitFor();
@@ -89,9 +88,8 @@ let browser,page;
  // A definitively failed upload can be resent; uncertain uploads still recover
  // using their old ID (the case above). This failure is injected before commit.
  await page.getByRole('button',{name:'Tạo cuộc trò chuyện mới'}).click();
- await page.getByRole('button',{name:'Thêm ảnh hoặc mở gợi ý'}).click();
  const nextChooser=page.waitForEvent('filechooser');
- await page.getByRole('button',{name:'Chọn ảnh để đăng sản phẩm'}).click();
+ await page.getByRole('button',{name:'Mở thư viện ảnh'}).click();
  await (await nextChooser).setFiles([path.resolve(__dirname,'../assets/shipcode-logo-app.png')]);
  await page.getByTestId('attachment-strip').waitFor();
  await input.fill('Soạn sản phẩm từ ảnh này');
@@ -118,9 +116,8 @@ let browser,page;
  checks.push('A failed gallery record with a business-specific 503 releases the stale ID and resends retained images');
  // An older backend rejects appending photos before accepting an operation.
  // Release that rejected ID while retaining the seller's photo and caption.
- await page.getByRole('button',{name:'Thêm ảnh hoặc mở gợi ý'}).click();
  const legacyChooser=page.waitForEvent('filechooser');
- await page.getByRole('button',{name:'Chọn ảnh để đăng sản phẩm'}).click();
+ await page.getByRole('button',{name:'Mở thư viện ảnh'}).click();
  await (await legacyChooser).setFiles([path.resolve(__dirname,'../assets/hcm-ute-account-logo.png')]);
  await page.getByTestId('attachment-strip').waitFor();
  await input.fill('đây nha');

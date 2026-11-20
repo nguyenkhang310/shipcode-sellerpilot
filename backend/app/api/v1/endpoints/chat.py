@@ -21,7 +21,7 @@ from app.models.product_draft import ProductDraft
 from app.models.product_edit import ProductEditProposal
 from app.services.conversation_state import ensure_conversation_open
 from app.services.product_drafts import delete_draft_images
-from app.services.conversations import recent_runs, run_data
+from app.services.conversations import recent_runs, turn_data
 from app.services.chat_requests import request_key
 
 router = APIRouter(tags=["seller chat"])
@@ -102,8 +102,7 @@ def conversation(conversation_id: UUID, session: Session = Depends(get_session),
     if not runs:
         raise HTTPException(404, detail="Không tìm thấy cuộc trò chuyện.")
     return {"data": {"id": str(conversation_id), "turns": [
-        {"message": run.message, "created_at": run.created_at.isoformat() + "Z",
-         "response": run_data(session, run)} for run in runs
+        turn_data(session, run) for run in runs
     ]}}
 
 

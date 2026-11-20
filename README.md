@@ -336,6 +336,40 @@ Không đưa key vào frontend hoặc Git. Free Tier có giới hạn theo proje
 cùng project không tăng quota. Hỗ trợ tối đa ba key và Groq dự phòng tùy chọn;
 xem [cài đặt Gemini và Groq cho nhóm](docs/GEMINI_API_SETUP.md).
 
+**SellerPilot Live** dùng chung danh sách tối đa ba key Gemini với chat.
+Live tự chọn key khi mở phiên và thử key hợp lệ tiếp theo khi key trước bị từ chối
+hoặc đang chạm hạn mức. `GEMINI_PROJECT_ID` là tùy chọn. Khi để trống, backend thử
+key tiếp theo và tạm nghỉ riêng key vừa gặp 429. Các key có cùng Project ID
+được tạm nghỉ cùng nhau khi project chạm hạn mức.
+Model Live mặc định là `gemini-3.8-live` với giọng `Achird`.
+Sau khi chạy `npm ci` và khởi động lại `npm run demo`, đăng nhập rồi mở **Trợ lý**.
+Bấm nút sóng âm cạnh ô chat trống và cấp quyền micro khi được hỏi.
+Mục **Shop → Giọng trợ lý** lưu lựa chọn giọng nam/nữ và tiếng Việt/English trên từng thiết bị.
+Lựa chọn áp dụng cho giọng nói, nhận diện lời nói và báo cáo của phiên Live tiếp theo.
+Web dùng `http://localhost:8081` hoặc HTTPS để trình duyệt cho phép micro. Trên
+iOS/Android dùng Expo Go tương thích SDK 58 và quét QR mới. Nếu dùng bản native
+tự build trước khi thêm `expo-audio`, cần build lại để nạp module và quyền micro.
+
+Live xưng mình/bạn và dùng chung dữ liệu, biểu đồ và bản nháp với chat. Bạn có thể
+hỏi số liệu, nhờ tư vấn kinh doanh, chỉnh sản phẩm, theo dõi và cập nhật đơn.
+SellerPilot đọc lại đề xuất rồi chờ bạn nói «xác nhận cập nhật sản phẩm» hoặc
+«xác nhận cập nhật đơn» để lưu. Tính năng quảng cáo hỗ trợ lập kế hoạch và đo hiệu quả.
+
+Để đăng hàng, mô tả sản phẩm bằng giọng nói rồi bấm **Thêm ảnh**. Ảnh được lưu
+vào bản nháp ngay khi chọn xong. Khi trợ lý đọc lại thông tin, bạn nói
+«xác nhận đăng» để đăng vào gian hàng đang dùng. Nếu không chọn ảnh mới, Live
+giữ lại các ảnh đã có trong bản nháp.
+
+Live tối đa 3 phút và chỉ gửi micro sau khi bạn bắt đầu. Bản chép lời và báo cáo
+được lưu trong cùng cuộc chat. SellerPilot không lưu bản ghi âm Live.
+Hạn mức phụ thuộc project trong AI Studio.
+[Tài liệu Gemini Live](https://aistudio.google.com/docs/live-api).
+
+Âm mở Live được kết xuất từ preset Soft của
+[Gemini Live Studio](https://github.com/GoogleCloudPlatform/generative-ai/blob/main/gemini/multimodal-live-api/gemini-live-studio/frontend/src/lib/live/chime-synth.ts)
+và được chỉnh âm lượng cho SellerPilot. Bản quyền Google LLC 2026, theo
+[giấy phép Apache 2.0](frontend/assets/gemini-live-studio-LICENSE.txt).
+
 **Antigravity CLI — lựa chọn bổ sung**, dùng tài khoản đã đăng nhập trên máy backend:
 
 ```dotenv

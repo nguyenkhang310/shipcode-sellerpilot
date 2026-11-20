@@ -60,7 +60,7 @@ class ChatRequestManager:
                 row.updated_at = datetime.utcnow()
             session.commit()
 
-    def submit(self, payload, shop):
+    def submit(self, payload, shop, *, review_only=False):
         key = request_key(shop, payload.request_id or uuid4())
         self.ensure_conversation_available(key[0], payload.conversation_id)
         fingerprint = hashlib.sha256(json.dumps(
@@ -96,7 +96,7 @@ class ChatRequestManager:
                 return key
         resolved = payload.model_copy(update={'conversation_id': conversation_id})
         self.conversations[conversation] = key
-        self.tasks[key] = asyncio.create_task(self._run(key, resolved, shop))
+        self.tasks[key] = asyncio.create_task(self._run(key, resolved, shop, review_only=review_only))
         return key
 
     def ensure_conversation_available(self, tenant, conversation_id):
@@ -110,7 +110,7 @@ class ChatRequestManager:
             raise HTTPException(409, detail={'code': 'conversation_busy',
                 'message': 'Hội thoại đang xử lý. Hãy chờ hoặc dừng phản hồi trước khi đổi bản nháp.'})
 
-    async def _run(self, key, payload, shop):
+    async def _run(self, key, payload, shop, *, review_only=False):
         queued_at = perf_counter()
         try:
             async with asyncio.timeout(300):
@@ -121,6 +121,7 @@ class ChatRequestManager:
                         bind = connection_session.get_bind()
                     with ChatTransaction(bind=bind, expire_on_commit=False, autoflush=False) as session:
                         session.info['defer_advisor_writes'] = True
+                        session.info['review_only'] = review_only
                         provider = self.provider()
                         async with AsyncExitStack() as scope:
                             generation_scope = getattr(provider, 'generation_scope', None)

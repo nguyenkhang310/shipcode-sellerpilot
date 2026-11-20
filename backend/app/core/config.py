@@ -7,6 +7,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 REPO_DIR = BACKEND_DIR.parent
 
+# The demo web clients run on these two ports, including over a private LAN.
+_IP_OCTET = r'(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)'
+LOCAL_WEB_ORIGIN = (
+    rf'^https?://(?:localhost|127\.0\.0\.1|\[::1\]|10\.{_IP_OCTET}\.{_IP_OCTET}\.{_IP_OCTET}'
+    rf'|172\.(?:1[6-9]|2\d|3[01])\.{_IP_OCTET}\.{_IP_OCTET}|192\.168\.{_IP_OCTET}\.{_IP_OCTET})'
+    r':(?:5173|8081)$'
+)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -33,6 +41,8 @@ class Settings(BaseSettings):
     gemini_api_key_3: SecretStr = SecretStr('')
     gemini_project_id_3: str = ''
     gemini_model: Literal['gemini-3.5-flash-lite', 'gemini-3.8-flash'] = 'gemini-3.5-flash-lite'
+    gemini_live_model: Literal['gemini-3.8-live', 'gemini-3.1-flash-live-preview'] = 'gemini-3.8-live'
+    gemini_live_voice: Literal['Achird', 'Sulafat', 'Aoede', 'Kore', 'Puck'] = 'Achird'
     gemini_generation_timeout_seconds: float = Field(default=60, ge=5, le=90)
     gemini_max_output_tokens: int = Field(default=2048, ge=256, le=4096)
     gemini_advice_max_output_tokens: int = Field(default=4096, ge=256, le=8192)

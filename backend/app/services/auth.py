@@ -94,12 +94,17 @@ def login(request, session, login_id, password):
 
 def require_seller(request: Request, session: Session = Depends(get_session),
                    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_session)):
-    if not credentials or not 30 <= len(credentials.credentials) <= 128:
+    record, seller = verify_seller(request.app.state.shop_repository, session, credentials.credentials if credentials else None)
+    request.state.seller_session = record
+    return seller
+
+
+def verify_seller(shop, session, token):
+    if not isinstance(token, str) or not 30 <= len(token) <= 128:
         raise denied()
-    record = session.get(SellerSession, hash_token(credentials.credentials))
+    record = session.get(SellerSession, hash_token(token))
     if not record or record.revoked_at or record.expires_at <= datetime.utcnow():
         raise denied('session_expired', 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
-    shop = request.app.state.shop_repository
     try:
         user = seller_user(shop, user_id=record.user_id)
     except ShopDatabaseError as error:
@@ -107,8 +112,7 @@ def require_seller(request: Request, session: Session = Depends(get_session),
     if (record.shop_slug != shop.seller_shop_slug or not user or not user['membership']
             or not secrets.compare_digest(record.credential_tag, hash_token(user['password_hash']))):
         raise denied('session_revoked', 'Quyền truy cập đã thay đổi. Vui lòng đăng nhập lại.')
-    request.state.seller_session = record
-    return identity(user, record.expires_at)
+    return record, identity(user, record.expires_at)
 
 
 def revoke(session, record, all_sessions=False):

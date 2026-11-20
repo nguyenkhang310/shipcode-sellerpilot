@@ -21,7 +21,7 @@
     "build": "npm run build --workspace frontend",
     "build:ios": "npm run build:ios --workspace frontend",
     "typecheck": "npm run typecheck --workspace frontend",
-    "test:api": "node --test frontend/tests/api-transport.cjs frontend/tests/chat-messages.cjs",
+    "test:api": "node --test frontend/tests/api-transport.cjs frontend/tests/chat-messages.cjs frontend/tests/live-voice.cjs",
     "test:auth": "node --test frontend/tests/auth-storage.cjs frontend/tests/auth-transport.cjs",
     "test:svg": "node --test frontend/tests/svg-gradients.cjs",
     "extension:setup": "node scripts/extension.cjs setup",

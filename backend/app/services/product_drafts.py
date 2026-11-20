@@ -147,6 +147,12 @@ def get_active_draft(session: Session, shop: UTEMallRepository, conversation_id:
     ).order_by(ProductDraft.id.desc()).limit(1))
 
 
+def mark_ready(draft: ProductDraft):
+    if not draft.sku:
+        draft.sku = f"SP-{draft.id:06d}-{secrets.token_hex(2).upper()}"
+    draft.status = "ready"
+
+
 def create_product_draft(
     session: Session,
     shop: UTEMallRepository,
@@ -246,6 +252,8 @@ def create_product_draft_images(
             draft.updated_at = datetime.utcnow()
         session.add(draft)
         session.flush()
+        if draft.status == 'collecting' and not pending_fields and not missing_fields(draft):
+            mark_ready(draft)
         answer = (
             f"Đã nhận **{len(stored)} ảnh**. Mình sẽ dùng ảnh cùng yêu cầu của bạn để soạn sản phẩm."
             if len(stored) > 1 else "Đã nhận ảnh. Mình sẽ dùng ảnh cùng yêu cầu của bạn để soạn sản phẩm."
@@ -283,6 +291,7 @@ async def advance_product_draft(
     *,
     message: str,
     upload_dir: Path,
+    review_only: bool = False,
 ) -> dict:
     text = normalize_text(message).strip(".! ")
     dialogue = _draft_dialogue(session, draft, limit=1)
@@ -300,7 +309,9 @@ async def advance_product_draft(
         draft.copy_instructions = message[:2000]
 
     action = draft_action(message)
-    if action == 'pause':
+    if review_only and (action == 'cancel' or _is_publish_command(message)):
+        answer = 'Mình giữ bản nháp để bạn xem lại và xác nhận.'
+    elif action == 'pause':
         answer = 'Mình giữ nguyên bản nháp và ảnh. Khi muốn làm tiếp, bạn gửi thêm thông tin hoặc mở lại cuộc trò chuyện này nhé.'
     elif action == 'cancel':
         pending_fields = []
@@ -428,9 +439,7 @@ async def advance_product_draft(
             draft.status = "collecting"
             answer = clarification
         elif not remaining:
-            if not draft.sku:
-                draft.sku = f"SP-{draft.id:06d}-{secrets.token_hex(2).upper()}"
-            draft.status = "ready"
+            mark_ready(draft)
             updated = original != (draft.name, draft.description, draft.price_vnd, draft.stock, draft.category_id)
             prefix = ('Mình đã cập nhật bản nháp.' if updated else 'Bản nháp hiện tại đã đủ thông tin.') if was_ready else 'Mình đã chuẩn bị xong bản nháp.'
             answer = _ready_answer(draft, prefix=prefix)

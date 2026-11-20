@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import datetime
 
 from sqlalchemy import select
 
@@ -8,6 +9,8 @@ from app.ai.context import bounded_history
 from app.ai.text import assistant_text
 from app.ai.money import money_mentions
 from app.ai.small_talk import social_reply
+from app.ai.money import plain
+from app.integrations.ute_mall import ShopItemNotFoundError
 from app.models.action import ActionProposal
 from app.models.agent_run import AgentRun
 from app.models.product_draft import ProductDraft
@@ -16,6 +19,14 @@ from app.services.seller_tools import proposal_to_dict
 from app.models.product_edit import ProductEditProposal
 from app.services.product_edits import edit_to_dict
 from app.services.chat_reports import build_chat_report
+from app.services.advisor import read_memory
+
+
+PRODUCT_REFERENCE = re.compile(
+    r'\b(?:(?:san pham|mon|mau|mat hang|hang|cai) (?:nay|do|vua dang)|'
+    r'(?:moi|vua) dang(?! (?:ky|nhap)\b)|(?:this|that) (?:product|item)|(?:just|recently) listed)\b'
+)
+ASK_PRODUCT = 'Bạn muốn tư vấn cho sản phẩm nào? Cho mình tên hoặc mã SKU nhé.'
 
 
 def recent_runs(session, shop, conversation_id, limit=12):
@@ -26,6 +37,74 @@ def recent_runs(session, shop, conversation_id, limit=12):
         AgentRun.shop_slug == (shop.seller_shop_slug or "local"),
     ).order_by(AgentRun.id.desc()).limit(limit)).all()
     return list(reversed(rows))
+
+
+def conversation_memory(session, shop, conversation_id):
+    reset = read_memory(session, shop, 'system').get('reset_at')
+    since = datetime.fromisoformat(reset) if reset else None
+    runs = recent_runs(session, shop, conversation_id, limit=24)
+    if since:
+        runs = [run for run in runs if run.created_at >= since]
+    for index in range(len(runs) - 1, -1, -1):
+        if runs[index].tool_name == 'forget_assistant_memory':
+            return runs[index + 1:], runs[index].created_at
+    return runs, since
+
+
+def has_product_reference(message):
+    return bool(PRODUCT_REFERENCE.search(plain(message).casefold()) or re.search(r'\bnó\b', message.casefold()))
+
+
+def conversation_product(session, shop, conversation_id, runs, since=None, *, published_only=False):
+    """Resolve one product from documented selections or this thread's listings."""
+    if not conversation_id:
+        return {}
+    statuses = ('published',) if published_only else ('collecting', 'ready', 'published')
+    query = select(ProductDraft).where(
+        ProductDraft.conversation_id == str(conversation_id),
+        ProductDraft.shop_slug == (shop.seller_shop_slug or 'local'),
+        ProductDraft.status.in_(statuses),
+    )
+    if since:
+        query = query.where(ProductDraft.updated_at >= since)
+    draft = session.scalar(query.order_by(ProductDraft.updated_at.desc(), ProductDraft.id.desc()).limit(1))
+
+    if not published_only:
+        for run in reversed(runs):
+            if draft and run.created_at <= draft.updated_at:
+                break
+            if run.product_draft_id:
+                continue
+            facts = json.loads(run.facts_json)
+            selection = facts.get('live_product_selection') or facts
+            selected = selection.get('selected_product') or selection
+            sku = selected.get('sku')
+            if 'items' in selection and not sku:
+                items = selection['items']
+                if len(items) != 1:
+                    return {}
+                sku = items[0].get('sku')
+            if sku:
+                return {'selected_product': product_by_sku(shop, sku)}
+
+    if draft and draft.status == 'published' and draft.sku:
+        return {'selected_product': product_by_sku(shop, draft.sku)}
+    if draft:
+        return {'draft_context': {'name': draft.name, 'description': draft.description,
+                                  'category': draft.category_name, 'selling_price_vnd': draft.price_vnd,
+                                  'stock': draft.stock, 'published': False}}
+    return {}
+
+
+def product_by_sku(shop, sku):
+    try:
+        return shop.get_item_by_sku(sku)
+    except ShopItemNotFoundError:
+        return {'sku': sku, 'found': False}
+
+
+def refers_to_published_product(message):
+    return bool(re.search(r'\b(?:vua dang|moi dang|just listed|recently listed)\b', plain(message).casefold()))
 
 
 def resolve_message(message, runs):
@@ -106,7 +185,7 @@ def run_data(session, run):
         draft_data['missing_fields'] = list(dict.fromkeys(facts.get('pending_fields', []) + draft_data['missing_fields']))
     return {
         "run_id": run.id, "conversation_id": run.conversation_id,
-        "answer": assistant_text(run.answer), "intent": run.intent, "mode": run.mode,
+        "answer": assistant_text(facts.get('live_spoken_answer') or run.answer), "intent": run.intent, "mode": run.mode,
         "provider": run.provider, "model": run.model, "fallback_reason": run.fallback_reason,
         "tool": run.tool_name, "facts": facts,
         "proposal": proposal_to_dict(proposal) if proposal else None,
@@ -115,3 +194,9 @@ def run_data(session, run):
         "suggestions": [], "integration_mode": "local_store",
         "report": build_chat_report(run.tool_name, facts),
     }
+
+
+def turn_data(session, run):
+    response = run_data(session, run)
+    return {'message': response['facts'].get('live_spoken_message') or run.message,
+            'created_at': run.created_at.isoformat() + 'Z', 'response': response}

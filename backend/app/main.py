@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.ai.factory import create_provider
 from app.api.v1.router import router
-from app.core.config import Settings
+from app.core.config import LOCAL_WEB_ORIGIN, Settings
 from app.core.logging import configure_logging
 from app.db.session import build_engine
 from app.integrations.ute_mall import UTEMallRepository, ShopDatabaseError
@@ -17,17 +17,6 @@ from app.services.chat_requests import ChatRequestManager
 from app.services.browser_connector import BrowserRequests
 
 logger = logging.getLogger(__name__)
-
-# Demo web runs on Expo's 8081 or the dedicated web server's 5173. DHCP may
-# change the computer's LAN address; still match only local/private hosts and
-# these frontend ports, rather than allowing every origin or an arbitrary port.
-_IP_OCTET = r'(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)'
-LOCAL_WEB_ORIGIN = (
-    rf'^https?://(?:localhost|127\.0\.0\.1|\[::1\]|10\.{_IP_OCTET}\.{_IP_OCTET}\.{_IP_OCTET}'
-    rf'|172\.(?:1[6-9]|2\d|3[01])\.{_IP_OCTET}\.{_IP_OCTET}|192\.168\.{_IP_OCTET}\.{_IP_OCTET})'
-    r':(?:5173|8081)$'
-)
-
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
@@ -37,6 +26,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         configure_logging()
         engine = build_engine(settings.database_url)
         app.state.session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+        app.state.live_sessions = set()
         app.state.shop_repository = UTEMallRepository(
             settings.shop_database_path,
             settings.shop_timezone,

@@ -29,6 +29,10 @@
         }
       ],
       "expo-asset",
+      [
+        "expo-audio",
+        { "microphonePermission": "Cho phép SellerPilot dùng micro khi bạn trò chuyện Live." }
+      ],
       "expo-status-bar",
       [
         "expo-splash-screen",

@@ -9,6 +9,7 @@ import { ExtensionShell } from './integrations/ExtensionShell';
 import { AuthProvider } from './features/auth/AuthProvider';
 import { AuthGate } from './features/auth/AuthGate';
 import { warmBrandAssets } from './components/ui/brandAssets';
+import { LivePreferencesProvider } from './features/assistant/live/preferences';
 
 export default function App() {
   useEffect(() => { void warmBrandAssets(); }, []);
@@ -39,7 +40,9 @@ export default function App() {
 
   return (
     <SafeAreaProvider><ThemeProvider darkMode={darkMode} desktop={isShopeeExtension()}>
-      {isShopeeExtension() ? <ExtensionShell /> : <AuthProvider><AuthGate><AppShell darkMode={darkMode} onDarkModeChange={changeDarkMode} /></AuthGate></AuthProvider>}
+      {isShopeeExtension() ? <ExtensionShell /> : <AuthProvider><AuthGate><LivePreferencesProvider>
+        <AppShell darkMode={darkMode} onDarkModeChange={changeDarkMode} />
+      </LivePreferencesProvider></AuthGate></AuthProvider>}
     </ThemeProvider></SafeAreaProvider>
   );
 }

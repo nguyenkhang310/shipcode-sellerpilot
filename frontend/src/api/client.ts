@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { ApiResponse } from './types';
+import type { LivePreferences } from '../features/assistant/live/locale';
 
 import { resolveApiUrls } from './urls';
 import { inExtension, extensionRequest } from '../integrations/extension';
@@ -36,6 +37,18 @@ let accessToken: string | null = null;
 let unauthorized: (() => void) | undefined;
 export const setAccessToken = (token: string | null) => { accessToken = token; };
 export const onUnauthorized = (handler?: () => void) => { unauthorized = handler; };
+export function openSellerLiveSocket(conversationId: string, preferences: LivePreferences) {
+  const token = accessToken;
+  if (!token) throw new Error('Đăng nhập SellerPilot để mở Live.');
+  const url = new URL(API_URL + '/live');
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const socket = new WebSocket(url.href);
+  socket.addEventListener('open', () => {
+    if (accessToken === token) socket.send(JSON.stringify({ type: 'auth', token, conversation_id: conversationId, preferences, turn_protocol: 1 }));
+    else socket.close();
+  });
+  return socket;
+}
 export const privateMediaHeaders = (uri: string): Record<string, string> =>
   accessToken && uri.startsWith(API_URL + '/product-drafts/') ? { Authorization: 'Bearer ' + accessToken } : {};
 

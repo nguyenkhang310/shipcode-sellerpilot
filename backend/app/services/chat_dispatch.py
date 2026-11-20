@@ -39,6 +39,7 @@ def listing_request(message):
 
 async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRepository, provider, settings) -> ChatResponse:
     try:
+        review_only = session.info.get('review_only', False)
         conversation_id = str(payload.conversation_id) if payload.conversation_id else None
         active_draft = get_active_draft(session, shop, conversation_id)
         previous=recent_runs(session,shop,conversation_id,limit=24)
@@ -57,7 +58,7 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
         if active_draft is None and listing_request(payload.message):
             active_draft = create_text_product_draft(session, shop, conversation_id)
             return ChatResponse(data=await advance_product_draft(session, shop, provider, active_draft,
-                message=payload.message, upload_dir=settings.shop_product_upload_dir))
+                message=payload.message, upload_dir=settings.shop_product_upload_dir, review_only=review_only))
         continue_edit=bool(pending_edit(previous) and not planning_request(payload.message)
             and (extract_sku(payload.message.lower()) or re.match(r'\s*(?:tieu de|ten san pham|mo ta|gia|ton|so luong)\s*[:=]',plain(payload.message))
                  or parse_fallback(payload.message,today=datetime.now(shop.timezone).date()).intent=='unknown'))
@@ -98,6 +99,7 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
                 session, shop, provider, active_draft,
                 message=payload.message,
                 upload_dir=settings.shop_product_upload_dir,
+                review_only=review_only,
             ))
         return ChatResponse(data=await handle_chat(
             session,

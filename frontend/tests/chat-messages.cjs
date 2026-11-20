@@ -7,9 +7,21 @@ const ts=require('typescript');
 const filename=path.resolve(__dirname,'../src/features/assistant/chatMessages.ts');
 const code=ts.transpileModule(fs.readFileSync(filename,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const loaded={exports:{}};
-vm.runInNewContext('(function(require,module,exports){'+code+'\n})',{})(()=>({productDraftImageUrl:url=>'http://api'+url}),loaded,loaded.exports);
+const timeline={};
+const timelineCode=ts.transpileModule(fs.readFileSync(path.join(path.dirname(filename),'live/timeline.ts'),'utf8'),
+  {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+vm.runInNewContext('(function(exports){'+timelineCode+'\n})',{})(timeline);
+vm.runInNewContext('(function(require,module,exports){'+code+'\n})',{})(name=>name==='./live/timeline'
+  ? timeline : {productDraftImageUrl:url=>'http://api'+url},loaded,loaded.exports);
 const {restoreMessages,latestProductCards}=loaded.exports;
 const {assistantText,assistantMessage}=loaded.exports;
+
+test('saving a voice turn keeps the keys used by the two streaming bubbles',()=>{
+ const data={run_id:81,answer:'Shop có hai đơn.',facts:{live_turn_id:'voice-turn'}};
+ const rows=restoreMessages([{message:'Hôm nay có bao nhiêu đơn?',response:data}]);
+ assert.equal(rows[0].id,timeline.liveMessageKey('voice-turn','user'));
+ assert.equal(rows[1].id,timeline.liveMessageKey('voice-turn','assistant'));
+});
 
 test('report snapshot survives answer normalization and history restoration',()=>{
  const report={title:'Hiệu quả kinh doanh',metrics:[{label:'Giá trị đơn',value:0,unit:'vnd'}],charts:[],table:null};

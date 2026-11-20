@@ -38,7 +38,7 @@ Không đặt key trong frontend, biến `EXPO_PUBLIC_*`, chat, ảnh chụp ho�
 
 ## Tối đa ba key
 
-Điền thêm khi cần, kèm **project ID thật** tương ứng trong AI Studio:
+Điền hai key bổ sung khi cần. Các dòng Project ID có thể để trống.
 
 ```dotenv
 GEMINI_PROJECT_ID=
@@ -49,15 +49,16 @@ GEMINI_PROJECT_ID_3=
 ```
 
 Hạn mức Gemini tính theo project, không theo số key hay số tài khoản Google.
-Các key cùng project chia sẻ bộ đếm và thời gian chờ. Key thiếu project ID cùng
-vào một nhóm chưa xác minh; backend không mặc định chúng có quota độc lập.
+Các key khai báo cùng Project ID chia sẻ bộ đếm và thời gian chờ.
+Key thiếu Project ID dùng chung bộ đếm yêu cầu chat tại backend.
 Key trùng được loại bỏ; khai báo cùng key với hai project khác nhau bị từ chối.
 
-Backend luân phiên key đang khả dụng. Khi nhận 429, cả nhóm project nghỉ theo
-`Retry-After` (mặc định 60 giây nếu dịch vụ không cung cấp thời gian), rồi mới được
-dùng lại. Lỗi xác thực 401/403 vô hiệu key đó trong tiến trình hiện tại; sửa cấu
-hình rồi khởi động lại. Lỗi nội dung/định dạng yêu cầu không được giải quyết bằng
-cách đổi key. Không có vòng lặp gọi liên tục khi hết quota.
+Chat và Live luân phiên các key khả dụng. Khi nhận 429, backend tạm nghỉ các key
+cùng Project ID. Nếu Project ID để trống, backend chỉ tạm nghỉ key vừa gặp 429
+và thử key kế tiếp. Thời gian chờ theo `Retry-After` hoặc 60 giây mặc định.
+Google vẫn thực thi hạn mức của project. Khi Live đã kết nối, phiên dùng key
+đã chọn cho đến khi kết thúc. Lỗi xác thực vô hiệu riêng key đó trong tiến trình
+hiện tại.
 
 ## Groq dự phòng, tùy chọn
 
