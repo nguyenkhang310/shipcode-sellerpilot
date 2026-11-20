@@ -8,9 +8,9 @@ const TARGET_VOICE_RMS = .20;
 const GAIN_WINDOW = REPLY_SAMPLE_RATE / 50;
 
 const PAUSE_BLOCK = REPLY_SAMPLE_RATE / 50;
-const QUIET_BLOCKS = 9;
-const MIN_LEAD_SAMPLES = REPLY_SAMPLE_RATE * 1.2;
-const LEAD_AHEAD_BYTES = REPLY_SAMPLE_RATE * 2 * .48;
+const QUIET_BLOCKS = 7;
+const MIN_LEAD_SAMPLES = REPLY_SAMPLE_RATE * .9;
+const LEAD_AHEAD_BYTES = REPLY_SAMPLE_RATE * 2 * .34;
 
 /** Find one quiet join for starting native playback before a long reply finishes. */
 export class ReplyLead {

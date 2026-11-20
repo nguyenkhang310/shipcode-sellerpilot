@@ -28,7 +28,7 @@ class ChatData(BaseModel):
     @classmethod
     def decode_answer(cls, value):
         return assistant_text(value)
-    intent: Literal["shop_summary", "inventory_query", "change_price", "product_search", "sales_advice", "create_product", "update_product", "unknown"]
+    intent: Literal["shop_summary", "inventory_query", "change_price", "product_search", "sales_advice", "create_product", "update_product", "delete_product", "unknown"]
     mode: Literal["ai", "fallback"]
     provider: Literal["ollama", "opencode", "antigravity", "gemini", "groq", "deterministic_parser"]
     model: str | None

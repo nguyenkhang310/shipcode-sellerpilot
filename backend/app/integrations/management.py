@@ -34,7 +34,7 @@ def _product_rows(connection, shop, query="", limit=20, offset=0, low=False, *, 
     image = "p.image_url" if "image_url" in columns else "NULL"
     sold = "p.sold_count" if "sold_count" in columns else "0"
     rating = "p.rating" if "rating" in columns else "0"
-    filters = [scope]
+    filters = [scope, "p.status IS NOT 'archived'"]
     if query:
         # Literal search; user text never becomes SQL.
         connection.create_function("search_text", 1, _search_text, deterministic=True)

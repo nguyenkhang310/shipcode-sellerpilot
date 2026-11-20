@@ -20,7 +20,7 @@ def _read(connection, shop, product_id):
     raw = dict(row)
     variants = [dict(item) for item in connection.execute('SELECT * FROM product_variant WHERE product_id=? ORDER BY id', (product_id,))]
     version = hashlib.sha256(json.dumps([raw, variants], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-    editable = ['name'] + (['description'] if 'description' in raw else []) + ['price_vnd', 'stock']
+    editable = [] if raw['status'] == 'archived' else ['name'] + (['description'] if 'description' in raw else []) + ['price_vnd', 'stock']
     return {'id': raw['id'], 'sku': raw['sku'], 'name': raw['name'], 'description': raw.get('description'),
             'price_vnd': round(raw['price']), 'stock': raw['stock'], 'image_url': raw.get('image_url'),
             'status': raw['status'], 'version': version, 'editable_fields': editable,
@@ -47,14 +47,10 @@ def update_product(shop, product_id, payload):
         with shop._connect() as connection:
             connection.execute('BEGIN IMMEDIATE')
             before = _read(connection, shop, product_id)
-            connection.execute('''CREATE TABLE IF NOT EXISTS sellerpilot_manual_product_receipt (
-                operation_id TEXT PRIMARY KEY, request_digest TEXT NOT NULL, shop_slug TEXT NOT NULL,
-                product_id INTEGER NOT NULL, created_at TEXT NOT NULL)''')
-            receipt = connection.execute('SELECT * FROM sellerpilot_manual_product_receipt WHERE operation_id=?', (str(payload.request_id),)).fetchone()
-            if receipt:
-                if receipt['request_digest'] != digest or receipt['shop_slug'] != slug or receipt['product_id'] != product_id:
-                    raise ProductConflictError('Mã yêu cầu đã được dùng cho một thay đổi khác.')
+            if _replayed(connection, payload.request_id, digest, slug, product_id):
                 return {**before, 'replayed': True}
+            if before['status'] == 'archived':
+                raise ProductConflictError('Sản phẩm đã được xóa khỏi gian hàng.')
             if before['version'] != payload.expected_version:
                 raise ProductConflictError('Sản phẩm vừa thay đổi. Tải lại chi tiết trước khi lưu.')
             if changes.keys() - set(before['editable_fields']):
@@ -95,3 +91,45 @@ def update_product(shop, product_id, payload):
             return {**result, 'replayed': False}
     except sqlite3.Error as error:
         raise ShopDatabaseError('Cannot update product') from error
+
+
+def _replayed(connection, request_id, digest, slug, product_id):
+    connection.execute('''CREATE TABLE IF NOT EXISTS sellerpilot_manual_product_receipt (
+        operation_id TEXT PRIMARY KEY, request_digest TEXT NOT NULL, shop_slug TEXT NOT NULL,
+        product_id INTEGER NOT NULL, created_at TEXT NOT NULL)''')
+    receipt = connection.execute('SELECT * FROM sellerpilot_manual_product_receipt WHERE operation_id=?',
+                                 (str(request_id),)).fetchone()
+    if receipt and (receipt['request_digest'], receipt['shop_slug'], receipt['product_id']) != (digest, slug, product_id):
+        raise ProductConflictError('Mã yêu cầu đã được dùng cho một thay đổi khác.')
+    return receipt is not None
+
+
+def archive_product(shop, product_id, payload):
+    """Remove the listing atomically while retaining historical order references."""
+    slug = shop.seller_shop_slug or 'local'
+    digest = hashlib.sha256(f'archive:{slug}:{product_id}:{payload.expected_version}'.encode()).hexdigest()
+    try:
+        with shop._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            before = _read(connection, shop, product_id)
+            if _replayed(connection, payload.request_id, digest, slug, product_id):
+                return {**before, 'replayed': True}
+            if before['status'] == 'archived' or before['version'] != payload.expected_version:
+                raise ProductConflictError('Sản phẩm vừa thay đổi. Tải lại chi tiết trước khi xóa.')
+            connection.execute("UPDATE product SET status='archived', stock=0 WHERE id=?", (product_id,))
+            connection.execute('UPDATE product_variant SET is_active=0, stock=0 WHERE product_id=?', (product_id,))
+            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table in ('cart_item', 'wishlist_item'):
+                if table in tables:
+                    connection.execute(f'DELETE FROM {table} WHERE product_id=?', (product_id,))
+            now = datetime.utcnow().isoformat()
+            if 'seller_activity' in tables:
+                connection.execute('INSERT INTO seller_activity(shop_id,user_id,action,created_at) VALUES(?,NULL,?,?)',
+                                   (shop._resolve_shop_id(connection), f'SellerPilot · Xóa sản phẩm #{product_id}', now))
+            connection.execute('INSERT INTO sellerpilot_manual_product_receipt VALUES(?,?,?,?,?)',
+                               (str(payload.request_id), digest, slug, product_id, now))
+            result = _read(connection, shop, product_id)
+            connection.commit()
+            return {**result, 'replayed': False}
+    except sqlite3.Error as error:
+        raise ShopDatabaseError('Cannot archive product') from error

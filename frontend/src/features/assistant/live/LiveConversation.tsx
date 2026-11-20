@@ -37,6 +37,7 @@ type LiveEvent =
   | { type: 'transcript'; role: LiveCaption['role']; text: string; final?: boolean; snapshot?: boolean; unclear?: boolean; turn_id?: string }
   | { type: 'turn_saved'; turn: ConversationDetail['turns'][number] }
   | { type: 'draft'; draft: ProductDraft | null }
+  | { type: 'archive_review'; name: string }
   | { type: 'action_done'; changed: boolean; message: string; draft: ProductDraft | null }
   | { type: 'shop_result' } & LiveShopResult
   | { type: 'error' | 'ended' | 'image_rejected'; message: string };
@@ -68,6 +69,7 @@ type Session = {
   muted: boolean;
   picking: boolean;
   skipOutput: boolean;
+  outputOpen: boolean;
   readingReview?: boolean;
   gallery?: { images: PendingImage[]; requestId: string };
 };
@@ -164,6 +166,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
   const [processing, setProcessing] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [listing, setListing] = useState<ProductDraft | null>(null);
+  const [archiveReview, setArchiveReview] = useState('');
   const [notice, setNotice] = useState('');
   const [uploading, setUploading] = useState(false);
   const [galleryFailed, setGalleryFailed] = useState(false);
@@ -291,11 +294,11 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     const session: Session = { conversationId: conversationId ?? interruptedHistory.current ?? createMessageId(), voice: new VoiceTurn(),
       preRoll: new MicPrefix(420), startup: new MicPrefix(8000), captured: false, language: preferences.language,
       ready: false, captureStarted: false, pendingHistory: false, muted: false, picking: false,
-      skipOutput: false, manualTurns: false, waiting: false, playing: false, fallbackTurn: createMessageId(),
+      skipOutput: false, outputOpen: false, manualTurns: false, waiting: false, playing: false, fallbackTurn: createMessageId(),
       captions: new Map(), closedTurns: new Set() };
     current.current = session;
     setMuted(false); setInputReady(false); setCaptureReady(false); setSpeaking(false); setUserSpeaking(false); setProcessing(false);
-    setNotice(''); setPhase('connecting'); setUploading(false); setGalleryFailed(false); setListing(null);
+    setNotice(''); setPhase('connecting'); setUploading(false); setGalleryFailed(false); setListing(null); setArchiveReview('');
     try {
       function forwardFrame(socket: WebSocket, frame: MicFrame, rms = pcmLevel(frame.pcm)) {
         if (session.waiting) {
@@ -392,6 +395,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
               setInputReady(true);
               break;
             case 'audio': {
+              session.outputOpen = true;
               if (session.skipOutput || session.picking) break;
               const pcm = toByteArray(event.data);
               if (pcm.length > 2 && pcm.length % 2 === 0) {
@@ -403,13 +407,17 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
               break;
             }
             case 'interrupted':
+              session.outputOpen = false;
               session.skipOutput = false;
               session.audio?.interrupt();
               break;
             case 'audio_end':
+              session.outputOpen = false;
+              session.readingReview = session.playing && session.readingReview;
               if (!session.skipOutput) session.audio?.flush();
               break;
             case 'turn_end':
+              session.outputOpen = false;
               session.skipOutput = false;
               session.audio?.flush();
               if (event.clear_captions) discardCaptions(session, event.turn_id ?? session.fallbackTurn);
@@ -448,7 +456,9 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
               break;
             }
             case 'draft': setListing(event.draft); break;
+            case 'archive_review': setArchiveReview(event.name); break;
             case 'action_done':
+              setArchiveReview('');
               if (event.draft) setListing(event.draft);
               if (event.changed) onShopChanged?.();
               break;
@@ -526,7 +536,8 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
   function interrupt() {
     const session = current.current;
     if (!session) return;
-    session.skipOutput = true;
+    session.skipOutput = session.outputOpen;
+    session.readingReview = false;
     session.audio?.interrupt();
     if (session.muted) toggleMicrophone();
   }
@@ -539,7 +550,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     session.picking = true;
     setPicking(true); setNotice('');
     if (speaking) {
-      session.skipOutput = true;
+      session.skipOutput = session.outputOpen;
       session.audio?.interrupt();
     }
     if (!session.muted) pauseMicrophone(session);
@@ -617,7 +628,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
   const status = phase === 'connecting' ? captureReady ? copy.buffering : copy.connecting : phase === 'idle' ? copy.retry :
     uploading ? copy.uploading : picking ? copy.choosing : speaking ? copy.speaking : muted ? copy.muted :
     userSpeaking ? copy.userSpeaking : processing ? copy.processing : captureReady ? copy.listening : copy.openingMic;
-  const canSendTurn = listening && !processing;
+  const canSendTurn = listening && Boolean(current.current?.voice.hasSpeech) && !processing;
   const meterLabel = phase === 'idle' ? copy.retry : speaking ? copy.interrupt : canSendTurn ? copy.send : status;
   const finishSpeaking = () => {
     const session = current.current;
@@ -643,7 +654,10 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     {galleryFailed && !picking && phase === 'live' ? <Pressable accessibilityRole="button" onPress={() => void selectPhoto(true)} style={styles.textAction}>
       <Text style={[ui.secondaryText, { color: BRAND.orangeInk }]}>{copy.retryPhotos}</Text>
     </Pressable> : null}
-    {listing && listing.status !== 'cancelled' ? <View testID="live-product-draft" style={[styles.listing, { backgroundColor: IOS.card, borderColor: IOS.separator }]}>
+    {archiveReview && phase === 'live' ? <View testID="live-archive-review" style={[styles.listing, { backgroundColor: IOS.card, borderColor: IOS.separator }]}>
+      <Text style={[ui.caption, { color: IOS.red }]}>{copy.confirmArchive}</Text>
+      <Text numberOfLines={2} style={ui.listTitle}>{archiveReview}</Text>
+    </View> : listing && listing.status !== 'cancelled' ? <View testID="live-product-draft" style={[styles.listing, { backgroundColor: IOS.card, borderColor: IOS.separator }]}>
       <Text style={[ui.caption, { color: BRAND.orangeInk }]}>
         {listing.status === 'published' ? copy.published : listing.status === 'ready' ? copy.confirmPublish : copy.draft}
       </Text>
@@ -666,7 +680,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
       </Pressable>
       </Animated.View>
       {control(muted ? 'mic-off-outline' : 'mic-outline', muted ? copy.enableMic : copy.disableMic, toggleMicrophone, phase !== 'live' || picking)}
-      {control('close', copy.finish, () => close(), false, true)}
+      {control('call-outline', copy.finish, () => close(), false, true)}
     </View>
   </Animated.View>;
 });
@@ -676,8 +690,8 @@ const styles = StyleSheet.create({
   notice: { paddingHorizontal: 6, paddingBottom: 3 },
   listing: { borderWidth: 1, borderRadius: 17, paddingHorizontal: 13, paddingVertical: 9, gap: 3 },
   textAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  controls: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 5, borderRadius: 26, borderWidth: 1 },
-  control: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  controls: { flexDirection: 'row', alignItems: 'center', gap: 5, padding: 5, borderRadius: 23, borderWidth: 1 },
+  control: { width: 44, height: 44, borderRadius: 17, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   disabled: { opacity: .42 },
   pressed: { opacity: .72 },
   meterSlot: { flex: 1, minWidth: 0 },

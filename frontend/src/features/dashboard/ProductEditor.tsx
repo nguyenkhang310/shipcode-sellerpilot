@@ -4,7 +4,7 @@ import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Modal, Platform, Pre
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError } from '../../api/client';
 import { createMessageId } from '../../api/chatRequests';
-import { getProduct, updateProduct } from '../../api/sellerPilot';
+import { archiveProduct, getProduct, updateProduct } from '../../api/sellerPilot';
 import { ProductChanges, ProductDetail } from '../../api/types';
 import { ProductThumbnail } from '../../components/ui/ProductThumbnail';
 import { useFormScroll } from '../../components/layout/useFormScroll';
@@ -26,9 +26,10 @@ export function ProductEditor({ id, onClose, onUpdated }: { id: number | null; o
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [review, setReview] = useState(false);
   const [error, setError] = useState(''), [conflict, setConflict] = useState(false), [discard, setDiscard] = useState(false), [reload, setReload] = useState(0);
   const saving = useRef(false), operation = useRef<{ fingerprint: string; id: string } | null>(null);
+  const [removing, setRemoving] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    setProduct(null); setError(''); setReview(false); setConflict(false); setDiscard(false); setVariantId(null); operation.current = null;
+    setProduct(null); setError(''); setReview(false); setRemoving(false); setConflict(false); setDiscard(false); setVariantId(null); operation.current = null;
     if (id === null) { setLoading(false); return; }
     setLoading(true);
     getProduct(id, controller.signal).then(({ data }) => {
@@ -38,7 +39,7 @@ export function ProductEditor({ id, onClose, onUpdated }: { id: number | null; o
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [id, reload]);
-  useEffect(() => { formScroll.ref.current?.scrollTo({ y: 0, animated: false }); }, [review]);
+  useEffect(() => { formScroll.ref.current?.scrollTo({ y: 0, animated: false }); }, [review, removing]);
   const target = product?.variants.find(variant => variant.id === variantId) || product;
   const commerceEditable = Boolean(product && (!product.variants.length || variantId !== null));
   const changes: ProductChanges = {};
@@ -51,7 +52,12 @@ export function ProductEditor({ id, onClose, onUpdated }: { id: number | null; o
     }
   }
   const changed = Object.keys(changes).length > 0;
-  const close = () => { if (!saving.current) { if (changed) setDiscard(true); else onClose(); } };
+  const close = () => {
+    if (saving.current) return;
+    if (removing) setRemoving(false);
+    else if (changed) setDiscard(true);
+    else onClose();
+  };
   const validate = () => {
     if ('name' in changes && (form.name.trim().length < 3 || form.name.trim().length > 200)) return 'Tên sản phẩm cần từ 3 đến 200 ký tự.';
     if ('description' in changes && form.description.trim().length > 10000) return 'Mô tả không vượt quá 10.000 ký tự.';
@@ -61,16 +67,17 @@ export function ProductEditor({ id, onClose, onUpdated }: { id: number | null; o
   };
   const inspect = () => { const issue = validate(); setError(issue); if (!issue && changed && !conflict) { formScroll.blur(); Keyboard.dismiss(); setReview(true); } };
   const save = async () => {
-    if (!product || saving.current || !changed || conflict) return;
-    const issue = validate(); if (issue) { setError(issue); setReview(false); return; }
-    const fingerprint = JSON.stringify([product.version, variantId, changes]);
+    if (!product || saving.current || (!changed && !removing) || conflict) return;
+    const issue = removing ? '' : validate(); if (issue) { setError(issue); setReview(false); return; }
+    const fingerprint = JSON.stringify([product.version, removing, variantId, changes]);
     if (operation.current?.fingerprint !== fingerprint) operation.current = { fingerprint, id: createMessageId() };
     saving.current = true; setBusy(true); setError('');
     try {
-      await updateProduct(product.id, changes, product.version, operation.current.id, variantId);
+      if (removing) await archiveProduct(product.id, product.version, operation.current.id);
+      else await updateProduct(product.id, changes, product.version, operation.current.id, variantId);
       onUpdated(); onClose();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Chưa nhận được kết quả lưu. Thử lại để kiểm tra cùng yêu cầu.');
+      setError(e instanceof ApiError ? e.message : 'Chưa nhận được kết quả. Bạn có thể thử lại cùng yêu cầu.');
       if (e instanceof ApiError && e.status === 409) setConflict(true);
     } finally { saving.current = false; setBusy(false); }
   };
@@ -85,7 +92,10 @@ export function ProductEditor({ id, onClose, onUpdated }: { id: number | null; o
           {loading ? <ActivityIndicator style={{ margin: 30 }} color={BRAND.navy} /> : null}
           {product ? <>
             <View style={ui.row}><ProductThumbnail uri={product.image_url} size={52} radius={12} label={product.name} /><View style={ui.grow}><Text numberOfLines={2} style={ui.productName}>{product.name}</Text><Text style={ui.caption}>{product.variants.length ? product.variants.length + ' phân loại' : 'Sản phẩm không có phân loại'}</Text></View></View>
-            {!review ? <>
+            {removing ? <View style={{ gap: 8 }}><Text accessibilityRole="header" style={ui.listTitle}>Xóa khỏi gian hàng?</Text>
+              <Text style={ui.caption}>Người mua sẽ không thể đặt sản phẩm và các phân loại của nó. Lịch sử đơn hàng được giữ lại.</Text>
+              {changed ? <Text style={ui.caption}>Những thay đổi chưa lưu sẽ bị bỏ.</Text> : null}
+            </View> : !review ? <>
               {product.variants.length ? <View style={{ gap: 8 }}><Text style={ui.caption}>Chọn phân loại để sửa giá / tồn</Text>
                 {[{ id: null, sku: 'Nội dung chung', title: '', is_active: true }, ...product.variants].map(variant => <Pressable key={variant.id ?? 'parent'} accessibilityRole="radio" accessibilityLabel={'Sửa ' + variant.sku} accessibilityState={{ checked: variantId === variant.id }} disabled={busy} onPress={() => {
                   if ('price_vnd' in changes || 'stock' in changes) { setError('Giá / tồn của SKU hiện tại đang được sửa. Lưu hoặc khôi phục giá trị cũ trước khi đổi phân loại.'); return; }
@@ -98,6 +108,9 @@ export function ProductEditor({ id, onClose, onUpdated }: { id: number | null; o
                 const editable = product.editable_fields.includes(field) && (!['price_vnd', 'stock'].includes(field) || commerceEditable);
                 return <View key={field} onLayout={event => formScroll.position(field, event.nativeEvent.layout.y)} style={{ gap: 7 }}><Text style={ui.caption}>{labels[field]}</Text>{editable ? <TextInput onFocus={() => formScroll.focus(field)} onBlur={formScroll.blur} accessibilityLabel={labels[field]} value={form[field]} editable={!busy} onChangeText={value => { setForm(previous => ({ ...previous, [field]: value })); setError(''); }} multiline={field === 'description' || field === 'name'} keyboardType={field === 'price_vnd' || field === 'stock' ? 'number-pad' : 'default'} maxLength={field === 'name' ? 200 : field === 'description' ? 10000 : 16} style={{ fontSize: 16, lineHeight: 23, color: IOS.label, borderWidth: 1, borderColor: IOS.separator, borderRadius: 12, padding: 13, minHeight: field === 'description' ? 150 : 52, maxHeight: field === 'description' ? 260 : field === 'name' ? 104 : 52, textAlignVertical: 'top' }} /> : <Text style={ui.productName}>{field === 'price_vnd' || field === 'stock' ? 'Chọn phân loại bên trên' : 'Shop chưa hỗ trợ trường này'}</Text>}</View>;
               })}
+              {product.status !== 'archived' ? <Pressable accessibilityRole="button" disabled={busy || conflict} onPress={() => {
+                formScroll.blur(); Keyboard.dismiss(); setError(''); setRemoving(true);
+              }} style={ui.secondaryButton}><Text style={[ui.secondaryText, { color: IOS.red }]}>Xóa sản phẩm</Text></Pressable> : null}
             </> : <View style={{ gap: 18 }}>
               {variantId !== null ? <Text style={ui.caption}>Phân loại: {product.variants.find(item => item.id === variantId)?.sku}</Text> : null}
               {(Object.keys(changes) as (keyof Form)[]).map(field => <View key={field} onLayout={event => formScroll.position(field, event.nativeEvent.layout.y)} style={{ gap: 7 }}><Text style={ui.caption}>{labels[field]}</Text><Text selectable style={ui.caption}>{showValue(field, beforeValue(field))}</Text><Text selectable style={ui.productName}>→ {showValue(field, changes[field])}</Text></View>)}
@@ -108,7 +121,12 @@ export function ProductEditor({ id, onClose, onUpdated }: { id: number | null; o
           {conflict || !product && !loading ? <Pressable accessibilityRole="button" disabled={busy} onPress={() => setReload(value => value + 1)} style={ui.secondaryButton}><Text style={ui.secondaryText}>Tải lại sản phẩm</Text></Pressable> : null}
         </ScrollView>
         {product ? <View style={{ paddingHorizontal: 18, paddingTop: 12, flexShrink: 0, gap: 10, borderTopWidth: 1, borderColor: IOS.separator }}>
-          {discard ? <><Text style={ui.productName}>Bỏ những thay đổi chưa lưu?</Text><View style={ui.row}><Pressable accessibilityRole="button" onPress={() => setDiscard(false)} style={[ui.secondaryButton, { flex: 1 }]}><Text style={ui.secondaryText}>Tiếp tục sửa</Text></Pressable><Pressable accessibilityRole="button" onPress={onClose} style={[ui.secondaryButton, { flex: 1 }]}><Text style={[ui.secondaryText, { color: IOS.red }]}>Bỏ thay đổi</Text></Pressable></View></> : <>
+          {removing ? <View style={ui.row}>
+            <Pressable accessibilityRole="button" disabled={busy} onPress={() => setRemoving(false)} style={[ui.secondaryButton, { flex: 1 }]}><Text style={ui.secondaryText}>Quay lại</Text></Pressable>
+            <Pressable accessibilityRole="button" disabled={busy || conflict} onPress={() => void save()} style={[ui.secondaryButton, { flex: 1.4, backgroundColor: IOS.redSoft, opacity: conflict ? .5 : 1 }]}>
+              {busy ? <ActivityIndicator color={IOS.red} /> : <Text style={[ui.secondaryText, { color: IOS.red }]}>Xác nhận xóa</Text>}
+            </Pressable>
+          </View> : discard ? <><Text style={ui.productName}>Bỏ những thay đổi chưa lưu?</Text><View style={ui.row}><Pressable accessibilityRole="button" onPress={() => setDiscard(false)} style={[ui.secondaryButton, { flex: 1 }]}><Text style={ui.secondaryText}>Tiếp tục sửa</Text></Pressable><Pressable accessibilityRole="button" onPress={onClose} style={[ui.secondaryButton, { flex: 1 }]}><Text style={[ui.secondaryText, { color: IOS.red }]}>Bỏ thay đổi</Text></Pressable></View></> : <>
             {review ? <Pressable accessibilityRole="button" disabled={busy} onPress={() => { setReview(false); setError(''); }} style={ui.secondaryButton}><Text style={ui.secondaryText}>Chỉnh lại sản phẩm</Text></Pressable> : null}
             <Pressable accessibilityRole="button" disabled={!changed || busy || conflict} onPress={review ? () => void save() : inspect} style={[ui.primaryButton, (!changed || conflict) && { opacity: .4 }]}>{busy ? <ActivityIndicator color="#FFF" /> : <Text style={ui.primaryText}>{review ? 'Xác nhận lưu sản phẩm' : 'Xem thay đổi sản phẩm'}</Text>}</Pressable>
           </>}

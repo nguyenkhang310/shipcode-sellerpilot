@@ -18,7 +18,9 @@ def planning_request(message, history=()):
             'video_script' if re.search(r'tiktok|tik tok|kich ban|quay video|lam video|video ngan|reels|cau mo dau|hook|hieu qua tung video', text) else
             'performance_analysis' if re.search(
                 r'phan tich (?:so lieu|shop|kinh doanh|hieu suat|doanh)|tang doanh (?:thu|so)|tang don|ra don|'
-                r'ban cham|ban chay|xep hang san pham|lam sao (?:de )?ban|(?:how to|how (?:can|should) i) sell|increase sales',
+                r'ban cham|ban chay|xep hang san pham|lam sao (?:de )?ban|'
+                r'nen (?:bat dau )?ban.{0,40}(?:the nao|ra sao)|'
+                r'(?:how to|how (?:can|should) i) sell|increase sales',
                 text) else None)
     if mode is None and has_product_reference(message) and re.search(r'\b(?:ban|tiep thi|quang ba)\b', text):
         if re.search(r'lam sao|sao cho|ra sao|the nao', text):

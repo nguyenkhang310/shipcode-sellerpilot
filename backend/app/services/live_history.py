@@ -143,7 +143,7 @@ class LiveHistory:
                         run.tool_name = 'publish_product'
                 elif kind == 'price':
                     run.proposal_id = identifier
-                elif kind == 'edit':
+                elif kind in ('edit', 'archive'):
                     run.product_edit_proposal_id = identifier
             run.facts_json = json.dumps(facts, ensure_ascii=False)
             session.add(run)

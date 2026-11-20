@@ -58,6 +58,7 @@ const fallbackLabel = (reason: ChatData['fallback_reason']) => reason === 'inval
 
 export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () => void; onToast?: (message: string) => void; keyboardVisible?: boolean; reduceMotion?: boolean; active?: boolean }>(function AssistantChat({ onShopChanged, onToast, keyboardVisible = false, reduceMotion = false, active = true }, ref) {
   const { ui, IOS, BRAND, desktop } = useTheme();
+  const extensionPanel = inExtension();
   const auth = useAuth();
   const STORAGE = STORAGE_BASE + (auth?.user ? ':' + auth.user.shop.slug + ':' + auth.user.user.id : '');
   const { height: windowHeight, width: windowWidth, fontScale } = useWindowDimensions();
@@ -471,7 +472,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       if (version !== generation.current) return;
       setMessages(items => items.map(item => item.response?.product_edit_proposal?.id === data.id
         ? { ...item, response: { ...item.response, product_edit_proposal: data } } : item));
-      if (data.status === 'approved') onToast?.('Đã cập nhật sản phẩm trên shop.');
+      if (data.status === 'approved') onToast?.(data.action === 'archive' ? 'Đã xóa sản phẩm khỏi gian hàng.' : 'Đã cập nhật sản phẩm trên shop.');
     } catch (e) {
       onShopChanged?.();
       if (version !== generation.current) return;
@@ -624,6 +625,10 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     </View>
   );
   const productCardMessageIds = useMemo(() => latestProductCards(messages), [messages]);
+  const latestEditCards = useMemo(() => new Map(messages.flatMap(message => {
+    const proposal = message.response?.product_edit_proposal;
+    return proposal ? [[proposal.id, message.id] as const] : [];
+  })), [messages]);
   const proposalLabel = { approved: 'Đã cập nhật trên shop', rejected: 'Đã bỏ qua · Giá giữ nguyên', conflict: 'Giá đã thay đổi · Cần tạo đề xuất mới', pending: 'Chờ xác nhận' };
 
   return <View style={ui.chat}>
@@ -674,7 +679,8 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
           return [message.role === 'user'
         ? <MessageEntrance key={message.id} style={ui.userMessageRow} animate={!message.livePending && message.id === last?.id} reduceMotion={reduceMotion}><View testID="user-message" style={[ui.userBubble, Boolean(message.imageUris?.length) && ui.userBubbleMedia]}>{message.imageUris?.length === 1 ? <ProtectedImage testID="user-image-single" source={{ uri: message.imageUris[0] }} style={ui.userImageSingle} resizeMode="cover" /> : message.imageUris?.length ? <ScrollView testID="user-image-gallery" horizontal style={ui.userImageScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.userImageRow}>{message.imageUris.map((uri, index) => <ProtectedImage key={uri + index} source={{ uri }} style={ui.userImageMultiple} resizeMode="cover" />)}</ScrollView> : null}<Text selectable style={[ui.userText, Boolean(message.imageUris?.length) && ui.userTextWithMedia]}>{message.text}</Text></View></MessageEntrance>
         : <MessageEntrance key={message.id} style={ui.assistantMessageRow} animate={!message.livePending && !message.response?.facts.voice && message.id === last?.id} reduceMotion={reduceMotion} onLayout={message.response?.report && !message.response.facts.voice ? event => focusReport(message.id, event.nativeEvent.layout.y) : undefined}><View style={ui.assistantContent}><View style={[ui.row, { gap: 7, marginBottom: 8 }]}><BrandLogo size={20} /><Text style={ui.assistantName}>SellerPilot</Text></View><View style={ui.assistantBubble}><MessageText text={message.text} /></View>
-          {message.response?.product_edit_proposal ? <ProductEditCard proposal={message.response.product_edit_proposal} busy={actionsDisabled} error={editErrors[message.response.product_edit_proposal.id]} onDecide={choice => void decideEdit(message.response!.product_edit_proposal!, choice)} /> : null}
+          {message.response?.product_edit_proposal && latestEditCards.get(message.response.product_edit_proposal.id) === message.id
+            ? <ProductEditCard proposal={message.response.product_edit_proposal} busy={actionsDisabled} error={editErrors[message.response.product_edit_proposal.id]} onDecide={choice => void decideEdit(message.response!.product_edit_proposal!, choice)} /> : null}
           {message.response?.report && !isShopeeExtension() && !results.some(result => result.report
             && result.report.title === message.response?.report?.title
             && result.report.subtitle === message.response.report.subtitle) ? <ChatReportCard report={message.response.report} onInteract={holdReport} /> : null}
@@ -701,7 +707,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       {!liveOpen && !busy && !restoring && !keyboardVisible && last?.response?.suggestions?.length ? <ScrollView testID="chat-follow-ups" horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, height: Math.ceil(48 * fontScale + 28), maxHeight: Math.ceil(48 * fontScale + 28), marginTop: 12 }} contentContainerStyle={{ gap: 8, paddingBottom: 2, alignItems: 'center' }}>{last.response.suggestions.slice(0, 3).map(suggestion => <Pressable key={suggestion} accessibilityRole="button" onPress={() => void send(suggestion)} style={[ui.followUp, { minHeight: 44, maxWidth: 260, paddingVertical: 10 }]}><Text numberOfLines={2} style={[ui.followUpText, { flex: 0, flexShrink: 1 }]}>{suggestion}</Text><SystemIcon name="arrow-up-outline" size={15} color={BRAND.navy} /></Pressable>)}</ScrollView> : null}
     </ScrollView>
     {showLatest && hasThread ? <Pressable accessibilityRole="button" accessibilityLabel="Cuộn đến tin nhắn mới nhất" onPress={goBottom} style={[ui.circleButton, { position: 'absolute', right: 22, bottom: Math.max(12, composerAreaHeight + 12) }]}><SystemIcon name="arrow-down" size={20} color={BRAND.navy} /></Pressable> : null}
-    <View testID="chat-composer" onLayout={event => { const height = Math.ceil(event.nativeEvent.layout.height); setComposerAreaHeight(current => Math.abs(current - height) > 1 ? height : current); }} style={[ui.composerArea, { paddingBottom: desktop || keyboardVisible ? 8 : dockContentInset(insets.bottom), flexShrink: 0 }]}>
+    <View testID="chat-composer" onLayout={event => { const height = Math.ceil(event.nativeEvent.layout.height); setComposerAreaHeight(current => Math.abs(current - height) > 1 ? height : current); }} style={[ui.composerArea, { paddingBottom: desktop || extensionPanel || keyboardVisible ? 8 : dockContentInset(insets.bottom), flexShrink: 0 }]}>
       <View>
       <Animated.View pointerEvents={liveOpen ? 'none' : 'auto'} accessibilityElementsHidden={liveOpen} aria-hidden={liveOpen}
         importantForAccessibility={liveOpen ? 'no-hide-descendants' : 'auto'}
@@ -709,7 +715,14 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
       {pendingImages.length ? <ScrollView testID="attachment-strip" horizontal style={ui.attachmentScroller} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={ui.attachmentRow}>{pendingImages.map((pendingImage, index) => <View key={pendingImage.uri + index} style={ui.attachmentPreview}><ProtectedImage source={{ uri: pendingImage.uri }} style={ui.attachmentImage} resizeMode="cover" /><Pressable accessibilityRole="button" accessibilityLabel={`Bỏ ảnh số ${index + 1}`} hitSlop={10} onPress={() => setPendingImages(items => items.filter((_item, itemIndex) => itemIndex !== index))} style={ui.attachmentRemove}><SystemIcon name="close" size={17} color="#FFF" /></Pressable></View>)}{pendingImages.length < MAX_PRODUCT_IMAGES ? <Pressable accessibilityRole="button" accessibilityLabel="Thêm ảnh sản phẩm" onPress={() => void pickProductImage()} style={ui.attachmentAdd}><SystemIcon name="add" size={25} color={BRAND.navy} /><Text style={ui.attachmentCount}>{pendingImages.length}/{MAX_PRODUCT_IMAGES}</Text></Pressable> : null}</ScrollView> : null}
       <View style={ui.composer}><Pressable accessibilityRole="button" accessibilityLabel="Mở thư viện ảnh" disabled={actionsDisabled}
         onPress={() => void pickProductImage()} style={ui.composerPlus}><SystemIcon name="add" size={27} color={BRAND.navy} /></Pressable>
-        <View style={ui.composerInputFrame}><TextInput ref={input} accessibilityLabel="Nhắn cho SellerPilot" placeholder={pendingImages.length ? 'Thêm yêu cầu…' : 'Hỏi SellerPilot…'} placeholderTextColor={IOS.secondary} value={draft} onChangeText={value => { setDraft(value); if (!value) setInputHeight(INPUT_MIN_HEIGHT); }} multiline maxLength={4000} scrollEnabled={inputHeight >= INPUT_MAX_HEIGHT - 1} returnKeyType="default" blurOnSubmit={false} onFocus={() => setTimeout(() => { if (nearBottom.current) scroll.current?.scrollToEnd({ animated: false }); }, 80)} style={[ui.composerInput, { height: inputHeight }]} editable={!restoring} />
+        <View style={ui.composerInputFrame}><TextInput ref={input} accessibilityLabel="Nhắn cho SellerPilot" placeholder={pendingImages.length ? 'Thêm yêu cầu…' : 'Hỏi SellerPilot…'} placeholderTextColor={IOS.secondary} value={draft} onChangeText={value => { setDraft(value); if (!value) setInputHeight(INPUT_MIN_HEIGHT); }} multiline maxLength={4000} scrollEnabled={inputHeight >= INPUT_MAX_HEIGHT - 1} returnKeyType="default" blurOnSubmit={false}
+          onKeyPress={extensionPanel && Platform.OS === 'web' ? event => {
+            const key = event.nativeEvent as typeof event.nativeEvent & KeyboardEvent;
+            if (key.key !== 'Enter' || key.shiftKey || key.isComposing || key.keyCode === 229) return;
+            event.preventDefault();
+            if (!key.repeat && !actionsDisabled && (draft.trim() || pendingImages.length)) void send();
+          } : undefined}
+          onFocus={() => setTimeout(() => { if (nearBottom.current) scroll.current?.scrollToEnd({ animated: false }); }, 80)} style={[ui.composerInput, { height: inputHeight }]} editable={!restoring} />
           {Platform.OS !== 'web' ? <Text pointerEvents="none" accessible={false} aria-hidden onTextLayout={event => resizeComposerFromLines(event.nativeEvent.lines.length)} style={ui.composerMeasure}>{draft + '\u200B'}</Text> : null}</View>
         {showLiveButton ? <Pressable accessibilityRole="button" accessibilityLabel="Trò chuyện Live" disabled={actionsDisabled || Boolean(pendingChat.current)} onPress={() => { input.current?.blur(); live.current?.start(); }} style={({pressed}) => [ui.send, pressed && { transform: [{ scale: .95 }] }]}>
           <LiveOrb round />

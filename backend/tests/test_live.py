@@ -23,6 +23,7 @@ from app.services.live_history import LiveHistory
 from app.services.live_language import merge_transcript, unclear_vietnamese
 from app.services.live_shop import inspect_shop
 from app.services.product_drafts import publish_product_draft
+from app.services.product_archive_chat import is_product_archive_request
 from test_auth import secured, sign_in  # noqa: F401 - pytest fixture import
 
 
@@ -150,6 +151,77 @@ def test_end_of_microphone_audio_does_not_authorize_a_partial_confirmation():
     assert not live.voice_finished(speech)
     assert live.voice_finished({**speech, 'speech_finished': True})
     assert not live.voice_finished({**speech, 'speech_finished': True, 'awaiting_turn': False})
+
+
+def test_local_product_archive_preview_is_scoped_versioned_and_preserves_orders(secured):
+    client, path = secured
+    token = live_token(client)
+    headers = {'Authorization': 'Bearer ' + token}
+    conversation_id = str(uuid4())
+    with sqlite3.connect(path) as db:
+        db.execute("INSERT INTO \"order\" (id,shop_id,total_amount,status,created_at) VALUES (77,1,1000000,'pending','2026-11-21')")
+        db.execute('INSERT INTO order_item VALUES (1,77,1,1,1000000)')
+        db.execute('CREATE TABLE cart_item(id INTEGER PRIMARY KEY, product_id INTEGER)')
+        db.execute('INSERT INTO cart_item VALUES (1,1),(2,2)')
+    url = '/api/v1/management/products/1'
+    original = client.get(url, headers=headers).json()['data']
+    assert is_product_archive_request('Xóa sản phẩm này giúp mình')
+    for message in ('Có nên xóa sản phẩm này?', 'Đừng xóa sản phẩm', 'Xóa tất cả sản phẩm', 'Xóa SKU A và xóa SKU B'):
+        assert not is_product_archive_request(message)
+    preview = client.post('/api/v1/chat', headers=headers, json={'message': 'Xóa SKU SEED-PHONE',
+        'conversation_id': conversation_id})
+    assert preview.status_code == 200, preview.text
+    proposal = preview.json()['data']['product_edit_proposal']
+    assert proposal['action'] == 'archive' and proposal['status'] == 'pending'
+    assert client.get(url, headers=headers).json()['data']['status'] == 'active'
+    payload = {'expected_version': original['version'], 'request_id': str(uuid4())}
+    assert client.post(url + '/archive', json=payload).status_code == 401
+    response = client.post(url + '/archive', headers=headers, json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()['data']['status'] == 'archived'
+    assert client.post(url + '/archive', headers=headers, json=payload).json()['data']['replayed']
+    assert client.post(f"/api/v1/product-edits/{proposal['id']}/confirm", headers=headers).status_code == 409
+    assert client.get('/api/v1/management/products?q=SEED-PHONE', headers=headers).json()['data']['items'] == []
+    assert client.get('/api/v1/management/orders/77', headers=headers).status_code == 200
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT product_id,quantity,price FROM order_item').fetchone() == (1,1,1000000)
+        assert db.execute('SELECT stock,is_active FROM product_variant WHERE product_id=1').fetchone() == (0,0)
+        assert db.execute('SELECT product_id FROM cart_item').fetchall() == [(2,)]
+
+
+def test_live_archive_only_uses_spoken_identity_and_a_new_confirmation(secured):
+    client, _ = secured
+    token = live_token(client)
+    history = LiveHistory(client.app.state, token, uuid4(), 'fixture')
+    sent = []
+
+    async def send(event):
+        sent.append(event)
+
+    socket = SimpleNamespace(app=client.app, send_json=send)
+    actions = LiveActions(socket, history)
+
+    async def scenario():
+        model_proposal = {'message': 'Xóa SKU SEED-LAPTOP'}
+        history.user = 'Xóa SKU SEED-PHONE'
+        traffic = {'manual_turns': True, 'awaiting_turn': True, 'turn_signals': 1}
+        denied = await live.shop_tool(socket, token, 'prepare_chat_request', model_proposal, history, actions,
+            {**traffic, 'awaiting_turn': False})
+        assert not denied['accepted']
+        review = await live.shop_tool(socket, token, 'prepare_chat_request', model_proposal, history, actions,
+            {**traffic, 'speech_finished': True})
+        assert review['accepted'] and actions.pending.value['sku'] == 'SEED-PHONE'
+        assert sent[-1]['type'] == 'archive_review'
+        assert not (await actions.decide('Xác nhận xóa sản phẩm.', finished=True))['accepted']
+        actions.pending.armed = True
+        assert not (await actions.decide('Xác nhận xóa sản phẩm?', finished=True))['accepted']
+        assert (await actions.decide('Xác nhận xóa sản phẩm.', finished=True))['accepted']
+        assert not (await actions.decide('Xác nhận xóa sản phẩm.', finished=True))['accepted']
+
+    asyncio.run(scenario())
+    headers = {'Authorization': 'Bearer ' + token}
+    assert client.get('/api/v1/management/products/1', headers=headers).json()['data']['status'] == 'archived'
+    assert client.get('/api/v1/management/products/2', headers=headers).json()['data']['status'] == 'active'
 
 
 def test_live_keeps_the_spoken_answer_after_a_tool_phase_reports_completion(secured, monkeypatch):
@@ -399,7 +471,7 @@ def test_voice_relays_audio_and_saves_a_real_draft(secured, monkeypatch):
     assert {tool['name'] for tool in allowed} == {'prepare_listing', 'inspect_shop', 'prepare_chat_request',
                                                 'prepare_order', 'confirm_action'}
     assert upstream.sent[1]['realtimeInput']['audio']['mimeType'] == 'audio/pcm;rate=16000'
-    assert upstream.sent[0]['setup']['generationConfig']['speechConfig']['voiceConfig']['prebuiltVoiceConfig']['voiceName'] == 'Achird'
+    assert upstream.sent[0]['setup']['generationConfig']['speechConfig']['voiceConfig']['prebuiltVoiceConfig']['voiceName'] == 'Sulafat'
     replies = upstream.sent[2]['toolResponse']['functionResponses']
     assert [reply['response']['accepted'] for reply in replies] == [False, True, False]
     assert not client.app.state.live_sessions

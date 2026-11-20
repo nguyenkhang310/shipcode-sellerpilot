@@ -18,6 +18,7 @@ from app.services.chat import handle_chat, is_casual_message
 from app.services.order_assistant import is_order_question
 from app.services.conversations import recent_runs, history_messages
 from app.services.product_edit_chat import is_product_edit_request, pending_edit, handle_product_edit
+from app.services.product_archive_chat import archive_target_reply, is_product_archive_request, prepare_product_removal
 from app.ai.fallback import extract_sku
 from app.services.product_drafts import (
     ProductDraftConflictError, _wants_ai_description,
@@ -43,6 +44,8 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
         conversation_id = str(payload.conversation_id) if payload.conversation_id else None
         active_draft = get_active_draft(session, shop, conversation_id)
         previous=recent_runs(session,shop,conversation_id,limit=24)
+        if is_product_archive_request(payload.message) or archive_target_reply(payload.message, previous):
+            return ChatResponse(data=prepare_product_removal(session, shop, payload.message, conversation_id))
         # Social acknowledgements are not names, captions or edit targets.
         # Keep work in progress intact so the next factual reply can resume it.
         casual = is_casual_message(payload.message) and not re.search(

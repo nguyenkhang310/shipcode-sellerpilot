@@ -14,14 +14,17 @@ export function ProductEditCard({ proposal, busy, error, onDecide }: {
 }) {
   const { ui, IOS, BRAND } = useTheme();
   const [expanded, setExpanded] = useState(false);
+  const removing = proposal.action === 'archive';
   const format = (field: string, value: string | number | null) => value === null || value === '' ? 'Chưa có' :
     field === 'price_vnd' ? money(Number(value)) : field === 'stock' ? count(Number(value)) + ' sản phẩm' : String(value);
   const hasLongText = proposal.changes.some(change => String(change.before ?? '').length > 180 || String(change.after).length > 180);
   return <View style={ui.proposal}>
     <View style={ui.proposalBody}>
-      <Text style={ui.proposalKicker}>{status[proposal.status]}</Text>
+      <Text style={ui.proposalKicker}>{removing && proposal.status === 'pending' ? 'Xóa khỏi gian hàng' :
+        removing && proposal.status === 'approved' ? 'Đã xóa khỏi gian hàng' : status[proposal.status]}</Text>
       <Text style={ui.listTitle}>{proposal.product_name}</Text>
-      <Text style={ui.caption}>SKU {proposal.sku}</Text>
+      {proposal.sku ? <Text style={ui.caption}>SKU {proposal.sku}</Text> : null}
+      {removing && proposal.status === 'pending' ? <Text style={ui.caption}>Lịch sử đơn hàng được giữ lại.</Text> : null}
       {proposal.shared_content ? <Text style={[ui.caption, { marginTop: 7 }]}>Tiêu đề và mô tả dùng chung cho các phân loại.</Text> : null}
       {proposal.changes.map(change => <View key={change.field} style={{ paddingTop: 15, gap: 6 }}>
         <Text style={[ui.productName, { fontWeight: '600' }]}>{labels[change.field]}</Text>
@@ -35,8 +38,8 @@ export function ProductEditCard({ proposal, busy, error, onDecide }: {
     </View>
     {proposal.status === 'pending' || proposal.status === 'executing' ? <View style={ui.proposalActions}>
       {proposal.status === 'pending' ? <Pressable accessibilityRole="button" disabled={busy} onPress={() => onDecide('reject')} style={[ui.secondaryButton, { flex: 1 }]}><Text style={ui.secondaryText}>Bỏ qua</Text></Pressable> : null}
-      <Pressable accessibilityRole="button" accessibilityLabel={'Xác nhận sửa sản phẩm SKU ' + proposal.sku} disabled={busy} onPress={() => onDecide('confirm')} style={[ui.primaryButton, { flex: 1.6 }, busy && { opacity: .55 }]}>
-        {busy ? <ActivityIndicator color="#FFF" /> : <SystemIcon name="checkmark" size={18} color="#FFF" />}<Text style={ui.primaryText}>{proposal.status === 'executing' ? 'Kiểm tra lại kết quả' : 'Xác nhận sửa'}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={removing ? 'Xác nhận xóa ' + proposal.product_name : 'Xác nhận sửa sản phẩm SKU ' + proposal.sku} disabled={busy} onPress={() => onDecide('confirm')} style={[removing ? ui.secondaryButton : ui.primaryButton, { flex: 1.6 }, removing && {backgroundColor: IOS.redSoft}, busy && { opacity: .55 }]}>
+        {busy ? <ActivityIndicator color={removing ? IOS.red : '#FFF'} /> : <SystemIcon name={removing ? 'trash-outline' : 'checkmark'} size={18} color={removing ? IOS.red : '#FFF'} />}<Text style={removing ? [ui.secondaryText, {color: IOS.red}] : ui.primaryText}>{proposal.status === 'executing' ? 'Kiểm tra lại kết quả' : removing ? 'Xác nhận xóa' : 'Xác nhận sửa'}</Text>
       </Pressable>
     </View> : null}
   </View>;

@@ -93,10 +93,10 @@ test('native Live splits at a quiet join spanning packets only after buffering t
   const lead = new ReplyLead();
   let bytes = 0;
   const append = pcm => lead.observe(pcm, bytes += pcm.length);
-  assert.equal(append(replyPcm(1140, 1500)), 0);
+  assert.equal(append(replyPcm(900, 1500)), 0);
   assert.equal(append(replyPcm(100)), 0);
   assert.equal(append(replyPcm(100)), 0);
-  assert.equal(append(replyPcm(500, 1700)), replyPcm(1230).length);
+  assert.equal(append(replyPcm(300, 1700)), replyPcm(970).length);
 });
 
 test('native Live leaves an uninterrupted phrase or all-silent audio in one clip', () => {

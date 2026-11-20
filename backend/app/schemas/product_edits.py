@@ -42,6 +42,7 @@ class ProductEditData(BaseModel):
     sku: str
     product_name: str
     target_kind: Literal['product','variant']
+    action: Literal['edit', 'archive'] = 'edit'
     status: Literal['pending','executing','approved','rejected','conflict']
     changes: list[FieldChange]
     shared_content: bool

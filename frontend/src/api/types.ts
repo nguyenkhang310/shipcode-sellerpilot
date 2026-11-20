@@ -1,7 +1,7 @@
 /** Shared API envelope returned by the FastAPI backend. */
 export type ApiResponse<T> = { data: T; meta?: Record<string, unknown> };
 
-export type ChatIntent = 'shop_summary' | 'inventory_query' | 'change_price' | 'product_search' | 'sales_advice' | 'create_product' | 'update_product' | 'unknown';
+export type ChatIntent = 'shop_summary' | 'inventory_query' | 'change_price' | 'product_search' | 'sales_advice' | 'create_product' | 'update_product' | 'delete_product' | 'unknown';
 export type ChatFallbackReason = 'provider_unavailable' | 'provider_timeout' | 'model_unavailable' | 'invalid_response' | 'provider_rejected' | 'provider_rate_limited' | 'free_tier_restricted' | 'free_model_unavailable' | 'tool_not_allowed';
 
 export type PriceProposal = {
@@ -39,6 +39,7 @@ export type ProductDraft = {
 
 export type ProductEditProposal = {
   id: number; sku: string; product_name: string; target_kind: 'product' | 'variant';
+  action?: 'edit' | 'archive';
   status: 'pending' | 'executing' | 'approved' | 'rejected' | 'conflict';
   changes: { field: 'name' | 'description' | 'price_vnd' | 'stock'; before: string | number | null; after: string | number }[];
   shared_content: boolean; created_at: string; decided_at: string | null; idempotent: boolean;

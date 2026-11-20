@@ -1,5 +1,5 @@
 from uuid import UUID
-from pydantic import Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.schemas.product_edits import ProductChanges
 
 
@@ -14,3 +14,9 @@ class ProductUpdate(ProductChanges):
         if not changed or any(getattr(self, key) is None for key in changed):
             raise ValueError('Cần ít nhất một trường thay đổi; không nhận giá trị null.')
         return self
+
+
+class ProductArchive(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    request_id: UUID
+    expected_version: str = Field(pattern=r'^[a-f0-9]{64}$')

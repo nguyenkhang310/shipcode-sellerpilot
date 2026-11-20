@@ -1,6 +1,6 @@
 import { MAX_PLAYBACK_SECONDS, REPLY_SAMPLE_RATE, WEB_REPLY_RATE, ReplyVolume, type AudioCallbacks, type LiveAudio } from './audioTypes';
 
-const FIRST_PLAY_BUFFER = .085;
+const FIRST_PLAY_BUFFER = .065;
 const RECOVERY_BUFFER = .15;
 
 // Integrate neighbouring input samples and emit 40 ms of mono PCM at 16 kHz.

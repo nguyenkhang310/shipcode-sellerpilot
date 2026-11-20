@@ -26,6 +26,9 @@ export async function sendSellerMessage(message: string, signal?: AbortSignal, c
 
 export const getManagement = (days: number, signal?: AbortSignal, date?: string | null) => apiRequest<ManagementData>('/management/dashboard?' + new URLSearchParams({days: String(days), ...(date ? {date} : {})}), { signal });
 export const getProduct = (id: number, signal?: AbortSignal) => apiRequest<ProductDetail>('/management/products/' + id, {signal});
+export const archiveProduct = (id: number, version: string, requestId: string) => apiRequest<ProductDetail>(`/management/products/${id}/archive`, {
+  method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({expected_version: version, request_id: requestId}), timeoutMs: 20000,
+});
 export const updateProduct = (id: number, changes: ProductChanges, version: string, requestId: string, variantId: number | null) => apiRequest<ProductDetail>('/management/products/' + id, {
   method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({...changes, expected_version: version, request_id: requestId, variant_id: variantId}), timeoutMs: 20000,
 });

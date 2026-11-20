@@ -425,7 +425,7 @@ class UTEMallRepository:
                     variant_filter = ' AND p.shop_id = ?' if shop_id is not None else ''
                     variant_params = (variant_id, product_id, shop_id) if shop_id is not None else (variant_id, product_id)
                     row = connection.execute(
-                        f"SELECT v.price FROM product_variant v JOIN product p ON p.id=v.product_id WHERE v.id = ? AND v.product_id = ?{variant_filter}",
+                        f"SELECT v.price FROM product_variant v JOIN product p ON p.id=v.product_id WHERE v.id = ? AND v.product_id = ? AND p.status IS NOT 'archived'{variant_filter}",
                         variant_params,
                     ).fetchone()
                     if not row:
@@ -452,7 +452,7 @@ class UTEMallRepository:
                     product_filter = ' AND shop_id = ?' if shop_id is not None else ''
                     product_params = (product_id, shop_id) if shop_id is not None else (product_id,)
                     row = connection.execute(
-                        f"SELECT price FROM product WHERE id = ?{product_filter}", product_params,
+                        f"SELECT price FROM product WHERE id = ? AND status IS NOT 'archived'{product_filter}", product_params,
                     ).fetchone()
                     if not row:
                         raise ShopItemNotFoundError(str(product_id))

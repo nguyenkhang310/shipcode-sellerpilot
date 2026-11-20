@@ -341,10 +341,10 @@ Live tự chọn key khi mở phiên và thử key hợp lệ tiếp theo khi ke
 hoặc đang chạm hạn mức. `GEMINI_PROJECT_ID` là tùy chọn. Khi để trống, backend thử
 key tiếp theo và tạm nghỉ riêng key vừa gặp 429. Các key có cùng Project ID
 được tạm nghỉ cùng nhau khi project chạm hạn mức.
-Model Live mặc định là `gemini-3.8-live` với giọng `Achird`.
+Model Live mặc định là `gemini-3.8-live`. Tiếng Việt dùng giọng Sulafat cố định.
 Sau khi chạy `npm ci` và khởi động lại `npm run demo`, đăng nhập rồi mở **Trợ lý**.
 Bấm nút sóng âm cạnh ô chat trống và cấp quyền micro khi được hỏi.
-Mục **Shop → Giọng trợ lý** lưu lựa chọn giọng nam/nữ và tiếng Việt/English trên từng thiết bị.
+Mục **Shop → Giọng trợ lý** lưu ngôn ngữ và lựa chọn giọng nam/nữ cho tiếng Anh.
 Lựa chọn áp dụng cho giọng nói, nhận diện lời nói và báo cáo của phiên Live tiếp theo.
 Web dùng `http://localhost:8081` hoặc HTTPS để trình duyệt cho phép micro. Trên
 iOS/Android dùng Expo Go tương thích SDK 58 và quét QR mới. Nếu dùng bản native
@@ -352,6 +352,8 @@ tự build trước khi thêm `expo-audio`, cần build lại để nạp module
 
 Live xưng mình/bạn và dùng chung dữ liệu, biểu đồ và bản nháp với chat. Bạn có thể
 hỏi số liệu, nhờ tư vấn kinh doanh, chỉnh sản phẩm, theo dõi và cập nhật đơn.
+Để xóa khỏi gian hàng, dùng nút **Xóa sản phẩm** trong màn sửa, gửi tên/SKU trong chat
+hoặc nói trong Live rồi xác nhận. Lịch sử đơn của sản phẩm được giữ lại.
 SellerPilot đọc lại đề xuất rồi chờ bạn nói «xác nhận cập nhật sản phẩm» hoặc
 «xác nhận cập nhật đơn» để lưu. Tính năng quảng cáo hỗ trợ lập kế hoạch và đo hiệu quả.
 
@@ -568,6 +570,7 @@ Thay `IP_LAN_CUA_MAY` bằng IP thật. Restart Expo sau khi thay `.env`. Các b
 ## 5. Cài đặt và chạy Chrome Extension (Shopee Connector)
 
 Extension SellerPilot chạy trên Chrome Side Panel, giúp đồng bộ số liệu và tự động điền form sản phẩm trên **Kênh Người Bán Shopee** (`https://banhang.shopee.vn/`).
+Trong khung chat, nhấn **Enter** để gửi và **Shift+Enter** để xuống dòng.
 
 ### Bước 1: Build Extension từ thư mục gốc
 

@@ -10,6 +10,7 @@ export const LIVE_TEXT = {
     muted: 'Micro đã tắt', userSpeaking: 'Bạn đang nói', processing: 'Đang xử lý', listening: 'Đang nghe',
     send: 'Gửi lượt nói', addPhotos: 'Thêm ảnh', retryPhotos: 'Thử lưu ảnh lại', enableMic: 'Bật mic', disableMic: 'Tắt mic',
     finish: 'Kết thúc Live', published: 'Đã đăng sản phẩm', confirmPublish: 'Chờ bạn nói “xác nhận đăng”',
+    confirmArchive: 'Nói “xác nhận xóa sản phẩm”',
     draft: 'Bản nháp sản phẩm', untitled: 'Sản phẩm mới', noPrice: 'Chưa có giá', stock: 'trong kho', photos: 'ảnh',
   },
   en: {
@@ -18,6 +19,7 @@ export const LIVE_TEXT = {
     muted: 'Microphone muted', userSpeaking: 'You’re speaking', processing: 'Processing', listening: 'Listening',
     send: 'Send voice turn', addPhotos: 'Add photos', retryPhotos: 'Retry saving photos', enableMic: 'Unmute', disableMic: 'Mute',
     finish: 'End Live', published: 'Product published', confirmPublish: 'Say “confirm publish”',
+    confirmArchive: 'Say “confirm product removal”',
     draft: 'Product draft', untitled: 'New product', noPrice: 'No price yet', stock: 'in stock', photos: 'photos',
   },
 };

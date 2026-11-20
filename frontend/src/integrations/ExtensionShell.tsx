@@ -119,42 +119,40 @@ export function ExtensionShell() {
   const button = (label: string, action: () => void, icon: 'menu-outline' | 'create-outline') =>
     <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={action} style={ui.circleButton}><Ionicons name={icon} size={19} color={IOS.label}/></Pressable>;
   return <View testID="extension-shell" style={{flex: 1, minHeight: 0, width: '100%', backgroundColor: IOS.bg}}>
-    <View style={{height: 52, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: IOS.card, borderBottomWidth: 1, borderColor: IOS.separator}}>
+    <View style={{height: 52, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: IOS.card}}>
       <BrandLogo size={28}/><Text style={{fontSize: 15, fontWeight: '600', color: IOS.label, flex: 1}}>SellerPilot</Text>
       {button('Lịch sử trò chuyện', () => {setTab('assistant'); assistant.current?.openHistory();}, 'menu-outline')}
       {button('Cuộc trò chuyện mới', () => {setTab('assistant'); assistant.current?.newConversation();}, 'create-outline')}
     </View>
     <ExtensionBar onPage={setPage} onConnection={onConnection}/>
-    <View accessibilityRole="tablist" style={{flexDirection: 'row', borderBottomWidth: 1, borderColor: IOS.separator, backgroundColor: IOS.card, paddingHorizontal: 6}}>
-      {TABS.map(item => <Pressable key={item.key} accessibilityRole="tab" accessibilityLabel={item.title} accessibilityState={{selected: item.key === tab}} onPress={() => setTab(item.key)} style={{flex: 1, minWidth: 0, paddingVertical: 10, gap: 4, alignItems: 'center', borderBottomWidth: 2, borderColor: tab === item.key ? BRAND.navy : 'transparent'}}>
-        <InterfaceIcon name={item.icon} size={17} color={tab === item.key ? BRAND.navy : IOS.secondary}/><Text numberOfLines={1} style={{fontSize: 11, fontWeight: tab === item.key ? '600' : '400', color: tab === item.key ? BRAND.navy : IOS.secondary}}>{item.title}</Text>
+    <View accessibilityRole="tablist" style={{flexDirection: 'row', borderBottomWidth: 1, borderColor: IOS.separator, backgroundColor: IOS.card, paddingHorizontal: 8, paddingVertical: 6, gap: 2}}>
+      {TABS.map(item => <Pressable key={item.key} accessibilityRole="tab" accessibilityLabel={item.title} accessibilityState={{selected: item.key === tab}} onPress={() => setTab(item.key)} style={({pressed}) => ({
+        flex: 1, minWidth: 0, paddingVertical: 6, gap: 3, minHeight: 44, alignItems: 'center', justifyContent: 'center',
+        borderRadius: 9, backgroundColor: tab === item.key ? BRAND.orangeSoft : 'transparent', opacity: pressed ? .72 : 1,
+      })}>
+        <InterfaceIcon name={item.icon} size={16} color={tab === item.key ? BRAND.orangeInk : IOS.secondary}/><Text numberOfLines={1} style={{fontSize: 11, fontWeight: tab === item.key ? '700' : '500', color: tab === item.key ? BRAND.orangeInk : IOS.secondary}}>{item.title}</Text>
       </Pressable>)}
     </View>
     {notice ? <Pressable accessibilityRole="button" accessibilityLabel="Đóng thông báo" onPress={() => setNotice('')} style={{padding: 10, backgroundColor: IOS.card}}><Text style={ui.caption}>{notice}</Text></Pressable> : null}
-    <View style={[{flex: 1, minHeight: 0}, tab !== 'assistant' && {display: 'none'}]}><AssistantChat ref={assistant} onToast={setNotice}/></View>
+    <View style={[{flex: 1, minHeight: 0}, tab !== 'assistant' && {display: 'none'}]}><AssistantChat ref={assistant} onToast={setNotice} active={tab === 'assistant'}/></View>
     {tab !== 'assistant' ? <ScrollView style={{flex: 1}} contentContainerStyle={{padding: 14, gap: 14}}>
-      <View style={{gap: 4}}><Text style={{fontSize: 20, fontWeight: '600', color: IOS.label}}>{TABS.find(item => item.key === tab)?.title}</Text>
-        <Text style={ui.caption}>{connection?.target?.label || 'Chưa chọn tài khoản'} · {validPage ? 'Trang đang xem' : (tab === 'overview' && currentMetrics.length) || (tab !== 'overview' && tab !== 'shop' && relevant.length) ? 'Dữ liệu đã thu thập từ Shopee' : 'Chưa đọc dữ liệu'}</Text></View>
+      <Text accessibilityRole="header" style={{fontSize: 20, fontWeight: '600', color: IOS.label}}>{TABS.find(item => item.key === tab)?.title}</Text>
       {stock && ['overview', 'products'].includes(tab) ? <View style={{padding: 14, gap: 10, borderRadius: 10, backgroundColor: IOS.card, borderWidth: 1, borderColor: IOS.separator}}>
         <View style={ui.between}><Text style={ui.listTitle}>Tồn kho</Text><Text style={ui.caption}>{stockPage?.coverage?.pages_read || 1} trang · {stockPage?.coverage?.pagination_complete ? 'Đã đọc hết danh sách' : 'Chưa đọc đủ'}</Text></View>
         <View style={{flexDirection: 'row', gap: 12}}>{[[stock.records_count, 'Dòng hàng'], [stock.total_units, 'Tổng tồn đã biết'], [stock.low_stock_count, 'Sắp hết · ≤5']] .map(([value, label]) => <View key={String(label)} style={{flex: 1, gap: 5}}><Text style={{fontSize: 20, fontWeight: '600', color: IOS.label}}>{Number(value).toLocaleString('vi-VN')}</Text><Text style={ui.caption}>{label}</Text></View>)}</View>
         {stock.quantities_unknown ? <Text style={ui.caption}>{stock.quantities_unknown} dòng chưa xác định số tồn</Text> : null}
-        <Pressable accessibilityRole="button" onPress={() => {setTab('assistant'); assistant.current?.ask('Sản phẩm nào gần hết hàng? Liệt kê SKU, số tồn và đề xuất nhập hàng.');}} style={ui.secondaryButton}><Text style={ui.secondaryText}>Xem hàng sắp hết với SellerPilot</Text></Pressable>
+        <Pressable accessibilityRole="button" onPress={() => {setTab('assistant'); assistant.current?.ask('Sản phẩm nào gần hết hàng? Liệt kê SKU, số tồn và đề xuất nhập hàng.');}} style={ui.secondaryButton}><Text style={ui.secondaryText}>Xem hàng sắp hết</Text></Pressable>
       </View> : null}
       {tab === 'overview' ? <>
         {currentMetrics.length ? <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 8}}>{currentMetrics.map(metric => <View key={metric.label} style={{width: '47%', flexGrow: 1, padding: 14, gap: 8, borderRadius: 10, backgroundColor: IOS.card, borderWidth: 1, borderColor: IOS.separator}}>
           <Text style={ui.caption}>{metric.label}</Text><Text style={{fontSize: 22, fontWeight: '600', color: IOS.label}}>{metric.value}</Text>
-        </View>)}</View> : <Text style={ui.caption}>Chưa có số liệu tổng quan. Bấm Cập nhật để tự thu thập từ Shopee.</Text>}
-        {trustedConnection && (validPage || cachedPages.dashboard) ? <Text style={ui.caption}>Cập nhật {new Date(cachedPages.dashboard?.snapshot.captured_at || validPage!.snapshot.captured_at).toLocaleTimeString('vi-VN')} · Kỳ báo cáo chưa xác minh tự động.</Text> : null}
-        <Pressable accessibilityRole="button" onPress={() => {setTab('assistant'); assistant.current?.ask('Phân tích dữ liệu shop đã đồng bộ, kiểm tra hàng sắp hết và đề xuất 3 việc ưu tiên.');}} style={ui.secondaryButton}><Text style={ui.secondaryText}>Phân tích với SellerPilot</Text></Pressable>
+        </View>)}</View> : <Text style={ui.caption}>Chưa có số liệu. Chọn Cập nhật để đọc trang.</Text>}
+        {trustedConnection && (validPage || cachedPages.dashboard) ? <Text style={ui.caption}>Cập nhật {new Date(cachedPages.dashboard?.snapshot.captured_at || validPage!.snapshot.captured_at).toLocaleTimeString('vi-VN')}</Text> : null}
+        {currentMetrics.length ? <Pressable accessibilityRole="button" onPress={() => {setTab('assistant'); assistant.current?.ask('Phân tích dữ liệu shop đã đồng bộ, kiểm tra hàng sắp hết và đề xuất 3 việc ưu tiên.');}} style={ui.secondaryButton}><Text style={ui.secondaryText}>Phân tích với SellerPilot</Text></Pressable> : null}
       </> : tab === 'shop' ? <View style={{backgroundColor: IOS.card, padding: 14, gap: 12, borderRadius: 10}}>
         <Text style={ui.listTitle}>{connection?.target?.label || 'Chưa liên kết tài khoản'}</Text>
-        <Text style={ui.caption}>Liên kết trình duyệt · Chưa cấp quyền Open API</Text>
-        <Text style={ui.caption}>Tự đọc số liệu và danh sách sản phẩm/đơn hàng qua các trang nhận diện được trong tab nền. Không gửi nguyên văn trang, tên người mua, số điện thoại hay địa chỉ.</Text>
-        <Text style={ui.caption}>Có thể chat, phân tích ảnh, soạn nội dung và điền form tên/mô tả/giá/tồn. Ảnh, ngành hàng, biến thể và lưu/đăng được kiểm tra trực tiếp trên Shopee.</Text>
-        <Text style={ui.caption}>Kết nối độc lập bằng Shop ID và đồng bộ toàn shop cần ứng dụng Shopee Open Platform được cấp quyền.</Text>
+        <Text style={ui.caption}>{trustedConnection ? 'Đã liên kết qua trình duyệt' : 'Chọn Liên kết để kết nối shop'}</Text>
       </View> : <>
-        {relevant.length ? <Text style={ui.caption}>Xem trước tối đa 4 bảng, 50 dòng mỗi bảng. AI dùng toàn bộ dữ liệu đã đọc để tính tồn.</Text> : null}
         {relevant.length ? relevant.slice(0, 4).map((table, index) => <View key={index} style={{backgroundColor: IOS.card, borderWidth: 1, borderColor: IOS.separator, borderRadius: 10, overflow: 'hidden'}}>
           <Text style={[ui.caption, {padding: 12}]}>{Math.max(0, table.length - 1)} dòng đã đọc</Text>
           <ScrollView horizontal><View>{table.slice(0, 51).map((row, rowIndex) => <View key={rowIndex} style={{flexDirection: 'row', paddingVertical: 10, borderTopWidth: 1, borderColor: IOS.separator, backgroundColor: rowIndex === 0 ? IOS.fill : IOS.card}}>{row.map((cell, cellIndex) => <Text key={cellIndex} numberOfLines={3} style={{width: cellIndex === 0 ? 180 : 125, paddingHorizontal: 12, fontSize: 12, lineHeight: 18, fontWeight: rowIndex === 0 ? '600' : '400', color: IOS.label}}>{cell || '—'}</Text>)}</View>)}</View></ScrollView>

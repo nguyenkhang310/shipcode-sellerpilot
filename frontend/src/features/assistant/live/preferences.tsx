@@ -76,8 +76,8 @@ export function LiveVoiceSettings() {
     <View style={ui.row}><SystemIcon name="mic-outline" size={21} color={BRAND.navy} />
       <Text accessibilityRole="header" style={ui.listTitle}>Giọng trợ lý</Text>
     </View>
-    {choices('voice', 'Giọng nói', [['male', 'Nam'], ['female', 'Nữ']])}
     {choices('language', 'Ngôn ngữ trò chuyện Live', [['vi', 'Tiếng Việt'], ['en', 'English']])}
-    <Text style={ui.caption}>Áp dụng khi mở phiên Live tiếp theo.</Text>
+    {value.language === 'en' ? choices('voice', 'Giọng tiếng Anh', [['male', 'Nam'], ['female', 'Nữ']])
+      : <Text style={ui.caption}>Giọng tiếng Việt · Sulafat</Text>}
   </View>;
 }

@@ -18,6 +18,7 @@ const SYMBOLS = {
   pin: 'pin.fill', 'pin-outline': 'pin.slash', 'trash-outline': 'trash',
   'ellipsis-horizontal': 'ellipsis',
   'pulse-outline': 'waveform', 'mic-outline': 'mic', 'mic-off-outline': 'mic.slash',
+  'call-outline': 'phone.down.fill',
 } as const satisfies Record<string, SymbolViewProps['name']>;
 
 export function SystemIcon({ name, size = 22, color }: { name: keyof typeof SYMBOLS; size?: number; color: string }) {

@@ -16,6 +16,8 @@ from app.schemas.order_management import OrderUpdate
 from app.services.advisor import forget_memory, is_forget_request
 from app.services.auth import verify_seller
 from app.services.conversation_state import ensure_conversation_open
+from app.services.conversations import recent_runs
+from app.services.product_archive_chat import archive_target_reply
 from app.services.product_drafts import (
     ProductDraftConflictError, ProductDraftNotFoundError, cancel_product_draft,
     draft_stored_images, draft_to_dict, get_active_draft, get_product_draft, publish_product_draft,
@@ -52,6 +54,11 @@ class LiveActions:
         verify_seller(self.shop, session, self.history.token)
         ensure_conversation_open(session, self.tenant, self.history.conversation_id)
 
+    def follows_archive_request(self, speech):
+        with self.state.session_factory() as session:
+            self.authenticate(session)
+            return archive_target_reply(speech, recent_runs(session, self.shop, self.history.conversation_id, limit=1))
+
     def load_draft(self, draft_id=None):
         with self.state.session_factory() as session:
             self.authenticate(session)
@@ -75,17 +82,23 @@ class LiveActions:
                          f"{draft['image_count']} photos. Say “confirm publish” to list it."))
         return self.pending.message if self.pending and self.pending.kind == 'publish' else None
 
+    async def clear_review(self):
+        if self.pending and self.pending.kind == 'archive':
+            await self.socket.send_json({'type': 'archive_review', 'name': ''})
+        self.pending = None
+
     async def ask_chat(self, message):
         if self.history.delegated:
             return {'accepted': False, 'message': self.say('Mình đã xử lý yêu cầu này. Dùng kết quả của công cụ trước.',
                                                            'Use the previous result for this turn.')}
         if is_forget_request(message):
+            await self.clear_review()
             self.pending = Review('memory', {'id': 0},
                 'Bạn muốn xóa những điều mình ghi nhớ về shop. Nói «xác nhận xóa ghi nhớ» để thực hiện.')
             return {'accepted': True, 'review': self.pending.message}
         with self.state.session_factory() as session:
             self.authenticate(session)
-        self.pending = None
+        await self.clear_review()
         request = ChatRequest(message=message[:4000], conversation_id=UUID(self.history.conversation_id), request_id=uuid4())
         key = self.manager.submit(request, self.shop, review_only=True)
         await self.manager.wait(key)
@@ -102,12 +115,19 @@ class LiveActions:
                 "Bạn nói «xác nhận cập nhật sản phẩm» để lưu.")
             review_message = self.pending.message
         if (edit := data.get('product_edit_proposal')) and edit['status'] == 'pending':
-            fields = {'name': 'tên', 'description': 'mô tả', 'price_vnd': 'giá', 'stock': 'tồn kho'}
-            changes = '; '.join(f"{fields[item['field']]} từ {item['before']} thành {item['after']}" for item in edit['changes'])
-            self.pending = Review('edit', edit, f"Sửa {edit['product_name']}, mã {edit['sku']}. {changes}. "
-                                  "Bạn nói «xác nhận cập nhật sản phẩm» để lưu.")
+            if edit['action'] == 'archive':
+                self.pending = Review('archive', edit, self.say(
+                    f"Bạn muốn xóa {edit['product_name']} khỏi gian hàng. Các đơn cũ vẫn được giữ. Bạn nói «xác nhận xóa sản phẩm» nhé.",
+                    f"You asked to remove {edit['product_name']} from your shop. Past orders will be kept. Say “confirm product removal”."))
+            else:
+                fields = {'name': 'tên', 'description': 'mô tả', 'price_vnd': 'giá', 'stock': 'tồn kho'}
+                changes = '; '.join(f"{fields[item['field']]} từ {item['before']} thành {item['after']}" for item in edit['changes'])
+                self.pending = Review('edit', edit, f"Sửa {edit['product_name']}, mã {edit['sku']}. {changes}. "
+                                      "Bạn nói «xác nhận cập nhật sản phẩm» để lưu.")
             review_message = self.pending.message
         if review_message:
+            if self.pending and self.pending.kind == 'archive':
+                await self.socket.send_json({'type': 'archive_review', 'name': self.pending.value['product_name']})
             return {'accepted': True, 'review': review_message}
         instruction = (' Hướng dẫn bạn bấm nút Thêm ảnh trong Live. Ảnh được lưu ngay sau khi chọn.'
                        if draft and 'image' in draft['missing_fields'] else '')
@@ -117,7 +137,7 @@ class LiveActions:
 
     async def accept_gallery(self, draft_id, run_id):
         draft, jpeg = await run_in_threadpool(self.gallery, draft_id, run_id)
-        self.pending = None
+        await self.clear_review()
         review = await self.set_draft(draft)
         missing = {'name': 'tên sản phẩm', 'price_vnd': 'giá bán', 'stock': 'tồn kho', 'category_id': 'ngành hàng',
                    'description': 'mô tả'}
@@ -158,6 +178,7 @@ class LiveActions:
                   'shipping_carrier': 'đơn vị vận chuyển', 'tracking_number': 'mã vận đơn', 'note': 'ghi chú', 'status': 'trạng thái'}
         statuses = {'paid': 'chờ lấy hàng', 'shipped': 'đang giao', 'delivered': 'đã giao', 'cancelled': 'đã hủy'}
         summary = '; '.join(f"{fields[key]} thành {statuses.get(value, value) or 'để trống'}" for key, value in changes.items())
+        await self.clear_review()
         self.pending = Review('order', {'id': order_id},
                               f"Cập nhật đơn {order_id}, {summary}. Bạn nói «xác nhận cập nhật đơn» để lưu.", payload)
         return {'accepted': True, 'review': self.pending.message}
@@ -172,22 +193,25 @@ class LiveActions:
         if not pending or not pending.armed or not finished or self.history.unclear:
             return None
         words = spoken_words(speech)
-        reject = words in {'huy yeu cau', 'khong dong y', 'dung cap nhat', 'chua dang', 'dung dang'}
+        reject = words in {'huy yeu cau', 'khong dong y', 'dung cap nhat', 'chua dang', 'dung dang',
+                           'khong xoa', 'dung xoa', 'chua xoa'}
         phrases = {
             'publish': {'xac nhan dang', 'xac nhan dang san pham', 'dang di', 'dang luon', 'dong y dang', 'dang san pham di'},
             'cancel_draft': {'xac nhan huy ban nhap'},
             'price': {'xac nhan cap nhat san pham', 'xac nhan doi gia', 'dong y doi gia'},
             'edit': {'xac nhan cap nhat san pham', 'dong y cap nhat san pham'},
+            'archive': {'xac nhan xoa san pham', 'xac nhan go khoi gian hang'},
             'order': {'xac nhan cap nhat don', 'xac nhan cap nhat don hang'},
             'memory': {'xac nhan xoa ghi nho'},
         }
         if self.history.language == 'en':
-            reject = words in {'cancel request', 'do not publish', 'do not update', 'stop this change'}
+            reject = words in {'cancel request', 'do not publish', 'do not update', 'do not remove', 'stop this change'}
             phrases = {
                 'publish': {'confirm publish', 'publish it', 'confirm listing', 'confirm publishing'},
                 'cancel_draft': {'confirm draft cancellation', 'confirm cancel draft'},
                 'price': {'confirm product update', 'confirm price update'},
                 'edit': {'confirm product update'},
+                'archive': {'confirm product removal', 'confirm product deletion'},
                 'order': {'confirm order update'},
                 'memory': {'confirm memory reset'},
             }
@@ -208,6 +232,8 @@ class LiveActions:
                 result, message, changed = await run_in_threadpool(self.apply, pending, reject)
         except (ProductDraftConflictError, ProductDraftNotFoundError, ProposalConflictError,
                 ProposalNotFoundError, OrderConflictError, ShopItemNotFoundError):
+            if pending.kind == 'archive':
+                await self.socket.send_json({'type': 'archive_review', 'name': ''})
             return {'accepted': False, 'message': 'Thông tin vừa thay đổi hoặc thao tác không còn hợp lệ. Mình cần đọc lại trước khi bạn xác nhận.'}
         self.history.decision = (pending.kind, pending.value['id'], message)
         await self.socket.send_json({'type': 'action_done', 'changed': changed, 'message': message,
@@ -249,6 +275,9 @@ class LiveActions:
             else:
                 result, replayed = decide_product_edit(session, self.shop, identifier, approve=not reject)
                 result = edit_to_dict(result, idempotent=replayed)
+            if kind == 'archive' and not reject:
+                return result, self.say(f"Mình đã xóa {result['product_name']} khỏi gian hàng.",
+                                        f"I removed {result['product_name']} from your shop."), not replayed
             return result, (self.say('Mình đã bỏ đề xuất cập nhật.', 'I discarded the proposed update.') if reject else
                             self.say('Mình đã cập nhật sản phẩm trong shop.', 'I updated the product in your shop.')), not reject
 

@@ -9,8 +9,8 @@ from app.integrations.ute_mall import ShopDatabaseError, UTEMallRepository
 from app.integrations.ute_mall import ShopItemNotFoundError
 from app.integrations.order_management import order_detail, update_order, OrderConflictError
 from app.schemas.order_management import OrderUpdate
-from app.integrations.product_management import product_detail, update_product, ProductConflictError
-from app.schemas.product_management import ProductUpdate
+from app.integrations.product_management import archive_product, product_detail, update_product, ProductConflictError
+from app.schemas.product_management import ProductArchive, ProductUpdate
 
 router = APIRouter(prefix="/management", tags=["mobile management"])
 
@@ -63,6 +63,18 @@ def get_product(product_id: int, shop: UTEMallRepository = Depends(get_shop)):
 def patch_product(product_id: int, payload: ProductUpdate, shop: UTEMallRepository = Depends(get_shop)):
     try:
         return {'data': update_product(shop, product_id, payload)}
+    except ShopItemNotFoundError as error:
+        raise HTTPException(404, detail='Không tìm thấy sản phẩm trong shop đang liên kết.') from error
+    except ProductConflictError as error:
+        raise HTTPException(409, detail=str(error)) from error
+    except ShopDatabaseError as error:
+        raise shop_error(error) from error
+
+
+@router.post('/products/{product_id}/archive')
+def remove_product(product_id: int, payload: ProductArchive, shop: UTEMallRepository = Depends(get_shop)):
+    try:
+        return {'data': archive_product(shop, product_id, payload)}
     except ShopItemNotFoundError as error:
         raise HTTPException(404, detail='Không tìm thấy sản phẩm trong shop đang liên kết.') from error
     except ProductConflictError as error:

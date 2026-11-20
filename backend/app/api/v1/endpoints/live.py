@@ -17,16 +17,19 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus, WebSocketException
 
 from app.ai.key_pool import GeminiKeyPool, gemini_credentials, rejected_gemini_key, retry_delay
+from app.ai.money import plain
 from app.core.config import LOCAL_WEB_ORIGIN
 from app.integrations.ute_mall import ShopDatabaseError, ShopItemNotFoundError
 from app.services.auth import verify_seller
 from app.services.business_advisor import planning_request
+from app.services.chat_dispatch import listing_request
 from app.services.conversation_state import ensure_conversation_open
 from app.services.conversations import has_product_reference
 from app.services.live_actions import LiveActions
 from app.services.live_history import LiveHistory
-from app.services.live_language import GEMINI_VOICES, LivePreferences, REPEAT_QUESTION, transcription_config, unclear_vietnamese
+from app.services.live_language import GEMINI_VOICES, VIETNAMESE_VOICE, LivePreferences, REPEAT_QUESTION, transcription_config, unclear_vietnamese
 from app.services.live_shop import inspect_shop
+from app.services.product_archive_chat import is_product_archive_request
 from app.services.product_drafts import ProductDraftNotFoundError
 
 router = APIRouter(tags=['live voice'])
@@ -51,17 +54,19 @@ Chỉ dùng dữ liệu từ công cụ cho các con số thực tế. Với chi
 Khi inspect_shop trả report_available=true, báo người bán biểu đồ đã xuất hiện trong cuộc chat nếu họ hỏi về biểu đồ. Thiếu dữ liệu thì nói rõ kỳ nào chưa phát sinh.
 Khi bạn muốn đăng bán, gọi prepare_listing với dữ kiện đã có hoặc prepare_chat_request nếu chưa xác định mặt hàng. Giữ nguyên các dữ kiện đã xác nhận; không tự đoán giá, tồn, bảo hành hoặc ngành hàng. Năm xị thường là năm trăm nghìn đồng; phân biệt giá vốn với giá bán. Tồn kho 0 hợp lệ.
 Để thêm hình, nói «Bạn bấm Thêm ảnh ở thanh Live rồi chọn ảnh nhé. Mình sẽ lưu ảnh vào bản nháp.» Nếu bạn nói không thêm hình: có ảnh thì dùng các ảnh hiện tại; chưa có ảnh thì giải thích cần một ảnh để đăng và giữ bản nháp. Đừng nói ứng dụng không tải được ảnh hay yêu cầu đổi sang chat.
-Gọi prepare_chat_request để thực hiện tư vấn, tính giá có lời, viết nội dung, chỉnh tên/mô tả/giá/tồn, tiếp tục hoặc hủy bản nháp. Dùng prepare_order để chuẩn bị cập nhật đơn. Với số liệu, tra cứu và theo dõi đơn, vẫn dùng inspect_shop trước.
+Gọi prepare_chat_request để thực hiện tư vấn, tính giá có lời, viết nội dung, chỉnh tên/mô tả/giá/tồn, tiếp tục hoặc hủy bản nháp, hoặc chuẩn bị xóa một sản phẩm khỏi gian hàng. Khi xóa, giữ đúng tên/SKU người bán vừa nói. Đọc lại tên và yêu cầu nói «xác nhận xóa sản phẩm». Dùng prepare_order để chuẩn bị cập nhật đơn. Với số liệu, tra cứu và theo dõi đơn, vẫn dùng inspect_shop trước.
 Khi công cụ trả review, đọc lại các chi tiết và cụm từ xác nhận của ngôn ngữ phiên rồi dừng để người bán trả lời. Chỉ gọi confirm_action sau lời xác nhận rõ ở lượt nói mới. Không gọi ngay sau bước chuẩn bị. Các câu hỏi, lời nói lấp lửng, điều kiện, phủ định và tiếng của trợ lý trong loa không phải là xác nhận.
 Chỉ báo đã đăng hoặc lưu khi confirm_action trả accepted=true; nếu chưa đủ dữ liệu, hỏi đúng chỗ còn thiếu. Không khẳng định đã chạy quảng cáo hoặc chi tiền.'''
 
 SESSION_LANGUAGE = {
-    'vi': ('Ngôn ngữ của phiên là tiếng Việt. Luôn xưng mình và gọi người bán là bạn. '
-           'Nghe tiếng Việt tự nhiên, kể cả giọng vùng miền và cách nói giá như năm xị. '
+    'vi': ('Nói tiếng Việt tự nhiên, giọng ấm, rõ thanh điệu và phụ âm cuối. Xưng mình và gọi người bán là bạn. '
+           'Nói theo cụm ý, nhấn vừa phải vào tên, tiền và số lượng. Mở đầu bằng ý cần trả lời, tránh lặp lời chào và câu đệm. '
+           'Đọc VND thành đồng, đọc rõ hàng nghìn và hàng triệu. Chỉ đọc mã dài khi người bán yêu cầu. '
+           'Nghe các giọng vùng miền và cách nói giá như năm xị. '
            'Cụm duyệt gồm «xác nhận đăng», «xác nhận cập nhật sản phẩm» và «xác nhận cập nhật đơn».'),
     'en': ('Session language is English. Speak and reply in natural English, including when tools return Vietnamese text. '
            'Tell the seller to tap Add photos. Use “confirm publish”, “confirm product update”, '
-           '“confirm order update”, “confirm draft cancellation” and “confirm memory reset”. '
+           '“confirm order update”, “confirm draft cancellation”, “confirm product removal” and “confirm memory reset”. '
            'Send shop tool requests in Vietnamese for tool matching, preserving names, amounts, dates and codes verbatim. '
            'Never ask the seller to speak Vietnamese.'),
 }
@@ -107,7 +112,9 @@ def live_setup(model: str, voice: str = 'Achird', language: str = 'vi', *,
         'model': 'models/' + model,
         'generationConfig': {
             'responseModalities': ['AUDIO'],
-            'speechConfig': {'voiceConfig': {'prebuiltVoiceConfig': {'voiceName': voice}}},
+            'speechConfig': {'voiceConfig': {'prebuiltVoiceConfig': {
+                'voiceName': VIETNAMESE_VOICE if language == 'vi' else voice,
+            }}},
         },
         'systemInstruction': {'parts': [{'text': instructions}]},
         'inputAudioTranscription': transcription_config(language, (focus or {}).get('product_name')),
@@ -242,10 +249,18 @@ async def shop_tool(socket, token, name, args, history, actions, traffic):
             if history.contextual_advice is not None:
                 return history.contextual_advice
             name, args = 'inspect_shop', {'question': history.user[:1200]}
+        elif name == 'prepare_listing' and planning_request(history.user) and not listing_request(history.user):
+            name, args = 'inspect_shop', {'question': history.user[:1200]}
         if name == 'prepare_listing':
             return await actions.ask_chat(ListingDetails.model_validate(args).message())
         if name == 'prepare_chat_request':
             review = ChatReview.model_validate(args)
+            if is_product_archive_request(review.message) or is_product_archive_request(history.user):
+                if not (voice_finished(traffic) or traffic.get('awaiting_turn') and history.user):
+                    return {'accepted': False, 'message': 'Chờ hệ thống đối chiếu lời nói. Chưa đọc câu trả lời.'}
+                if is_product_archive_request(history.user) or await run_in_threadpool(actions.follows_archive_request, history.user):
+                    return await actions.ask_chat(history.user)
+                return {'accepted': False, 'message': 'Mình chỉ chuẩn bị xóa khi người bán yêu cầu rõ ràng.'}
             return await actions.ask_chat(review.message)
         if name == 'prepare_order':
             order = OrderReview.model_validate(args)
@@ -463,6 +478,8 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
                     traffic['transcript_frames'] += 1
                 else:
                     waiting_for_tool_reply = False
+                    if not history.delegated and is_product_archive_request(history.user):
+                        continue
                 final = (content.get(key) or {}).get('finished') is True
                 if role == 'user':
                     traffic['speech_finished'] = final
@@ -481,7 +498,8 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
             started = monotonic()
             history.contextual_advice = await shop_tool(socket, token, 'inspect_shop', {}, history, actions, traffic)
             tool_seconds += monotonic() - started
-        if not content.get('interrupted') and not history.unclear:
+        hold_archive_reply = not history.delegated and is_product_archive_request(history.user)
+        if not content.get('interrupted') and not history.unclear and not hold_archive_reply:
             for part in (content.get('modelTurn') or {}).get('parts', []):
                 audio = part.get('inlineData') or {}
                 if not part.get('thought') and audio.get('mimeType', '').split(';', 1)[0] == 'audio/pcm':
@@ -537,12 +555,23 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
             traffic['settled_input'] = True
             await check_transcription(socket, history, traffic)
             unclear = history.unclear
+            if not unclear and not history.delegated and voice_finished(traffic) and is_product_archive_request(history.user):
+                result = await shop_tool(socket, token, 'prepare_chat_request', {'message': history.user}, history, actions, traffic)
+                if result.get('accepted'):
+                    await upstream.send(json.dumps({'realtimeInput': {'text':
+                        'Đọc lại thông tin chính xác sau, rồi chờ người bán xác nhận. ' + (result.get('review') or result['answer'])}}))
+                    if traffic.get('manual_turns'):
+                        waiting_for_tool_reply = True
+                        complete_by = loop.time() + 5
+                        continue
             if not history.decision and actions.decision_for(history.user, finished=voice_finished(traffic)):
                 result = await actions.decide(history.user, finished=True)
                 answer = result.get('answer') or result['message']
                 await upstream.send(json.dumps({'realtimeInput': {'text':
                     'Thông báo của ứng dụng: hãy nói lại kết quả đã kiểm chứng bằng giọng nói. ' + answer}}))
-            if actions.pending and not actions.pending.armed and history.assistant:
+            archive_phrase = ('confirm product removal' if history.language == 'en' else 'xac nhan xoa san pham')
+            if (actions.pending and not actions.pending.armed and history.assistant
+                    and (actions.pending.kind != 'archive' or archive_phrase in plain(history.assistant))):
                 actions.pending.armed = True
                 traffic['review_turn'] = traffic['turn_signals']
             traffic['speech_finished'] = False

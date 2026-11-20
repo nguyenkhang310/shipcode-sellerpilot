@@ -62,6 +62,8 @@ def apply_product_edit(shop, proposal):
                 if receipt['request_digest'] != digest or receipt['shop_slug'] != proposal.shop_slug:
                     raise StaleProductEditError('Operation identity conflict')
                 return True
+            if product['status'] == 'archived':
+                raise StaleProductEditError('Sản phẩm đã được xóa khỏi gian hàng.')
             target = variant or product
             current = {'name':product['name'],'description':product['current_description'],
                        'price_vnd':round(target['price']),'stock':target['stock']}
