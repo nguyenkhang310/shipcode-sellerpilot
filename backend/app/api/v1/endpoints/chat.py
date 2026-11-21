@@ -30,6 +30,9 @@ router = APIRouter(tags=["seller chat"])
 @router.post("/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest, request: Request,
                shop: UTEMallRepository = Depends(get_shop)) -> ChatResponse:
+    if getattr(request.app.state.settings, 'enable_strict_security', False):
+        from app.services.ai.guardrails import sanitize_ai_prompt
+        payload.message = sanitize_ai_prompt(payload.message)
     manager = request.app.state.chat_requests
     key = manager.submit(payload, shop)
     # Losing the HTTP connection does not lose the durable result. Only an

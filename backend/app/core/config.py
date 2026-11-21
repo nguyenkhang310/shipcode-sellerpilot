@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     seller_shop_slug: str = "utech-official"
     shop_timezone: str = "Asia/Ho_Chi_Minh"
     demo_mode: bool = True
+    enable_strict_security: bool = True
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     ai_provider: Literal["ollama", "opencode", "antigravity", "gemini"] = "ollama"
     gemini_api_key: SecretStr = SecretStr('')
