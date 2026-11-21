@@ -39,6 +39,9 @@ class ParsedCommand(BaseModel):
     max_price_vnd: int | None = Field(default=None, ge=0, le=1_000_000_000)
     days: int | None = Field(default=None, ge=1, le=30)
     calendar_period: Literal['week', 'month'] | None = None
+    sales_metric: Literal['units', 'collected', 'pending', 'paid', 'shipped', 'delivered', 'cancelled', 'returned'] | None = None
+    compare_yesterday: bool = False
+    sales_period_issue: Literal['invalid_date', 'multiple_periods', 'range_limit', 'future_period'] | None = None
 
     @field_validator("sku")
     @classmethod

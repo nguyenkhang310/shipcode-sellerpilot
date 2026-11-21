@@ -14,7 +14,7 @@ vm.runInNewContext('(function(exports){'+timelineCode+'\n})',{})(timeline);
 vm.runInNewContext('(function(require,module,exports){'+code+'\n})',{})(name=>name==='./live/timeline'
   ? timeline : {productDraftImageUrl:url=>'http://api'+url},loaded,loaded.exports);
 const {restoreMessages,latestProductCards}=loaded.exports;
-const {assistantText,assistantMessage}=loaded.exports;
+const {assistantText,assistantMessage,assistantContent,chatTimeline}=loaded.exports;
 
 test('saving a voice turn keeps the keys used by the two streaming bubbles',()=>{
  const data={run_id:81,answer:'Shop có hai đơn.',facts:{live_turn_id:'voice-turn'}};
@@ -31,6 +31,56 @@ test('report snapshot survives answer normalization and history restoration',()=
  const history=restoreMessages([{message:'Doanh thu hôm nay',response}]);
  assert.equal(history[1].response.report,report);
  assert.equal(history[1].response.report.metrics[0].value,0);
+});
+
+const salesReport=(subtitle,value)=>({
+ title:'Hiệu quả kinh doanh',subtitle,as_of:'2026-11-21T05:00:00Z',
+ metrics:[{label:'Giá trị đơn hàng',unit:'vnd',value},{label:'Đơn hợp lệ',unit:'count',value:3244}],
+ charts:[{kind:'line',title:'Diễn biến giá trị đơn hàng',unit:'vnd',points:[]}],table:null,
+});
+
+test('a voice report attaches to one answer before transcription and keeps its identity when saved',()=>{
+ const report=salesReport('2026-11-15 → 2026-11-21',19826570000);
+ const first={id:'first',turn_id:'sales',report,sales_context:{},language:'vi',answer:'Có 3.244 đơn, tổng 19.826.570.000đ.'};
+ const second={...first,id:'retry',report:{...report,as_of:'2026-11-21T05:01:00Z'}};
+ const question={turnId:'sales',role:'user',text:'Tuần qua bán được bao nhiêu?'};
+ const caption={turnId:'sales',role:'assistant',text:'Shop có ba nghìn hai trăm bốn mươi bốn đơn.'};
+ const early=chatTimeline([],[question],[first]);
+ const inProgress=chatTimeline([],[question,caption],[first,second]);
+ const content=assistantContent(inProgress[1]);
+ assert.equal(inProgress.length,2);
+ assert.equal(early[1].id,inProgress[1].id);
+ assert.equal(content.reports.length,1);
+ assert.equal(content.reports[0].report,second.report);
+ assert.equal(content.originalText,caption.text);
+ assert.doesNotMatch(content.text,/ba nghìn|3\.244|19\.826/);
+ const response={run_id:302,answer:caption.text,report,facts:{live_turn_id:'sales',live_results:[first,second]}};
+ const stored=restoreMessages([{message:question.text,response}]);
+ const visible=chatTimeline(stored,[question,caption],[first,{...second,id:'late'}]);
+ assert.equal(visible.length,2);
+ assert.equal(visible[1].id,inProgress[1].id);
+ assert.equal(assistantContent(visible[1]).reports[0].key,content.reports[0].key);
+ assert.equal(assistantContent(visible[1]).reports.length,1);
+});
+
+test('reports preserve distinct periods and text containing comparison, a specific metric, or actionable guidance',()=>{
+ const report=salesReport('Hôm nay',19826570000);
+ const message={id:'summary',role:'assistant',text:'Hôm qua cùng giờ có 5 đơn. Hôm nay có 3 đơn.',
+  response:{tool:'get_shop_summary',provider:'deterministic_parser',facts:{compare_yesterday:true},report}};
+ assert.equal(assistantContent(message).text,message.text);
+ message.response.facts={sales_metric:'units'};
+ assert.equal(assistantContent(message).text,message.text);
+ const precise={...message,response:{...message.response,facts:{seller_preferences:{response_style:'giải thích chi tiết'}}}};
+ assert.equal(assistantContent(precise).text,message.text);
+ const details='Kiểm tra giá vốn trước khi tăng ngân sách.';
+ const voice={...message,response:undefined,liveResults:[
+   {report,answer:details,spoken_summary:'Kiểm tra giá vốn.'},
+   {report:salesReport('Hôm qua',500000),answer:'Xem lại hôm qua.'},
+ ]};
+ const result=assistantContent(voice);
+ assert.equal(result.reports.length,2);
+ assert.equal(result.text,message.text);
+ assert.deepEqual(Array.from(result.details),[details]);
 });
 const draft={id:1,status:'ready',preview_urls:['/image-a','/image-b']};
 const turn=(id,tool,message,answer,product=draft)=>({message,response:{run_id:id,tool,answer,product_draft:product}});

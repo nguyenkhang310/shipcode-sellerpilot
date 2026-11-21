@@ -77,7 +77,6 @@ export function LiveVoiceSettings() {
       <Text accessibilityRole="header" style={ui.listTitle}>Giọng trợ lý</Text>
     </View>
     {choices('language', 'Ngôn ngữ trò chuyện Live', [['vi', 'Tiếng Việt'], ['en', 'English']])}
-    {value.language === 'en' ? choices('voice', 'Giọng tiếng Anh', [['male', 'Nam'], ['female', 'Nữ']])
-      : <Text style={ui.caption}>Giọng tiếng Việt · Sulafat</Text>}
+    {choices('voice', value.language === 'vi' ? 'Giọng tiếng Việt' : 'Giọng tiếng Anh', [['male', 'Nam'], ['female', 'Nữ']])}
   </View>;
 }

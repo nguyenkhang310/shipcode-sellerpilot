@@ -84,6 +84,22 @@ def test_browser_chat_has_only_browser_facts_and_isolated_prompt(browser):
     assert 'chưa phải toàn bộ shop' in response_prompt(provider.facts[0])
 
 
+@pytest.mark.parametrize('metrics, expected', [
+    ([{'label': 'Đơn hàng', 'value': '2'}, {'label': 'Doanh số', 'value': '1.500.000đ'}], '2 đơn'),
+    ([], 'chưa đọc được số đơn và doanh số hôm nay'),
+])
+def test_simple_sales_question_uses_only_observed_browser_totals(browser, metrics, expected):
+    client, provider = browser
+    request = payload(message='Ngày hôm nay shop bán được bao nhiêu?')
+    request['snapshot']['text'] = json.dumps({'metrics': metrics}, ensure_ascii=False)
+    result = finish(client, request)
+    assert result['status'] == 'completed' and result['result']['provider'] == 'deterministic_parser'
+    answer = result['result']['answer']
+    assert expected in answer and provider.facts == []
+    if metrics:
+        assert '1.500.000đ' in answer and 'chưa xác định được kỳ thống kê' in answer
+
+
 @pytest.mark.parametrize('url', ['https://banhang.shopee.vn.evil.example/', 'http://banhang.shopee.vn/',
                                     'https://user:pass@banhang.shopee.vn/', 'https://shopee.vn/',
                                     'https://banhang.shopee.vn:443/', 'file:///tmp/shop'])

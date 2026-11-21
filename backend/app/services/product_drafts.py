@@ -22,6 +22,7 @@ from app.ai.listing_evidence import commercial_context as _commercial_context
 from app.ai.listing_contracts import ListingCopy, listing_validation_context, contextual_product_reference
 from app.ai.fallback import extract_price, normalize_text
 from app.ai.money import money_hints, money_mentions, single_money, affirmed_quote, plain
+from app.ai.text import reply_format_issue
 from app.integrations.ute_mall import (
     ProductPublishConflictError,
     UTEMallRepository,
@@ -397,27 +398,19 @@ async def advance_product_draft(
                 logger.warning('Listing used grounded fallback: draft_id=%s reason=%s stage=%s', draft.id, fallback_reason, fallback_stage)
                 # Keep supplied facts and ask only for what remains. Never pass
                 # a paragraph/instruction off as a product title when AI is offline.
-                if error.reason == 'free_tier_restricted':
-                    clarification = (
-                        'OpenCode đang chặn model miễn phí trên đường gọi của SellerPilot. '
-                        'Mình chưa đọc được ảnh hoặc viết lại nội dung ở lượt này. '
-                        'Ảnh và thông tin bản nháp vẫn được giữ; chưa có sản phẩm nào được đăng. '
-                        'Bạn có thể gửi tên và mô tả sẵn có để tiếp tục.'
-                    )
-                elif was_ready:
-                    clarification = 'Mình chưa xử lý được yêu cầu sửa lúc này. Thông tin bản nháp vẫn được giữ; bạn thử lại giúp mình nhé.'
+                if was_ready:
+                    clarification = 'Mình chưa sửa được bản nháp ở lượt này. Nội dung bạn đã có vẫn còn. Bạn thử lại nhé.'
                 elif error.reason == 'invalid_response':
-                    clarification = ('AI đã phản hồi nhưng nội dung bản nháp chưa hợp lệ nên mình chưa áp dụng. '
-                                     'Ảnh và thông tin bạn gửi vẫn được giữ. Bạn nhắn **soạn lại bản nháp** để mình thử lại nhé.')
+                    clarification = ('Mình chưa soạn được nội dung đủ tin cậy. Ảnh và thông tin bạn gửi vẫn còn trong bản nháp. '
+                                     'Bạn nhắn **soạn lại bản nháp** để mình thử lại nhé.')
                 elif draft.name and not draft.description:
                     clarification = (
-                        "Mình chưa gọi được AI để soạn nội dung lúc này. Bản nháp và ảnh vẫn được giữ. "
-                        "Bạn gửi mô tả sẵn có, hoặc nhắn **viết lại nội dung** để thử lại."
+                        "Mình chưa viết xong phần mô tả. Bạn vẫn có thể gửi nội dung sẵn có hoặc nhắn **viết lại nội dung**."
                     )
                 elif not draft.name:
                     clarification = (
-                        "Mình chưa đọc được ảnh bằng AI. Bạn đang bán sản phẩm gì? "
-                        "Cho mình tên hoặc vài đặc điểm để mình viết tiêu đề và mô tả."
+                        "Mình chưa đọc được ảnh ở lượt này. Ảnh và thông tin bạn gửi vẫn còn trong bản nháp. "
+                        "Bạn cho mình tên hoặc vài đặc điểm để mình viết tiêu đề nhé."
                     )
 
         pending_fields = [field for field in pending_fields if field not in changed]
@@ -887,18 +880,19 @@ def _category_question(categories):
 
 
 def _question_for(field: str, categories: list[dict]) -> str:
+    if field == 'category_id':
+        return _category_question(categories)
     return {
         "name": "Bạn muốn bán mặt hàng nào? Mình có thể soạn tiêu đề và mô tả từ ảnh hoặc vài đặc điểm của món hàng.",
         "price_vnd": "Giá bán của sản phẩm là bao nhiêu? Ví dụ: **249.000đ**.",
         "stock": "Số lượng tồn kho ban đầu là bao nhiêu?",
-        "category_id": _category_question(categories),
-        "description": "Bạn gửi mô tả sản phẩm, hoặc nhắn **AI tự viết** để mình soạn từ thông tin đã có.",
+        "description": "Bạn gửi mô tả sẵn có, hoặc nhắn **AI tự viết** để mình soạn từ thông tin bạn đã gửi.",
         "image": "Bạn thêm ít nhất một ảnh sản phẩm bằng nút **+**, rồi bấm gửi để mình hoàn thiện bản nháp nhé.",
     }[field]
 
 
 def _safe_followup(copy, fields):
-    if not copy or not copy.next_question or not copy.next_question_fields:
+    if not copy or not copy.next_question or not copy.next_question_fields or reply_format_issue(copy.next_question):
         return None
     requested = set(copy.next_question_fields)
     if not requested <= set(fields):
@@ -916,20 +910,13 @@ def _safe_followup(copy, fields):
 def _missing_question(fields: list[str], categories, *, draft=None) -> str:
     name = f' **{draft.name}**' if draft and draft.name else ' sản phẩm này'
     if fields == ['price_vnd', 'stock']:
-        return f'Bạn muốn bán{name} giá bao nhiêu, và kho còn bao nhiêu cái?'
+        return f'Bạn định bán{name} giá bao nhiêu? Kho còn bao nhiêu sản phẩm?'
     if fields[0] == 'price_vnd':
         return f'Bạn chốt **giá bán** cho{name} là bao nhiêu?'
     if fields[0] == 'stock':
-        return f'Bạn còn bao nhiêu cái{name} trong **tồn kho** để mình đăng bán?'
+        return f'Số lượng **tồn kho** của{name} là bao nhiêu?'
     return _question_for(fields[0], categories)
 
 
 def _ready_answer(draft, prefix="Mình đã chuẩn bị xong bản nháp."):
-    return (
-        f"{prefix}\n\n"
-        f"• **{draft.name}**\n"
-        f"• Giá: **{draft.price_vnd:,}đ**\n"
-        f"• Tồn kho: **{draft.stock}**\n"
-        f"• Ngành hàng: **{draft.category_name}**\n\n"
-        "Bạn kiểm tra thẻ bên dưới rồi bấm **Đăng sản phẩm**. Chưa có gì được đăng ở bước này."
-    ).replace(f"{draft.price_vnd:,}", f"{draft.price_vnd:,}".replace(",", "."))
+    return f'{prefix} Bạn xem lại **{draft.name}** trong thẻ, rồi bấm **Đăng sản phẩm** khi sẵn sàng nhé.'

@@ -341,10 +341,10 @@ Live tự chọn key khi mở phiên và thử key hợp lệ tiếp theo khi ke
 hoặc đang chạm hạn mức. `GEMINI_PROJECT_ID` là tùy chọn. Khi để trống, backend thử
 key tiếp theo và tạm nghỉ riêng key vừa gặp 429. Các key có cùng Project ID
 được tạm nghỉ cùng nhau khi project chạm hạn mức.
-Model Live mặc định là `gemini-3.8-live`. Tiếng Việt dùng giọng Sulafat cố định.
+Model Live mặc định là `gemini-3.8-live`. Tiếng Việt có giọng nam Iapetus và giọng nữ Erinome.
 Sau khi chạy `npm ci` và khởi động lại `npm run demo`, đăng nhập rồi mở **Trợ lý**.
 Bấm nút sóng âm cạnh ô chat trống và cấp quyền micro khi được hỏi.
-Mục **Shop → Giọng trợ lý** lưu ngôn ngữ và lựa chọn giọng nam/nữ cho tiếng Anh.
+Mục **Shop → Giọng trợ lý** lưu ngôn ngữ và lựa chọn giọng nam/nữ cho tiếng Việt và tiếng Anh.
 Lựa chọn áp dụng cho giọng nói, nhận diện lời nói và báo cáo của phiên Live tiếp theo.
 Web dùng `http://localhost:8081` hoặc HTTPS để trình duyệt cho phép micro. Trên
 iOS/Android dùng Expo Go tương thích SDK 58 và quét QR mới. Nếu dùng bản native

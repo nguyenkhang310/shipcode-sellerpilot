@@ -16,6 +16,7 @@ def catalog_lookup(message):
     # These requests need their existing business/write path, not a catalogue read.
     # Preserve accents for ambiguous nouns such as "sữa" versus "sửa".
     if (re.search(r'\b(?:sửa|đổi|xóa|đăng|thêm|tạo|nhập)\b', source)
+            or re.search(r'\b(?:ban cham|ban e|(?:tai sao|vi sao|nguyen nhan) (?:shop|ban))\b', text)
             or re.search(r'\b(?:sku|doi gia|sua gia|sua san pham|xoa|dang ban|them san pham|tao san pham|gia nhap|gia von|tien loi|loi nhuan|tinh loi|tinh gia|lai|phi san|so sanh|phan tich|tu van|goi y|viet|mo ta|ke hoach|sap het|het hang|ton kho|ton thap|gan het|low stock|doanh thu|doanh so|don hang|bao nhieu don|may don|gia tri don|co the)\b', text)
             or re.search(r'\b(?:hom nay|hom qua|ngay mai|(?:tuan|thang|nam) (?:nay|qua|truoc|toi))\b', text)):
         return None

@@ -129,7 +129,8 @@ def orders(shop: UTEMallRepository, status="all", query="", limit=20, offset=0):
         raise ShopDatabaseError("Cannot read orders") from error
 
 
-def dashboard(shop: UTEMallRepository, days=7, selected_date=None):
+def dashboard(shop: UTEMallRepository, days=7, selected_date=None, *, include_units=False,
+              calendar_period=None, include_previous_units=False):
     """One tenant, VN calendar days, no orders dated in the future."""
     now = datetime.now(timezone.utc)
     today = now.astimezone(shop.timezone).date()
@@ -137,8 +138,12 @@ def dashboard(shop: UTEMallRepository, days=7, selected_date=None):
     start_day = end_day - timedelta(days=days - 1)
     start = datetime.combine(start_day, time.min, tzinfo=shop.timezone).astimezone(timezone.utc)
     end = min(now, datetime.combine(end_day + timedelta(days=1), time.min, tzinfo=shop.timezone).astimezone(timezone.utc))
-    previous_start = start - timedelta(days=days)
-    previous_end = previous_start + (end - start)
+    previous_start = start - timedelta(days=7 if calendar_period == 'week' else days)
+    if calendar_period == 'month':
+        previous_month = (start_day - timedelta(days=1)).replace(day=1)
+        previous_start = datetime.combine(previous_month, time.min, tzinfo=shop.timezone).astimezone(timezone.utc)
+    previous_end = min(start, previous_start + (end - start))
+    comparable = previous_end - previous_start == end - start
     try:
         with shop._connect() as connection:
             connection.execute("BEGIN")  # consistent read across dashboard counters
@@ -149,8 +154,9 @@ def dashboard(shop: UTEMallRepository, days=7, selected_date=None):
             ).fetchall()
             values = {(start_day + timedelta(days=i)).isoformat(): 0 for i in range(days)}
             hourly = {f"{end_day.isoformat()}T{hour:02d}:00": 0 for hour in range(now.astimezone(shop.timezone).hour + 1 if end_day == today else 24)}
-            count = cancelled = delivered = previous = 0
+            count = cancelled = delivered = previous = previous_count = previous_delivered = 0
             period_status_counts = {status: 0 for status in ("pending", "paid", "shipped", "delivered", "cancelled", "returned")}
+            previous_status_counts = dict.fromkeys(period_status_counts, 0)
             for row in rows:
                 created = datetime.fromisoformat(row["created_at"]).replace(tzinfo=timezone.utc)
                 local_time = created.astimezone(shop.timezone)
@@ -168,8 +174,31 @@ def dashboard(shop: UTEMallRepository, days=7, selected_date=None):
                             delivered += amount
                     else:
                         cancelled += 1
-                elif valid and created < previous_end:
-                    previous += amount
+                elif created < previous_end:
+                    status = row["status"]
+                    previous_status_counts[status] = previous_status_counts.get(status, 0) + 1
+                    if valid:
+                        previous += amount
+                        previous_count += 1
+                        if status == "delivered":
+                            previous_delivered += amount
+            unit_facts = {}
+            if include_units:
+                order_scope, order_params = _scope(connection, shop, 'order', 'o')
+                periods = [('', start, end)]
+                if include_previous_units:
+                    periods.append(('previous_', previous_start, previous_end))
+                for prefix, from_time, to_time in periods:
+                    unit_row = connection.execute(
+                        f'''SELECT COALESCE(SUM(i.quantity), 0) units, COUNT(DISTINCT o.id) covered
+                            FROM "order" o JOIN order_item i ON i.order_id=o.id
+                            WHERE {order_scope} AND o.created_at>=? AND o.created_at<?
+                              AND o.status NOT IN ('cancelled', 'returned') AND i.quantity>0''',
+                        [*order_params, from_time.replace(tzinfo=None).isoformat(sep=' '),
+                         to_time.replace(tzinfo=None).isoformat(sep=' ')],
+                    ).fetchone()
+                    unit_facts[f'{prefix}units_sold'] = unit_row['units']
+                    unit_facts[f'{prefix}orders_with_item_quantity'] = unit_row['covered']
             counts = {row["status"]: row["n"] for row in connection.execute(
                 f'SELECT status, COUNT(*) n FROM "order" WHERE {scope} GROUP BY status', params,
             )}
@@ -201,15 +230,17 @@ def dashboard(shop: UTEMallRepository, days=7, selected_date=None):
                 "updated_at": now.isoformat(), "timezone": shop.timezone_name,
                 "order_value_vnd": total, "order_count": count, "delivered_value_vnd": delivered,
                 "average_order_vnd": round(total / count) if count else 0,
-                "cancelled_count": cancelled, "previous_value_vnd": previous,
-                "change_percent": round((total - previous) / previous * 100, 1) if previous else None,
+                "cancelled_count": cancelled, "previous_value_vnd": previous, "previous_order_count": previous_count,
+                "previous_order_status_counts": previous_status_counts, "previous_delivered_value_vnd": previous_delivered,
+                "change_percent": round((total - previous) / previous * 100, 1) if previous and comparable else None,
                 "series": [{"date": day, "value": value} for day, value in (hourly if days == 1 else values).items()],
                 "order_status_counts": period_status_counts,
+                "all_order_status_counts": counts,
                 "tasks": {"pending_orders": counts.get("pending", 0), "packing_orders": counts.get("paid", 0),
                           "shipping_orders": counts.get("shipped", 0), "low_stock_products": low_count,
                           "unanswered_reviews": review_count},
                 "active_products": product_counts.get("active", 0), "top_products": top,
-                "integration_mode": "local_store",
+                "integration_mode": "local_store", **unit_facts,
             }
     except (sqlite3.Error, ValueError) as error:
         raise ShopDatabaseError("Cannot load management dashboard") from error

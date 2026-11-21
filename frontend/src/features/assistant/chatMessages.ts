@@ -1,8 +1,86 @@
-import { ChatData, ConversationDetail } from '../../api/types';
+import { ChatData, ChatReport, ConversationDetail } from '../../api/types';
 import { productDraftImageUrl } from '../../api/sellerPilot';
-import { liveMessageKey } from './live/timeline';
+import type { LiveShopResult } from './live/LiveConversation';
+import type { LiveLanguage } from './live/locale';
+import { liveMessageKey, type LiveCaption } from './live/timeline';
 
-export type Message = { id: string; role: 'user' | 'assistant'; text: string; imageUris?: string[]; response?: ChatData; livePending?: boolean };
+export type Message = {
+  id: string; role: 'user' | 'assistant'; text: string; imageUris?: string[]; response?: ChatData;
+  livePending?: boolean; liveResults?: LiveShopResult[];
+};
+
+export function liveShopResults(data?: ChatData): LiveShopResult[] {
+  const results = data?.facts?.live_results;
+  return Array.isArray(results) ? results : [];
+}
+
+/** Keep the assistant row's key from the first caption or tool result through saving. */
+export function chatTimeline(saved: Message[], captions: LiveCaption[], results: LiveShopResult[]): Message[] {
+  if (!captions.length && !results.length) return saved;
+  const savedIds = new Set(saved.map(message => message.id));
+  const savedResults = new Set(saved.flatMap(message => liveShopResults(message.response).map(result => result.id)));
+  const turns = new Map<string, { user?: string; assistant?: string; results: LiveShopResult[] }>();
+  const turn = (id: string) => {
+    let value = turns.get(id);
+    if (!value) { value = { results: [] }; turns.set(id, value); }
+    return value;
+  };
+  for (const caption of captions) {
+    if (!savedIds.has(liveMessageKey(caption.turnId, caption.role))) turn(caption.turnId)[caption.role] = caption.text;
+  }
+  for (const [index, result] of results.entries()) {
+    if (result.id && savedResults.has(result.id)) continue;
+    const id = result.turn_id || 'result:' + (result.id ?? index);
+    if (!savedIds.has(liveMessageKey(id, 'assistant'))) turn(id).results.push(result);
+  }
+  return [...saved, ...Array.from(turns).flatMap(([id, pending]): Message[] => {
+    const rows: Message[] = [];
+    if (pending.user) rows.push({ id: liveMessageKey(id, 'user'), role: 'user', text: pending.user, livePending: true });
+    if (pending.results.length || pending.assistant && pending.user) rows.push({
+      id: liveMessageKey(id, 'assistant'), role: 'assistant', text: pending.assistant || '',
+      livePending: true, liveResults: pending.results,
+    });
+    return rows;
+  })];
+}
+
+function reportKey(report: ChatReport) {
+  // Repeated tool calls can refresh a snapshot during a single turn.
+  return JSON.stringify([report.title, report.subtitle, report.metrics.map(metric => [metric.label, metric.unit]),
+    report.charts.map(chart => [chart.title, chart.kind, chart.unit]), report.table?.title]);
+}
+
+export function assistantContent(message: Message) {
+  const response = message.response;
+  const results = message.liveResults ?? liveShopResults(response);
+  const reports = new Map<string, { key: string; report: ChatReport; language?: LiveLanguage }>();
+  const responseLanguage = response?.facts?.live_language === 'en' ? 'en' : undefined;
+  if (response?.report) {
+    const key = reportKey(response.report);
+    reports.set(key, { key, report: response.report, language: responseLanguage });
+  }
+  for (const result of results) {
+    if (!result.report) continue;
+    const key = reportKey(result.report);
+    reports.set(key, { key, report: result.report, language: result.language ?? responseLanguage });
+  }
+  const summaryResult = results.findLast(result => result.report && result.sales_context);
+  const sales = summaryResult?.sales_context ?? response?.facts;
+  const detailed = results.filter(result => result.spoken_summary && result.language !== 'en')
+    .map(result => assistantText(result.answer))
+    .filter(answer => answer.trim() && answer.trim() !== message.text.trim());
+  const originalText = message.text.trim() || assistantText(results[0]?.answer ?? '').trim();
+  const preferences = response?.facts?.seller_preferences as { response_style?: string } | undefined;
+  const knownSummary = summaryResult || (response?.tool === 'get_shop_summary' && response.provider === 'deterministic_parser');
+  const compactSummary = knownSummary && reports.size === 1 && !sales?.sales_metric && !sales?.compare_yesterday
+    && !detailed.length && !preferences?.response_style;
+  const text = compactSummary
+    ? summaryResult?.language === 'en' ? 'Here’s how your shop performed during this period.'
+      : 'Mình đã tổng hợp kết quả bán hàng trong kỳ bạn hỏi.'
+    : originalText;
+  return { text, originalText, details: [...new Set(detailed.filter(answer => answer.trim() !== originalText))],
+    reports: [...reports.values()], results };
+}
 
 export function messageKey(data: ChatData, role: Message['role']) {
   const id = data.facts?.live_turn_id;

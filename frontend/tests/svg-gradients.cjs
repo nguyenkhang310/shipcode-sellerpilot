@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const ts = require('typescript');
 const React = require('react');
 
-test('dock and chart gradient values survive the native SVG parser without warnings', () => {
+test('dock and dashboard gradient values survive the native SVG parser without warnings', () => {
   const warnings = [];
   const filename = path.join(path.dirname(require.resolve('react-native-svg/package.json')), 'src/lib/extract/extractGradient.ts');
   const compiled = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
@@ -35,7 +35,7 @@ test('dock and chart gradient values survive the native SVG parser without warni
   warnings.length = 0;
 
   const offsets = [];
-  for (const file of ['components/layout/BottomNav.tsx', 'features/dashboard/ManagementCharts.tsx', 'features/assistant/ReportChart.tsx']) {
+  for (const file of ['components/layout/BottomNav.tsx', 'features/dashboard/ManagementCharts.tsx']) {
     const source = ts.createSourceFile(file, fs.readFileSync(path.join(__dirname, '../src', file), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     function visit(node) {
       if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && ['Stop', 'LinearGradient'].includes(node.tagName.getText(source))) {
@@ -55,7 +55,7 @@ test('dock and chart gradient values survive the native SVG parser without warni
     }
     visit(source);
   }
-  assert.equal(offsets.length, 7);
+  assert.equal(offsets.length, 5);
   assert(offsets.includes(0.55));
   assert.deepEqual(nativeOffsets(offsets), [...offsets].sort((a, b) => a - b));
   assert.deepEqual(warnings, []);

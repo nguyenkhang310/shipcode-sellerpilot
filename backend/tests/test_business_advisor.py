@@ -14,7 +14,9 @@ from app.ai.fallback import parse_fallback
 from app.ai.gemini import GeminiClient
 from app.integrations.business import business_snapshot
 from app.integrations.ute_mall import UTEMallRepository, ShopDatabaseError
-from app.services.business_advisor import attach_business_brief, planning_request, business_reply_issue
+from app.services.business_advisor import (attach_business_brief, planning_request, business_reply_issue,
+                                           complete_business_reply, planning_fallback)
+from app.services.marketplace_performance import marketplace_funnel
 from app.services.chat import reply_issue
 from app.models.product_draft import ProductDraft
 from test_shop_tenant_scope import build_marketplace
@@ -109,6 +111,7 @@ def test_plan_horizon_followups_and_video_intent_are_read_only():
     assert planning_request('Cụ thể hơn', [{'role':'user','content':'Viết kịch bản TikTok cho SKU A001'}])['mode'] == 'video_script'
     assert planning_request('Cụ thể hơn', [{'role':'user','content':'Xin chào'}]) is None
     assert planning_request('SKU A001 còn bao nhiêu?') is None
+    assert planning_request('Tối ưu hiệu suất TikTok Shop')['mode'] == 'performance_analysis'
     command = parse_fallback('Quay video TikTok cho SKU A001, giá 5 xị', today=NOW.date())
     assert command.intent == 'sales_advice' and command.new_price_vnd is None
 
@@ -124,6 +127,87 @@ def test_brief_keeps_requested_sku_does_not_substitute_and_has_video_measurement
     assert len(brief['video_production']['structure']) == 4
     missing = {'period':{'days':7}, 'selected_product':{'sku':'MISSING001','found':False}}
     assert attach_business_brief(shop, missing, message='Lập kế hoạch cho SKU MISSING001')['focus_product'] is None
+
+
+def test_offline_video_uses_the_named_product_and_films_real_actions(client):
+    shop = client.app.state.shop_repository
+    with shop._connect() as db:
+        db.execute("UPDATE product SET name='Bàn phím Nova K75' WHERE sku='P001'")
+        db.execute("UPDATE product SET name='Túi laptop Quân', status='inactive' WHERE sku='P002'")
+        db.commit()
+    clip = {'period': {'days': 7}}
+    brief = attach_business_brief(shop, clip, message='Viết kịch bản quay video cho bàn phím Nova K75')
+    assert brief['focus_product']['sku'] == 'P001'
+    assert brief['mode'] == 'video_script'
+    reply = planning_fallback(clip)
+    assert 'gõ một câu' in reply.lower() and 'Hook A' in reply and 'Hook B' in reply
+    assert 'Thoại' in reply and 'Caption' in reply and '72 giờ' in reply
+    assert len(reply.split()) <= 150
+    assert complete_business_reply('câu quá dài ' * 80, clip) == reply
+    assert business_reply_issue(reply, clip) is None
+    followup = attach_business_brief(shop, {'period': {'days': 7}}, message='Cụ thể hơn',
+        history=[{'role': 'user', 'content': 'Viết kịch bản quay video cho bàn phím Nova K75'}])
+    assert followup['focus_product']['sku'] == 'P001'
+    bag = {'period': {'days': 7}}
+    brief = attach_business_brief(shop, bag, message='Kịch bản cho túi laptop Quân')
+    assert brief['focus_product']['sku'] == 'P002'
+    assert 'cuốn sổ' in planning_fallback(bag)
+    assert 'Xem đúng mẫu trên Shopee' not in planning_fallback(bag)
+    missing = {'period': {'days': 7}}
+    assert attach_business_brief(shop, missing, message='Kịch bản cho sản phẩm không tồn tại')['focus_product'] is None
+
+
+def test_business_plan_uses_order_coverage_and_completes_shallow_generated_reply(client, shop_db_path):
+    seed_performance(shop_db_path)
+    shop = client.app.state.shop_repository
+    facts = {'period': {'days': 7}, 'tasks': {'pending_orders': 3, 'packing_orders': 2},
+             'selected_product': shop.get_item_by_sku('P001'),
+             'business_analysis': business_snapshot(shop, 7, now=NOW)}
+    brief = attach_business_brief(shop, facts, message='Lập kế hoạch 7 ngày tới cho SKU P001')
+    assert brief['focus_performance']['order_count'] == 2
+    assert brief['focus_performance']['order_share_percent'] == 66.67
+    script = complete_business_reply('Bạn nên đầu tư vào nội dung.', facts)
+    assert '3 đơn chờ xác nhận' in script and 'Ngày 6–7' in script and 'đơn có nguồn' in script
+    assert '+140%' in planning_fallback(facts)
+
+
+def test_marketplace_plan_calculates_the_weakest_comparable_step_without_model_or_local_report(client):
+    from test_quick_reads import NoNetwork
+    client.app.state.ai_provider = NoNetwork()
+    result = client.post('/api/v1/chat', json={'message':
+        'Tối ưu hiệu suất Shopee 7 ngày qua, lập kế hoạch 7 ngày tới. '
+        '1.000 khách truy cập, 60 khách đặt đơn, 30 khách thanh toán; '
+        'kỳ trước: 1.000 khách truy cập, 60 khách đặt đơn, 48 khách thanh toán.',
+    }).json()['data']
+    assert result['provider'] == 'deterministic_parser'
+    assert result['report'] is None
+    funnel = result['facts']['business_advisory']['marketplace_funnel']
+    assert funnel['source'] == 'seller_input' and funnel['priority'] == 'place_to_pay'
+    assert funnel['metrics']['place_to_pay'] == 50
+    assert funnel['baseline']['place_to_pay'] == 80
+    assert 'Ghi mốc tỷ lệ đặt đơn → thanh toán' in result['answer'] and 'Kế hoạch 7 ngày' in result['answer']
+    followup = client.post('/api/v1/chat', json={'message': 'Cụ thể hơn', 'conversation_id': result['conversation_id']}).json()['data']
+    assert followup['report'] is None
+    assert followup['facts']['business_advisory']['marketplace_funnel'] == funnel
+
+
+@pytest.mark.parametrize('message,status', [
+    ('SKU A001 có 20 khách truy cập và 22 khách đặt đơn', 'invalid'),
+    ('100 khách truy cập, 20 khách đặt đơn, 10 khách đặt đơn', 'invalid'),
+    ('SKU A001 có 100 khách truy cập; kỳ trước SKU B002 có 90 khách truy cập', 'scope_mismatch'),
+    ('Shopee có 100 khách truy cập; kỳ trước TikTok Shop có 90 khách truy cập', 'scope_mismatch'),
+    ('7 ngày qua có 100 khách truy cập; kỳ trước 30 ngày có 90 khách truy cập', 'period_mismatch'),
+])
+def test_marketplace_checks_scope_and_funnel_counts(message, status):
+    assert marketplace_funnel(message)['status'] == status
+
+
+def test_marketplace_does_not_use_orders_as_buyers_or_missing_traffic_as_zero():
+    assert marketplace_funnel('Tỷ lệ chuyển đổi 80 lượt truy cập, 40 đơn hàng') is None
+    data = marketplace_funnel('0 khách truy cập, 0 khách đặt đơn, 0 khách thanh toán')
+    assert data['metrics']['visit_to_place'] is None and data['priority'] is None
+    data = marketplace_funnel('80 khách truy cập, 40 khách thanh toán; doanh thu đã thanh toán: 12.000.000đ')
+    assert data['metrics']['basket'] == 300000 and data['metrics']['visit_to_place'] is None
 
 
 class PlanningAI:
@@ -170,9 +254,9 @@ def test_outage_keeps_actionable_plan_and_is_labeled_fallback(client):
 
 
 def test_detailed_prompt_and_output_budget_only_apply_to_plans():
-    assert 'CẦM ĐI QUAY' not in response_prompt({})
+    assert 'KỊCH BẢN TIKTOK' not in response_prompt({})
     facts = {'business_advisory': {'mode':'business_plan'}}
-    assert 'CẦM ĐI QUAY' in response_prompt(facts)
+    assert 'KỊCH BẢN TIKTOK' in response_prompt(facts)
     seen = []
     async def run():
         def handler(request):

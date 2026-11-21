@@ -1,11 +1,13 @@
 import json
 import re
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import select
 
 from app.ai.fallback import extract_price, extract_sku, normalize_text
+from app.ai.contracts import ParsedCommand
 from app.ai.context import bounded_history
+from app.ai.quick_reads import quick_read, read_text, sales_period_followup
 from app.ai.text import assistant_text
 from app.ai.money import money_mentions
 from app.ai.small_talk import social_reply
@@ -105,6 +107,48 @@ def product_by_sku(shop, sku):
 
 def refers_to_published_product(message):
     return bool(re.search(r'\b(?:vua dang|moi dang|just listed|recently listed)\b', plain(message).casefold()))
+
+
+def contextual_read(message, runs, *, today):
+    """Carry only the last known read scope into a short follow-up."""
+    last = next((run for run in reversed(runs) if not (run.tool_name is None and social_reply(run.message))), None)
+    if not last:
+        return None
+    text = read_text(message)
+    facts = json.loads(last.facts_json)
+    reports = [item['sales_context'] for item in facts.get('live_results', []) if item.get('sales_context')]
+    sales = facts if last.tool_name == 'get_shop_summary' else reports[0] if len(reports) == 1 else None
+    if sales:
+        period = sales_period_followup(text, today=today)
+        if period:
+            return ParsedCommand(intent='shop_summary', sales_metric=sales.get('sales_metric'), **period)
+        if re.fullmatch(r'(?:(?:vay|the) )?(?:con |la )?(?:(?:bao nhieu|may|nhieu|nhiu)(?: (?:don|tien|cai|chiec))?'
+                        r'|so don|tong gia tri|xem lai so lieu)(?: thi sao)?', text):
+            end = sales.get('to_date') or sales.get('date')
+            metric = sales.get('sales_metric')
+            if text.endswith((' cai', ' chiec')):
+                metric = 'units'
+            elif re.search(r'\b(?:tien|don|gia tri)\b', text) and metric == 'units':
+                metric = None
+            if 'all_order_status_counts' in sales and metric == sales.get('sales_metric'):
+                return ParsedCommand(intent='shop_summary', sales_metric=metric)
+            return ParsedCommand(intent='shop_summary', day=date.fromisoformat(end) if end else today,
+                                 days=sales.get('days', 1) if not sales.get('calendar_period') else None,
+                                 calendar_period=sales.get('calendar_period'), sales_metric=metric)
+    selected = facts.get('live_product_selection') or facts
+    if selected.get('selected_product'):
+        selected = selected['selected_product']
+    sku = selected.get('sku')
+    items = selected.get('items') or []
+    if not sku and len(items) == 1:
+        sku = items[0].get('sku')
+    if not sku or selected.get('found') is False:
+        return None
+    if not re.fullmatch(r'(?:(?:con )?(?:mon|mau|cai|san pham|hang|ma) (?:do|nay) |no |con )?'
+                        r'(?:(?:con(?: lai)?|gia(?: ban)?|ton kho) )?(?:bao nhieu|may|nhieu|nhiu)(?: (?:tien|cai|chiec|hang|san pham))?'
+                        r'|(?:(?:mon|mau|cai|san pham|hang|ma) (?:do|nay) |no )?gia (?:sao|the nao)', text):
+        return None
+    return quick_read(f'SKU {sku} giá bao nhiêu', today=today)
 
 
 def resolve_message(message, runs):

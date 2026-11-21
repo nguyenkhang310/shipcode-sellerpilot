@@ -2,6 +2,7 @@ export type LiveCaption = {
   turnId: string;
   role: 'user' | 'assistant';
   text: string;
+  final?: boolean;
 };
 
 export function liveMessageKey(turnId: string, role: LiveCaption['role']) {

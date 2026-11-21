@@ -103,7 +103,7 @@ class LiveHistory:
             elif not assistant and not delegated:
                 assistant = advice.get('answer') or advice.get('message') or ''
         elif not assistant and not delegated:
-            assistant = ('\n\n'.join(result['answer'] for result in results) if results else
+            assistant = ('\n\n'.join(result.get('spoken_summary') or result['answer'] for result in results) if results else
                          'Live ended before a reply.' if self.language == 'en' else 'Phiên Live đã kết thúc trước khi có câu trả lời.')
         return SpokenTurn(identifier, user, assistant, results, decision, delegated, selection)
 

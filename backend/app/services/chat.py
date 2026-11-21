@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.ai.contracts import AIProvider, AIProviderError, ParsedCommand
 from app.ai.fallback import (
-    extract_day,
     extract_price,
     extract_sku,
     extract_threshold,
@@ -20,16 +19,17 @@ from app.ai.fallback import (
 )
 from app.ai.money import money_mentions, plain
 from app.ai.catalog_query import catalog_lookup
-from app.ai.quick_reads import quick_read, read_text, simple_pricing_read
-from app.ai.text import assistant_text, reply_format_issue
+from app.ai.quick_reads import quick_read, read_text, sales_period, sales_text, simple_pricing_read
+from app.ai.text import conversational_text, reply_format_issue
 from app.ai.small_talk import social_reply
 from app.integrations.ute_mall import ShopItemNotFoundError, UTEMallRepository
 from app.integrations import management
 from app.services.conversations import (
-    ASK_PRODUCT, conversation_memory, conversation_product, has_product_reference, history_messages,
+    ASK_PRODUCT, contextual_read, conversation_memory, conversation_product, has_product_reference, history_messages,
     refers_to_published_product, resolve_message,
 )
 from app.models.agent_run import AgentRun
+from app.models.action import ActionProposal
 from app.services.advisor import (enrich_advice, forget_memory, is_forget_request,
                                   read_memory, pricing_reply, shop_context)
 from app.services.seller_tools import (
@@ -37,11 +37,12 @@ from app.services.seller_tools import (
     create_price_proposal,
     proposal_to_dict,
 )
-from app.services.seller_voice import read_reply
+from app.services.seller_voice import ORDER_STATUS_TEXT, read_reply
 from app.services.order_assistant import order_answer
 from app.services.chat_reports import build_chat_report
-from app.services.business_advisor import (attach_business_brief, planning_fallback,
+from app.services.business_advisor import (attach_business_brief, planning_fallback, complete_business_reply,
                                           business_reply_issue, business_correction, planning_request)
+from app.services.marketplace_performance import marketplace_for_plan
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,9 @@ def reply_issue(answer: str, facts: dict | None = None, *, seller_context: str =
         return format_issue
     if re.search(r'đạt giới hạn số bước|hết bước xử lý|maximum steps reached', answer, re.I):
         return 'internal_agent_message'
-    for match in re.finditer(r"\bđã\s+(?:cập nhật|đổi giá|thay đổi giá|đăng bán|đăng sản phẩm|đăng video|lên lịch|chạy quảng cáo|gửi tin|xác nhận đơn|hủy đơn)", answer, re.IGNORECASE):
+    for match in re.finditer(r"\bđã\s+(?:cập nhật|đổi giá|thay đổi giá|đăng bán|đăng sản phẩm|đăng video|lên lịch|"
+                             r"chạy quảng cáo|gửi tin|xác nhận đơn|hủy đơn|(?:xóa|gỡ) (?:sản phẩm|khỏi gian hàng)|"
+                             r"lưu (?:đơn hàng|thay đổi))", answer, re.IGNORECASE):
         prefix = answer[:match.start()].rstrip()
         # "Nếu bạn đã đăng sản phẩm..." is a condition, not an executed write.
         if not re.search(r'\b(?:nếu|khi|sau khi)(?:\s+(?:bạn|mình|shop|chủ shop))?\s*$', prefix, re.IGNORECASE):
@@ -79,18 +82,29 @@ def reply_issue(answer: str, facts: dict | None = None, *, seller_context: str =
     return None
 
 
+def reply_correction(issue):
+    return business_correction(issue) or {
+        'empty_answer': 'Trả lời thẳng vào câu hỏi bằng câu tiếng Việt hoàn chỉnh.',
+        'invalid_answer_envelope': 'Chỉ viết câu trả lời người bán cần đọc. Bỏ JSON và các khối mã chứa câu trả lời.',
+        'raw_tool_payload': 'Chuyển dữ kiện công cụ thành câu tiếng Việt. Bỏ tên trường và JSON.',
+        'internal_agent_message': 'Bỏ thông báo kỹ thuật và trả lời việc người bán vừa hỏi.',
+        'unexecuted_write_claim': 'Chỉ nói việc đã được công cụ xác nhận. Viết bước còn lại dưới dạng đề xuất hoặc yêu cầu xác nhận.',
+        'unsupported_fulfillment_claim': 'Dùng trạng thái hiện tại. Gợi ý hành động chỉ khi có dữ kiện rõ ràng.',
+        'unsupported_shop_age': 'Bỏ nhận định về tuổi của shop nếu dữ liệu không có ngày thành lập.',
+        'unsupported_pricing_amount': 'Dùng kết quả tiền lời từ pricing_analysis và nêu khoản phí còn thiếu nếu có.',
+    }.get(issue, 'Trả lời gọn và chỉ dùng dữ kiện đã kiểm tra.')
+
+
 def fallback_explanation(reason: str | None) -> str:
-    messages = {
-        'invalid_response': 'Câu trả lời của AI chưa vượt qua kiểm tra nên mình chưa hiển thị. Bạn thử lại nhé; số liệu shop vẫn đọc được bình thường.',
-        'provider_timeout': 'AI phản hồi quá lâu ở lượt này. Bạn thử lại nhé; các câu hỏi trực tiếp về doanh số và tồn kho vẫn đọc được dữ liệu shop.',
-        'provider_rejected': 'Dịch vụ AI đang từ chối yêu cầu hoặc giới hạn lượt gọi. Bạn thử lại sau một chút nhé; dữ liệu shop vẫn truy cập được.',
-        'free_model_unavailable': 'Model GLM miễn phí hiện chưa sẵn sàng trên OpenCode. Mình vẫn có thể đọc doanh số, SKU và tồn kho của shop.',
-        'free_tier_restricted': 'OpenCode đang chặn model miễn phí trên đường gọi của SellerPilot và yêu cầu dùng trong OpenCode. Mình chưa có câu trả lời AI ở lượt này; doanh số và tồn kho của shop vẫn xem được.',
-        'provider_rate_limited': 'AI đang đạt giới hạn lượt gọi. Bạn thử lại sau nhé; mình vẫn có thể đọc doanh số, SKU và tồn kho của shop.',
-        'model_unavailable': 'Model AI hiện chưa sẵn sàng. Mình vẫn có thể đọc doanh số, SKU và tồn kho của shop.',
-        'tool_not_allowed': 'Phản hồi AI có thao tác chưa được phép nên mình đã dừng lượt này. Chưa có thay đổi nào được thực hiện. Bạn thử diễn đạt lại yêu cầu nhé.',
-    }
-    return messages.get(reason, 'Mình chưa kết nối được dịch vụ AI lúc này. Bạn thử lại sau nhé; các câu hỏi trực tiếp về doanh số, SKU và tồn kho vẫn đọc được dữ liệu shop.')
+    if reason == 'invalid_response':
+        return 'Mình chưa có câu trả lời đủ tin cậy cho lượt này. Bạn thử gửi lại nhé.'
+    if reason == 'provider_timeout':
+        return 'Lượt này xử lý lâu quá. Bạn thử gửi lại câu vừa rồi nhé.'
+    if reason == 'provider_rate_limited':
+        return 'Mình đang chạm giới hạn lượt xử lý. Bạn thử lại sau ít phút nhé.'
+    if reason == 'tool_not_allowed':
+        return 'Mình đã dừng yêu cầu trước khi thay đổi dữ liệu. Bạn cho mình biết phần cụ thể muốn chỉnh nhé.'
+    return 'Mình chưa xử lý xong yêu cầu này. Bạn thử lại sau một chút nhé.'
 
 
 async def handle_chat(
@@ -111,15 +125,18 @@ async def handle_chat(
     prepared_answer = None
     runs, since = conversation_memory(session, shop, conversation_id)
     conversation_id = str(conversation_id or uuid4())
+    known_read = quick_read(message, today=today) or contextual_read(message, runs, today=today)
     resolved = resolve_message(message, runs)
     # A complete shop-wide read must not inherit a SKU merely because its
     # wording contains "giá trị" after a previous product discussion.
     current_command = parse_fallback(message, today=today)
-    if current_command.intent == 'shop_summary' or is_exact_fact_question(message, current_command):
+    if known_read or current_command.intent == 'shop_summary' or is_exact_fact_question(message, current_command):
         resolved = message
     history = history_messages(runs)
-    order_read = order_answer(shop, message, runs)
-    contextual_plan = not order_read and has_product_reference(message) and planning_request(message, history)
+    order_read = None if known_read else order_answer(shop, message, runs)
+    plan = planning_request(message, history) if not order_read else None
+    manual_funnel = marketplace_for_plan(plan, message, history)
+    contextual_plan = plan and not manual_funnel and has_product_reference(message)
     product_context = {}
     if contextual_plan:
         if extract_sku(normalize_text(message)):
@@ -132,19 +149,19 @@ async def handle_chat(
             if not product_context:
                 product_context = {'product_reference_missing': True}
     order_generation = order_read.pop('_generate', False) if order_read else False
-    simple = simple_reply(message, runs)
+    simple = simple_reply(session, message, runs)
     classifier_input = resolved
     if history:
         classifier_input = ("Lịch sử tham khảo:\n" + "\n".join(row["role"] + ": " + row["content"][:240] for row in history[-4:])
                             + "\n\nTIN NHẮN HIỆN TẠI:\n" + resolved)
 
-    direct = parse_fallback(resolved, today=today)
-    if contextual_plan:
+    direct = known_read or parse_fallback(resolved, today=today)
+    if contextual_plan or (plan and direct.intent in ('unknown', 'product_search')) or (manual_funnel and direct.intent == 'shop_summary'):
         direct = ParsedCommand(intent='sales_advice', sku=extract_sku(normalize_text(resolved)),
                                days=reporting_days(message))
     forgetting = is_forget_request(message)
     catalog_read = direct.intent == 'product_search' and catalog_lookup(message) is not None
-    skip_classifier = bool(order_read or contextual_plan) or bool(simple) or catalog_read or callable(getattr(ai_provider, "respond", None)) and (
+    skip_classifier = bool(known_read or direct.sales_period_issue or order_read or plan and direct.intent == 'sales_advice') or bool(simple) or catalog_read or callable(getattr(ai_provider, "respond", None)) and (
         direct.intent == "sales_advice"
         or natural_responses and direct.intent in (
             "shop_summary", "inventory_query", "product_search"
@@ -175,7 +192,7 @@ async def handle_chat(
         command = ParsedCommand(intent="unknown")
     if order_read:
         command = ParsedCommand(intent='unknown')
-    direct_reply = bool(simple) or bool(order_read and not order_generation) or catalog_read or bool(getattr(ai_provider, 'prefer_direct_facts', False)) and (
+    direct_reply = bool(known_read or command.sales_period_issue or simple) or bool(order_read and not order_generation) or catalog_read or bool(getattr(ai_provider, 'prefer_direct_facts', False)) and (
         is_exact_fact_question(message, command)
     )
     if command.intent in ('sales_advice', 'unknown') and not command.days:
@@ -189,21 +206,18 @@ async def handle_chat(
                 days = None
         if days:
             command = command.model_copy(update={'days': days})
-    result = ({**order_read, 'proposal': None} if order_read else execute_command(session, shop, command))
-    result['facts'].update(product_context)
     preferences = read_memory(session, shop, 'shop')
+    result = ({**order_read, 'proposal': None} if order_read else
+              execute_command(session, shop, command, preferences=preferences))
+    result['facts'].update(product_context)
     if preferences:
         result['facts']['seller_preferences'] = preferences
     if command.intent == 'sales_advice' and not order_read:
         # Evidence and reports are useful even without an available LLM.
         brief = attach_business_brief(shop, result['facts'], message=message, history=history,
                                       preferences=preferences)
-        if contextual_plan and brief:
+        if brief:
             result['answer'] = planning_fallback(result['facts'])
-    if getattr(ai_provider, 'prefer_direct_facts', False):
-        rendered = read_reply(result, today=today, preferences=preferences)
-        if rendered is not None:
-            result['answer'] = rendered
     if forgetting:
         forget_memory(session, shop)
         command = ParsedCommand(intent='unknown')
@@ -211,6 +225,8 @@ async def handle_chat(
                           'forget_assistant_memory', {}, {'seller_preferences': {}})
     elif product_context.get('product_reference_missing'):
         result['answer'] = ASK_PRODUCT
+        direct_reply = True
+    elif result['facts'].get('business_advisory', {}).get('marketplace_funnel'):
         direct_reply = True
     elif not order_read and callable(getattr(ai_provider, 'respond', None)) and command.intent in ('sales_advice', 'unknown') and not simple and not is_casual_message(message):
         if command.intent == 'unknown':
@@ -223,6 +239,14 @@ async def handle_chat(
             advisor = await enrich_advice(session, shop, ai_provider, message=message,
                 resolved=resolved, conversation_id=conversation_id, runs=runs, history=history,
                 facts=result['facts'])
+            asks_for_math = bool(re.search(
+                r'\b(?:gia von|hoa von|tinh (?:lai|loi|gia|bien loi)|(?:lai|loi) (?:bao nhieu|moi don)|'
+                r'bien loi|bien loi nhuan)\b', read_text(message)))
+            if plan and not asks_for_math:
+                # A question about the price's effect on sales is a diagnosis.
+                # A speculative model topic cannot replace it with a margin form.
+                advisor['pricing_analysis'] = None
+                advisor['pricing_context'] = None
             prepared_answer = advisor.pop('_prepared_answer', None)
             result['facts'].update({key: value for key, value in advisor.items() if value is not None})
             if contextual_plan and (product_context.get('selected_product') or direct.sku):
@@ -239,60 +263,59 @@ async def handle_chat(
                     command = command.model_copy(update={'intent': 'sales_advice'})
             if advisor['pricing_analysis']:
                 command = ParsedCommand(intent='sales_advice')
-                result.update(answer=pricing_reply(advisor['pricing_analysis']), tool='calculate_pricing',
+                simple_price = simple_pricing_read(message)
+                asks_profit = simple_price and bool(re.search(r'\b(?:loi|lai) bao nhieu\b', read_text(message)))
+                result.update(answer=pricing_reply(advisor['pricing_analysis'], selling_profit_first=asks_profit), tool='calculate_pricing',
                               tool_arguments=advisor['pricing_analysis']['inputs'])
                 if (getattr(ai_provider, 'prefer_direct_pricing', False)
-                        and not advisor.get('context_extraction_error') and simple_pricing_read(message)):
+                        and not advisor.get('context_extraction_error') and simple_price):
                     direct_reply = True
-    # Price proposals and confirmations retain the backend's exact wording.
-    # OpenCode may phrase read-only tool results naturally using their actual facts.
     can_generate = command.intent in ("sales_advice", "unknown") or (
         natural_responses and command.intent != "change_price"
     )
-    confirmation_reply = bool(simple and runs and any(
-        word in normalize_text(message) for word in ("xác nhận", "đồng ý", "confirm")
-    ))
     report = build_chat_report(result['tool'], result['facts'])
-    if can_generate and not forgetting:
-        if direct_reply:
-            if simple:
-                result['answer'] = simple
-            mode, provider_name, model_name, fallback_reason = 'ai', 'deterministic_parser', None, None
-        elif simple and (not natural_responses or confirmation_reply or mode != "ai"):
-            result["answer"] = simple
-        elif hasattr(ai_provider, "respond") and mode == "ai":
-            try:
-                response_facts = {**result['facts'], **({'report_available': True} if report else {})}
-                for attempt in range(2):
-                    generated = (prepared_answer if attempt == 0 and prepared_answer is not None else
-                                 await ai_provider.respond(message, history=history, facts=response_facts))
-                    generated = assistant_text(generated)
-                    seller_context = '\n'.join([row['content'] for row in history if row['role'] == 'user'] + [message])
-                    issue = reply_issue(generated, result['facts'], seller_context=seller_context)
-                    issue = issue or business_reply_issue(generated, result['facts'], message=message,
-                                                          seller_context=seller_context)
-                    if not issue:
-                        break
-                    logger.warning('AI reply needs correction: reason=%s attempt=%s', issue, attempt + 1)
-                    if attempt:
-                        raise AIProviderError('invalid_response', stage=issue)
-                    response_facts = {**response_facts, 'reply_correction': {
-                        'reason': issue,
-                        'requirements': 'Viết lại dựa trên đúng số liệu. Chỉ đề xuất, không nói đã thực hiện thay đổi. Không suy đoán shop mới mở từ số đơn bằng 0. Mọi số tiền tính lời/giảm giá phải lấy đúng từ pricing_analysis. Đơn đang giao không phải đơn cần gửi lại. ' + business_correction(issue),
-                    }}
-                generated = re.sub(r"\s*\((?:pending_orders|packing_orders|shipping_orders)\)", "", generated)
-                generated = re.sub(r"\bstock\s*[=:]?\s*(\d+)", r"còn \1", generated, flags=re.IGNORECASE)
-                result["answer"] = generated
-                provider_name = getattr(ai_provider, 'response_provider', provider_name)
-                model_name = getattr(ai_provider, 'response_model', model_name)
-            except AIProviderError as error:
-                logger.warning('Chat used grounded fallback: reason=%s stage=%s', error.reason, error.stage or 'unknown')
-                mode, provider_name, fallback_reason = "fallback", "deterministic_parser", error.reason
+    if direct_reply:
+        if simple:
+            result['answer'] = simple
+        mode, provider_name, model_name, fallback_reason = 'ai', 'deterministic_parser', None, None
+    elif can_generate and not forgetting and callable(getattr(ai_provider, 'respond', None)) and mode == 'ai':
+        try:
+            response_facts = {**result['facts'], **({'report_available': True} if report else {})}
+            seller_context = '\n'.join([row['content'] for row in history if row['role'] == 'user'] + [message])
+            for attempt in range(2):
+                generated = (prepared_answer if attempt == 0 and prepared_answer is not None else
+                             await ai_provider.respond(message, history=history, facts=response_facts))
+                generated = conversational_text(generated)
+                issue = reply_issue(generated, result['facts'], seller_context=seller_context)
+                issue = issue or business_reply_issue(generated, result['facts'], message=message,
+                                                      seller_context=seller_context)
+                if not issue:
+                    break
+                business = result['facts'].get('business_advisory', {})
+                if issue == 'incomplete_video_script' and business.get('shot_list') and not business.get('detailed_video'):
+                    generated = result['answer']
+                    break
+                logger.warning('AI reply needs correction: reason=%s attempt=%s', issue, attempt + 1)
+                if attempt:
+                    raise AIProviderError('invalid_response', stage=issue)
+                response_facts = {**response_facts, 'reply_correction': {
+                    'reason': issue,
+                    'requirements': reply_correction(issue),
+                }}
+            generated = re.sub(r"\s*\((?:pending_orders|packing_orders|shipping_orders)\)", "", generated)
+            generated = re.sub(r"\bstock\s*[=:]?\s*(\d+)", r"còn \1", generated, flags=re.IGNORECASE)
+            result["answer"] = complete_business_reply(generated, result['facts'])
+            provider_name = getattr(ai_provider, 'response_provider', provider_name)
+            model_name = getattr(ai_provider, 'response_model', model_name)
+        except AIProviderError as error:
+            logger.warning('Chat used grounded fallback: reason=%s stage=%s', error.reason, error.stage or 'unknown')
+            mode, provider_name, fallback_reason = "fallback", "deterministic_parser", error.reason
     if mode == "fallback" and natural_responses and command.intent == "unknown" and not simple and not forgetting and not order_read:
         result["answer"] = fallback_explanation(fallback_reason)
     if forgetting:
         mode, provider_name, model_name, fallback_reason = 'ai', 'deterministic_parser', None, None
-    result["suggestions"] = (["Còn mã vận đơn?", "Còn đơn đó sao rồi?"] if order_read and result['facts'].get('order_action') else suggestions_for(command, result))
+    result["suggestions"] = ([] if simple else ["Còn mã vận đơn?", "Còn đơn đó sao rồi?"]
+                             if order_read and result['facts'].get('order_action') else suggestions_for(command, result))
     if order_read and result['facts'].get('order_comparison'):
         result['suggestions'] = [f"Theo dõi đơn #{item['id']}" for item in result['facts']['order_comparison'] if item.get('found')][:3]
     elapsed_ms = max(0, int(round((perf_counter() - started_at) * 1_000)))
@@ -367,17 +390,18 @@ def enrich_ai_command(
             data["inventory_scope"] = fallback.inventory_scope
 
     if command.intent == "shop_summary":
-        data["day"] = extract_day(normalized_message, today=today)
-        data["days"] = fallback.days or command.days
-        # Calendar meaning comes only from a complete seller read, never a guess
-        # in classifier output. A month can contain 31 days.
-        data['calendar_period'] = fallback.calendar_period
+        data.update(day=today, days=None, calendar_period=None, sales_metric=None, compare_yesterday=False,
+                    sales_period_issue=None)
+        data.update(sales_period(sales_text(read_text(message)), today=today))
+        if fallback.intent == 'shop_summary':
+            data['sales_metric'] = fallback.sales_metric
     if fallback.intent == "product_search":
         data["query"] = fallback.query
         data['min_price_vnd'] = fallback.min_price_vnd
         data['max_price_vnd'] = fallback.max_price_vnd
     if command.intent == "inventory_query" and data["inventory_scope"] == "low_stock":
-        data["low_stock_threshold"] = extract_threshold(normalized_message)
+        data["low_stock_threshold"] = (fallback.low_stock_threshold if fallback.low_stock_threshold is not None
+                                       else extract_threshold(normalized_message))
 
     return ParsedCommand.model_validate(data)
 
@@ -386,43 +410,64 @@ def execute_command(
     session: Session,
     shop: UTEMallRepository,
     command: ParsedCommand,
+    *,
+    preferences: dict | None = None,
 ) -> dict[str, Any]:
+    today = datetime.now(shop.timezone).date()
+
+    def read(tool, arguments, facts):
+        result = response('', tool, arguments, facts)
+        result['answer'] = read_reply(result, today=today, preferences=preferences or {})
+        return result
+
     if command.intent == "shop_summary":
-        today = datetime.now(shop.timezone).date()
+        if command.sales_period_issue:
+            explanation = {
+                'invalid_date': 'Ngày bạn nhập không hợp lệ. Bạn gửi lại theo dạng ngày/tháng/năm nhé.',
+                'multiple_periods': 'Bạn muốn xem kỳ nào trước? Mình có thể xem từng kỳ hoặc so hôm nay với cùng giờ hôm qua.',
+                'range_limit': 'Bạn chọn từ 1 đến 30 ngày hoặc một tháng lịch để mình xem số liệu nhé.',
+                'future_period': 'Kỳ này chưa diễn ra. Bạn chọn hôm nay hoặc một kỳ trước đó để xem số liệu nhé.',
+            }
+            return response(explanation[command.sales_period_issue], None, {}, {})
         anchor = command.day or today
         if anchor > today:
             return response('Ngày này chưa diễn ra. Bạn chọn hôm nay hoặc một ngày trước đó để xem số liệu nhé.',
                             None, {}, {'requested_date': anchor.isoformat()})
         days = ((anchor.weekday() + 1 if command.calendar_period == 'week' else anchor.day)
                 if command.calendar_period else command.days or 1)
-        # Retain the same snapshot for text, charts, retries and history. Reading
-        # summary and dashboard separately could disagree during a concurrent write.
-        stats = management.dashboard(shop, days, selected_date=anchor)
+        # Text, charts and follow-ups use the same scoped snapshot.
+        include_units = command.sales_metric == 'units'
+        stats = management.dashboard(shop, days, selected_date=anchor, include_units=include_units,
+                                     calendar_period=command.calendar_period,
+                                     include_previous_units=include_units and command.compare_yesterday)
         facts = {key: stats[key] for key in (
             'days', 'from_date', 'to_date', 'order_value_vnd', 'order_count', 'average_order_vnd',
             'delivered_value_vnd', 'change_percent', 'previous_value_vnd', 'series',
             'order_status_counts', 'updated_at', 'timezone')}
         facts['includes_partial_today'] = anchor == today
-        if command.calendar_period or command.days and command.days > 1:
-            label = 'Tuần này' if command.calendar_period == 'week' else 'Tháng này' if command.calendar_period else f'{days} ngày qua'
-            if command.calendar_period:
-                facts['calendar_period'] = command.calendar_period
-                label += f" ({format_day(stats['from_date'])}–{format_day(stats['to_date'])})"
-            answer = (f"**{label}**, shop có **{stats['order_count']} đơn** hợp lệ.\n\n"
-                      f"• Giá trị đơn hàng: **{format_vnd(stats['order_value_vnd'])}**\n"
-                      f"• Giá trị trung bình: **{format_vnd(stats['average_order_vnd'])}/đơn**\n"
-                      f"• Giá trị đơn đã giao: **{format_vnd(stats['delivered_value_vnd'])}**\n\n"
-                      "Giá trị đơn hàng chưa phải toàn bộ tiền đã thu; không bao gồm đơn hủy hoặc hoàn.")
-            return response(answer, "get_shop_summary", {"days": days, **({'calendar_period': command.calendar_period} if command.calendar_period else {})}, facts)
-        facts.update(date=anchor.isoformat(), status_counts=stats['order_status_counts'],
-                     pending_count=stats['order_status_counts'].get('pending', 0),
-                     cancelled_count=stats['order_status_counts'].get('cancelled', 0))
-        answer = (f"Ngày **{format_day(facts['date'])}**, shop có **{facts['order_count']} đơn** hợp lệ.\n\n"
-                  f"• Giá trị đơn hàng: **{format_vnd(facts['order_value_vnd'])}**\n"
-                  f"• Chờ xử lý: **{facts['pending_count']} đơn**\n"
-                  f"• Đã hủy: **{facts['cancelled_count']} đơn**\n\n"
-                  "Đây là giá trị đơn, chưa phải toàn bộ tiền đã thu.")
-        return response(answer, "get_shop_summary", {"date": facts["date"]}, facts)
+        if command.calendar_period:
+            facts['calendar_period'] = command.calendar_period
+        if command.sales_metric:
+            facts['sales_metric'] = command.sales_metric
+        if command.compare_yesterday:
+            facts.update(compare_yesterday=True, previous_order_count=stats['previous_order_count'],
+                         previous_order_status_counts=stats['previous_order_status_counts'],
+                         previous_delivered_value_vnd=stats['previous_delivered_value_vnd'])
+        if command.day is None and command.days is None and not command.calendar_period and command.sales_metric in ORDER_STATUS_TEXT:
+            facts['all_order_status_counts'] = stats['all_order_status_counts']
+        if include_units:
+            facts.update(units_sold=stats['units_sold'], orders_with_item_quantity=stats['orders_with_item_quantity'])
+            if command.compare_yesterday:
+                facts.update(previous_units_sold=stats['previous_units_sold'],
+                             previous_orders_with_item_quantity=stats['previous_orders_with_item_quantity'])
+        if days == 1 and not command.calendar_period:
+            facts.update(date=anchor.isoformat(), status_counts=stats['order_status_counts'],
+                         pending_count=stats['order_status_counts'].get('pending', 0),
+                         cancelled_count=stats['order_status_counts'].get('cancelled', 0))
+        arguments = {'days': days} if days > 1 or command.calendar_period else {'date': facts['date']}
+        if command.calendar_period:
+            arguments['calendar_period'] = command.calendar_period
+        return read('get_shop_summary', arguments, facts)
 
     if command.intent == "inventory_query" and command.inventory_scope == "low_stock":
         threshold = (
@@ -438,37 +483,11 @@ def execute_command(
             "stock": item["stock"],
             "price_vnd": item["price_vnd"],
         } for item in items]
-        if compact_items:
-            preview = "\n".join(f"• **{item['product_name']}** — còn **{item['stock']}**\n  SKU: {item['sku']}" for item in compact_items[:5])
-            suffix = "" if len(compact_items) <= 5 else f"\n\nCòn {len(compact_items) - 5} SKU khác trong danh sách."
-            qualifier = "Ít nhất " if len(items) == 50 else ""
-            answer = f"{qualifier}**{len(compact_items)} SKU** có tồn kho không quá {threshold}:\n\n{preview}{suffix}\n\nBạn muốn kiểm tra kỹ sản phẩm nào?"
-        else:
-            answer = f"Không có SKU nào tồn kho không quá {threshold}."
-        facts = {
-            "threshold": threshold,
-            "count": len(compact_items),
-            "items": compact_items,
-        }
-        return response(
-            answer,
-            "get_low_stock",
-            {"threshold": threshold, "limit": 50},
-            facts,
-        )
+        return read("get_low_stock", {"threshold": threshold, "limit": 50},
+                    {"threshold": threshold, "count": len(compact_items), "items": compact_items})
 
     if command.intent == "inventory_query" and command.inventory_scope == "overview":
-        facts = shop.inventory_overview(low_stock_threshold=5)
-        answer = (
-            "Tồn kho hiện tại của shop:\n\n"
-            f"• **{facts['active_product_count']} sản phẩm** đang bán\n"
-            f"• **{facts['sku_count']} SKU** với **{format_number(facts['unit_count'])} sản phẩm** trong kho\n"
-            f"• **{facts['low_stock_count']} SKU** sắp hết (còn 1–5)\n"
-            f"• **{facts['out_of_stock_count']} SKU** đã hết hàng\n"
-            f"• Giá trị hàng theo giá bán hiện tại: **{format_vnd(facts['retail_value_vnd'])}**\n\n"
-            "Bạn muốn xem danh sách sắp hết hay kiểm tra một SKU cụ thể?"
-        )
-        return response(answer, "get_inventory_overview", {}, facts)
+        return read("get_inventory_overview", {}, shop.inventory_overview(low_stock_threshold=5))
 
     if command.intent == "inventory_query":
         if not command.sku:
@@ -481,20 +500,8 @@ def execute_command(
         try:
             item = shop.get_item_by_sku(command.sku)
         except ShopItemNotFoundError:
-            return response(
-                f"Mình chưa tìm thấy mã **{command.sku}** trong shop đang kết nối. Bạn kiểm tra lại mã hoặc cho mình tên sản phẩm nhé.",
-                "get_inventory",
-                {"sku": command.sku},
-                {"sku": command.sku, "found": False},
-            )
-        variant = f" ({item['variant_title']})" if item["variant_title"] else ""
-        active_text = "đang bán" if item["is_active"] else "đang ngừng bán"
-        answer = (f"**{item['product_name']}**{variant}\n\n"
-                  f"• Tồn kho: **{item['stock']} sản phẩm**\n"
-                  f"• Giá bán: **{format_vnd(item['price_vnd'])}**\n"
-                  f"• Trạng thái: {active_text}\n\nSKU: {item['sku']}"
-                  + ("\n\nMẫu này sắp hết hàng. Bạn nên cân nhắc bổ sung trước khi chạy ưu đãi." if item["stock"]<=5 else ""))
-        return response(answer, "get_inventory", {"sku": item["sku"]}, item)
+            return read("get_inventory", {"sku": command.sku}, {"sku": command.sku, "found": False})
+        return read("get_inventory", {"sku": item["sku"]}, item)
 
     if command.intent == "change_price":
         missing_fields = []
@@ -566,10 +573,7 @@ def execute_command(
         filters = {'min_price_vnd': command.min_price_vnd, 'max_price_vnd': command.max_price_vnd}
         found = management.products(shop, query, limit=8, **filters)
         found.update(query=query, **filters)
-        lines = "\n\n".join(f"**{i+1}. {p['name']}**\n{format_vnd(round(p['price_vnd']))} · Kho {p['stock']}\nSKU: {p['sku']}" for i,p in enumerate(found["items"]))
-        answer = (f"Mình tìm thấy **{found['total']} sản phẩm** khớp “{query}” trong shop.\n\n{lines}\n\nBạn muốn kiểm tra hoặc điều chỉnh sản phẩm nào?" if found["items"] else
-                  f"Chưa có sản phẩm khớp “{query}” trong shop. Bạn thử tên ngắn hơn hoặc mã SKU nhé.")
-        return response(answer, "search_products", {"query": query, "limit": 8, **filters}, found)
+        return read("search_products", {"query": query, "limit": 8, **filters}, found)
 
     if command.intent == "sales_advice":
         facts = shop_context(shop, command.days or 7)
@@ -579,74 +583,43 @@ def execute_command(
         if command.sku:
             try: facts["selected_product"] = shop.get_item_by_sku(command.sku)
             except ShopItemNotFoundError: facts["selected_product"] = {"sku": command.sku, "found": False}
-        answer = (f"Từ dữ liệu hiện tại, mình đề xuất ưu tiên:\n\n"
-                  f"• **Xử lý đơn:** có {facts['tasks']['pending_orders']} đơn chờ xác nhận.\n"
-                  f"• **Kiểm tra tồn kho:** {facts['tasks']['low_stock_products']} sản phẩm còn không quá 5.\n"
-                  f"• **Chăm sóc khách hàng:** {facts['tasks']['unanswered_reviews']} đánh giá chưa phản hồi.\n\n"
-                  "Bạn muốn mình đi sâu vào phần nào?")
+        tasks = facts['tasks']
+        priorities = []
+        if pending := tasks['pending_orders']:
+            priorities.append(f"Xác nhận **{pending} đơn** đang chờ.")
+        if low := tasks['low_stock_products']:
+            priorities.append(f"Rà lại **{low} sản phẩm** còn không quá 5 trước khi chạy ưu đãi.")
+        if reviews := tasks['unanswered_reviews']:
+            priorities.append(f"Trả lời **{reviews} đánh giá** đang chờ phản hồi.")
+        answer = ('Những việc cần ưu tiên lúc này:\n\n' + '\n'.join(f'• {item}' for item in priorities)
+                  if priorities else 'Hiện chưa có đơn chờ xác nhận, cảnh báo tồn thấp hay đánh giá cần phản hồi. '
+                  'Nếu bạn đang muốn tăng đơn, cho mình tên món bạn muốn tập trung để cùng xem bước tiếp theo.')
         return response(answer, "get_shop_insights", {"days": command.days or 7}, facts)
 
     return response(
-        "Mình chưa hiểu rõ việc bạn muốn làm. Bạn muốn xem tình hình bán hàng, tìm sản phẩm, "
-        "kiểm tra kho hay chuẩn bị nội dung bán hàng? Nói tự nhiên như bạn đang nhờ một cộng sự nhé.",
+        "Mình chưa rõ phần bạn muốn mình xử lý. Bạn nói thêm một chút nhé.",
         None,
         {},
         {"supported_intents": ["shop_summary", "inventory_query", "change_price", "product_search", "sales_advice"]},
     )
 
 
-def simple_reply(message, runs):
-    social = social_reply(message)
-    if social:
-        return social
+def simple_reply(session, message, runs):
     text = read_text(message)
-    if runs and any(run.proposal_id for run in runs[-3:]) and re.search(r'^(?:(?:minh|toi)\s+)?(?:xac nhan|dong y|confirm)\b', text):
-        return "Để tránh thay đổi nhầm, bạn hãy bấm **Xác nhận đổi giá** trên đúng thẻ đề xuất. Tin nhắn này chưa thay đổi dữ liệu."
-    return None
+    confirmation = re.sub(r'[,;]\s*', ' ', text)
+    if re.fullmatch(r'(?:(?:minh|toi) )?(?:xac nhan(?: doi gia)?|dong y(?: xac nhan| doi gia)?|confirm|ok|oke|okie)', confirmation):
+        last = next((run for run in reversed(runs) if run.tool_name or not social_reply(run.message)), None)
+        if last and last.proposal_id:
+            proposal = session.get(ActionProposal, last.proposal_id)
+            if proposal is not None and proposal.status == 'pending':
+                return (f'Bạn bấm **Xác nhận đổi giá** trên thẻ đề xuất để lưu mức '
+                        f'**{format_vnd(proposal.new_price_vnd)}** cho mã **{proposal.sku}** nhé.')
+    return social_reply(message, ongoing=bool(runs))
 
 
 def is_exact_fact_question(message, command):
-    """Only complete, unambiguous read requests may bypass model wording.
-
-    Extra analysis, instructions and follow-up text fail the full match and
-    continue through the natural assistant. This never handles write actions.
-    """
-    if quick_read(message, today=command.day or date.today()) is not None:
-        return True
-    text = plain(normalize_text(message)).strip(' ?!.')
-    if command.intent == 'inventory_query':
-        patterns = [
-            r'(?:xem |kiem tra )?(?:ton kho|hang ton kho)(?: cua shop| shop)?',
-            r'(?:shop (?:minh |toi )?co )?(?:nhung |cac )?san pham nao sap het(?: hang)?',
-        ]
-        if command.sku:
-            patterns.append(r'(?:sku )?[a-z0-9._-]+ con bao nhieu(?: hang| san pham| chiec| cai)?')
-    elif command.intent == 'shop_summary':
-        # Parse complete read clauses, including the app's own starter prompt.
-        # At most one distinct reporting period is allowed. Requests to explain,
-        # compare, calculate hypothetical revenue or change data fail fullmatch.
-        periods = re.findall(r'\b(?:hom nay|hom qua|(?:7|30) ngay(?: qua| gan day)?|tuan (?:nay|qua)|thang (?:nay|qua))\b', text)
-        if len(set(periods)) > 1:
-            return False
-        body = re.sub(r'\b(?:hom nay|hom qua|(?:7|30) ngay(?: qua| gan day)?|tuan (?:nay|qua)|thang (?:nay|qua))\b', ' ', text)
-        body = ' '.join(body.replace(',', ' ').split())
-        subject = r'(?:shop(?: cua (?:toi|minh)| (?:toi|minh))? )?'
-        count = r'(?:(?:co|ban duoc|nhan duoc) )?bao nhieu don(?: hang)?'
-        value = r'(?:tong )?(?:doanh thu|doanh so|gia tri don(?: hang)?)(?: cua shop)?(?: (?:la |duoc )?bao nhieu)?'
-        clause = rf'(?:{count}|{value})'
-        if re.fullmatch(rf'{subject}{clause}(?: va {clause})?', body):
-            return True
-        patterns = [
-            r'(?:doanh thu|doanh so|gia tri don)(?: cua shop)? (?:hom nay|hom qua|7 ngay qua|30 ngay qua)(?: (?:la |duoc )?bao nhieu)?',
-            r'(?:hom nay|hom qua) (?:shop (?:toi |minh )?)?(?:co |ban duoc )?bao nhieu don(?: hang)?',
-        ]
-    elif command.intent == 'product_search':
-        # A rejected budget/compound query must not re-enter the fast path
-        # through the older broad "Tìm ..." pattern.
-        return catalog_lookup(message) is not None
-    else:
-        return False
-    return any(re.fullmatch(pattern, text) for pattern in patterns)
+    return (quick_read(message, today=command.day or date.today()) is not None
+            or command.intent == 'product_search' and catalog_lookup(message) is not None)
 
 
 def is_casual_message(message):
@@ -670,7 +643,7 @@ def suggestions_for(command, result):
         if brief:
             focus = brief.get('focus_product')
             sku = focus.get('sku') if focus else None
-            return ([f"Viết kịch bản TikTok chi tiết cho SKU {sku}" if sku else "Chọn sản phẩm nào để quay video trước?",
+            return ([f"Viết kịch bản TikTok ngắn cho SKU {sku}" if sku else "Chọn sản phẩm nào để quay video trước?",
                      "Cụ thể hơn", "Lập kế hoạch 7 ngày với một người thực hiện"]
                     if brief['mode'] != 'video_script' else
                     ["Viết thêm 2 câu mở đầu khác để thử", "Hướng dẫn đo hiệu quả từng video", "Lập kế hoạch nội dung 7 ngày"])
@@ -707,7 +680,3 @@ def format_vnd(value: int) -> str:
 
 def format_number(value: int) -> str:
     return f"{value:,}".replace(",", ".")
-
-
-def format_day(iso_day: str) -> str:
-    return datetime.strptime(iso_day, "%Y-%m-%d").strftime("%d/%m/%Y")

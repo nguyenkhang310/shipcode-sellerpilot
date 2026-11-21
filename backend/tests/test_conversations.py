@@ -23,6 +23,9 @@ def test_followup_references_tool_sku_and_requires_confirmation(client, shop_db_
     assert 'thẻ đề xuất' in agreed['answer']
     with sqlite3.connect(shop_db_path) as connection:
         assert connection.execute("SELECT price FROM product_variant WHERE sku='A001'").fetchone()[0] == 150000
+    client.post(f"/api/v1/proposals/{proposal['proposal']['id']}/reject")
+    acknowledged = chat(client, 'Oke nha', first['conversation_id'])
+    assert 'Xác nhận đổi giá' not in acknowledged['answer']
     fresh = chat(client, 'Đổi giá mã này thành 120k')
     assert fresh['proposal'] is None
     assert 'sku' in fresh['facts']['missing_fields']
@@ -77,7 +80,17 @@ def test_model_cannot_invent_sku_or_apply_plain_text_confirmation(client):
     greeting = chat(client, 'Xin chào')
     assert greeting['intent'] == 'unknown'
     assert greeting['proposal'] is None
-    assert 'ShipCode' in greeting['answer']
+    assert 'ShipCODE' in greeting['answer']
+
+
+def test_brand_introduction_is_local_and_does_not_start_an_operation(client):
+    from test_quick_reads import NoNetwork
+    client.app.state.ai_provider = NoNetwork()
+    for phrase in ('Bạn là ai?', 'Giới thiệu về SellerPilot đi', 'Ai là người phát triển SellerPilot?'):
+        reply = chat(client, phrase)
+        assert 'do **ShipCODE** phát triển' in reply['answer']
+        assert reply['provider'] == 'deterministic_parser'
+        assert reply['tool'] is None and reply['proposal'] is None
 
 
 def test_advice_gets_shop_facts_and_prior_messages(client):
@@ -142,7 +155,7 @@ def test_opencode_style_provider_skips_classifier_for_obvious_casual_chat(client
     assert result['answer'] == 'Mình ở đây, bạn cứ kể mình nghe nhé.'
 
 
-def test_opencode_style_provider_uses_tool_facts_with_one_model_call(client):
+def test_opencode_style_provider_uses_tool_facts_for_custom_read_with_one_model_call(client):
     class NaturalAI:
         provider = 'opencode'
         model = 'glm-5.3-flash-free'
@@ -158,7 +171,7 @@ def test_opencode_style_provider_uses_tool_facts_with_one_model_call(client):
             return 'SKU A001 hiện còn 3 sản phẩm.'
 
     client.app.state.ai_provider = NaturalAI()
-    result = chat(client, 'SKU A001 còn bao nhiêu hàng?')
+    result = chat(client, 'SKU A001 còn bao nhiêu hàng? Giải thích ý nghĩa số tồn này.')
     assert result['tool'] == 'get_inventory'
     assert result['provider'] == 'opencode'
     assert result['answer'] == 'SKU A001 hiện còn 3 sản phẩm.'
@@ -175,7 +188,7 @@ def test_invalid_response_is_not_reported_as_lost_muse_connection(client):
     client.app.state.ai_provider = InvalidReply()
     result = chat(client, 'Sao vậy, không kết nối được à?')
     assert result['mode'] == 'fallback' and result['fallback_reason'] == 'invalid_response'
-    assert 'chưa vượt qua kiểm tra' in result['answer']
+    assert 'chưa có câu trả lời đủ tin cậy' in result['answer']
     assert 'chưa kết nối' not in result['answer']
 
 

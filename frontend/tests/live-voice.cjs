@@ -40,7 +40,9 @@ test('Live retains the latest startup audio in order and never exceeds the confi
 test('Live restores language and voice independently and tolerates old or corrupt preferences', () => {
   assert.deepEqual(parseLivePreferences('{"language":"en","voice":"female"}'), {language: 'en', voice: 'female'});
   assert.deepEqual(parseLivePreferences('{"language":"en"}'), {language: 'en', voice: 'male'});
-  assert.deepEqual(parseLivePreferences('{'), {language: 'vi', voice: 'male'});
+  assert.deepEqual(parseLivePreferences('{"language":"vi","voice":"male"}'), {language: 'vi', voice: 'male'});
+  assert.deepEqual(parseLivePreferences(null), {language: 'vi', voice: 'female'});
+  assert.deepEqual(parseLivePreferences('{'), {language: 'vi', voice: 'female'});
 });
 
 test('quiet syllables and a mid-sentence pause are sent within one speech turn', () => {

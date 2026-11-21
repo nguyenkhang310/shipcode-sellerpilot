@@ -48,6 +48,7 @@ def test_natural_catalog_questions_extract_subject_and_price(message, query, min
     'Tìm dưới 500k', 'Tìm đèn 50k', 'Tìm tủ 100k',
     'Có kết nối được không?', 'Bạn đọc được ảnh không?', 'Có hiểu tiếng Việt không?',
     'Bạn có hỗ trợ đăng sản phẩm không?', 'Bạn có trả lời được không?',
+    'Shop bán chậm có phải giá cao quá không?',
 ])
 def test_complex_and_mutating_requests_keep_their_existing_paths(message):
     assert catalog_lookup(message) is None

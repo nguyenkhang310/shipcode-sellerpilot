@@ -37,7 +37,7 @@ def test_read_paraphrases_are_normalized_and_complete(message, intent):
     'Hôm nay shop sao rồi và nên làm gì?',
     'Giả sử doanh thu hôm nay là 5 triệu thì sao?',
     'Đừng xem doanh thu hôm nay',
-    'Doanh thu hôm qua so với hôm nay',
+    'Doanh thu tháng này so với tháng trước là vì sao?',
     'Tồn kho hôm qua',
     'Sửa giá SKU A001 còn 5 xị',
     'Viết mô tả cho SKU A001',
@@ -120,3 +120,14 @@ def test_exact_pricing_after_validated_extraction_does_not_call_model_again(clie
     assert len(provider.preparations) == 1 and result['tool'] == 'calculate_pricing'
     assert result['facts']['pricing_analysis']['at_selling_price']['profit_per_unit_vnd'] == 500000
     assert '500.000đ' in result['answer']
+
+
+def test_exact_pricing_keeps_labelled_amounts_that_the_model_omits(client):
+    from test_chat_context import PreparedAI
+    class ExactPricing(PreparedAI):
+        prefer_direct_pricing = True
+    client.app.state.ai_provider = ExactPricing({'topic': 'pricing'})
+    result = chat(client, 'Giá vốn 5 xị, đóng gói 20k mỗi đơn, phí sàn 10%. Nếu bán 1 củ thì còn lời bao nhiêu?')
+    assert result['facts']['pricing_analysis']['at_selling_price']['profit_per_unit_vnd'] == 380000
+    assert result['answer'].startswith('Bán **1.000.000đ**, bạn lời ước tính **380.000đ/sản phẩm**')
+    assert 'chưa tính' in result['answer'] and '?' not in result['answer']

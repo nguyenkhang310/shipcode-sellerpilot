@@ -15,7 +15,7 @@ import { pickProductImages, type PendingImage } from '../productImages';
 import { createLiveAudio } from './audio';
 import type { LiveAudio } from './audioTypes';
 import { LiveOrb } from './LiveOrb';
-import { noteNativeAudioRelease, runNativeAudioWork } from './nativeAudioSession';
+import { noteNativeAudioRelease, runNativeAudioWork, waitForNativeAudioRelease } from './nativeAudioSession';
 import { LIVE_WAVE_POINTS, MicPrefix, pcmLevel, readMicWave, VoiceTurn, type MicFrame } from './voiceTurn';
 import { LIVE_TEXT, type LiveLanguage, type LivePreferences } from './locale';
 import { liveMessageKey, upsertCaption, type LiveCaption } from './timeline';
@@ -28,6 +28,9 @@ export type LiveShopResult = {
   answer: string;
   report: ChatData['report'];
   order_id: number | null;
+  turn_id?: string;
+  spoken_summary?: string;
+  sales_context?: { sales_metric?: string; compare_yesterday?: boolean };
 };
 type LiveEvent =
   | { type: 'ready'; turn_protocol?: number }
@@ -65,6 +68,7 @@ type Session = {
   fallbackTurn: string;
   captions: Map<string, LiveCaption>;
   closedTurns: Set<string>;
+  visibleUserTurns: Set<string>;
   captionTimer?: ReturnType<typeof setTimeout>;
   muted: boolean;
   picking: boolean;
@@ -82,14 +86,16 @@ type Props = {
   onResult: (result: LiveShopResult | null) => void;
   onSaved: (turn: ConversationDetail['turns'][number]) => void;
   onOpen: () => void;
-  onExit: (orderId?: number, recoverId?: string) => void;
+  onExit: (orderId?: number) => void;
+  onDrain: (draining: boolean, recoverId?: string) => void;
   onShopChanged?: () => void;
   reduceMotion: boolean;
 };
 export type LiveConversationHandle = { start: () => void; openOrder: (id: number) => void };
 
 const USE_NATIVE_DRIVER = Platform.OS !== 'web';
-const CUE = require('../../../../assets/sellerpilot-live-enter.wav');
+const ENTER_CUE = require('../../../../assets/sellerpilot-live-enter.wav');
+const EXIT_CUE = require('../../../../assets/sellerpilot-live-exit.wav');
 
 function sendPcm(socket: WebSocket, pcm: Uint8Array, rate: number) {
   const size = Math.floor(rate / 2) * 2;
@@ -98,8 +104,9 @@ function sendPcm(socket: WebSocket, pcm: Uint8Array, rate: number) {
   }
 }
 
-function entryCue(session: Session, source: number | string) {
-  return new Promise<void>(resolve => {
+function playCue(source: number | string, afterNativeRelease = false) {
+  let stop = () => {};
+  const done = new Promise<void>(resolve => {
     let player: ReturnType<typeof createAudioPlayer> | undefined;
     let media: HTMLAudioElement | undefined;
     let subscription: { remove: () => void } | undefined;
@@ -108,7 +115,6 @@ function entryCue(session: Session, source: number | string) {
       if (!active) return;
       active = false;
       clearTimeout(timer);
-      session.stopCue = undefined;
       subscription?.remove();
       if (media && !media.ended) media.pause();
       try {
@@ -120,7 +126,7 @@ function entryCue(session: Session, source: number | string) {
       resolve();
     };
     const timer = setTimeout(finish, 700);
-    session.stopCue = finish;
+    stop = finish;
     async function play() {
       try {
         if (Platform.OS === 'web') {
@@ -131,6 +137,7 @@ function entryCue(session: Session, source: number | string) {
           return;
         }
         await runNativeAudioWork(async () => {
+          if (afterNativeRelease) await waitForNativeAudioRelease();
           if (active) await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
         });
         if (!active) return;
@@ -143,21 +150,24 @@ function entryCue(session: Session, source: number | string) {
     }
     void play();
   });
+  return { done, stop };
 }
 
 export const LiveConversation = forwardRef<LiveConversationHandle, Props>(function LiveConversation({
-  visible, conversationId, progress, preferences, onCaptions, onResult, onSaved, onOpen, onExit, onShopChanged, reduceMotion,
+  visible, conversationId, progress, preferences, onCaptions, onResult, onSaved, onOpen, onExit, onDrain, onShopChanged, reduceMotion,
 }, ref) {
   const { IOS, BRAND, ui, isDark } = useTheme();
   const current = useRef<Session | null>(null);
   const interruptedHistory = useRef<string | undefined>(undefined);
   const closing = useRef(false);
+  const transitioning = useRef(false);
   const level = useRef(0);
   const lastLevelAt = useRef(0);
   const microphone = useRef(new Float32Array(LIVE_WAVE_POINTS));
   const lastVoiceAt = useRef(0);
   const voiceActive = useRef(false);
-  const cueAsset = useRef<number | string>(CUE);
+  const cues = useRef<{ enter: number | string; exit: number | string }>({ enter: ENTER_CUE, exit: EXIT_CUE });
+  const exitCue = useRef<ReturnType<typeof playCue> | null>(null);
   const [phase, setPhase] = useState<'idle' | 'connecting' | 'live'>('idle');
   const [muted, setMuted] = useState(false);
   const [inputReady, setInputReady] = useState(false);
@@ -192,8 +202,10 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
 
   useEffect(() => {
     // A native Metro asset can take longer to load than the chime itself.
-    const asset = Asset.fromModule(CUE);
-    void asset.downloadAsync().then(() => { if (asset.localUri) cueAsset.current = asset.localUri; }).catch(() => {});
+    for (const kind of ['enter', 'exit'] as const) {
+      const asset = Asset.fromModule(kind === 'enter' ? ENTER_CUE : EXIT_CUE);
+      void asset.downloadAsync().then(() => { if (asset.localUri) cues.current[kind] = asset.localUri; }).catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
@@ -206,21 +218,23 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
       }
       // An iOS permission prompt can temporarily make the app inactive.
       if (state === 'background' || state === 'inactive' && session.captureStarted) {
+        if (session.finish) { session.finish(); return; }
         disconnect();
         setSpeaking(false); setPhase('idle'); setUploading(false); setPicking(false);
         setNotice('Phiên đã dừng khi bạn rời màn hình.');
       }
     });
-    return () => { subscription.remove(); disconnect(); progress.stopAnimation(); };
+    return () => { subscription.remove(); disconnect(); exitCue.current?.stop(); progress.stopAnimation(); };
   }, [progress]);
 
   useEffect(() => {
     if (!visible) {
-      disconnect();
-      interruptedHistory.current = undefined;
+      if (!current.current?.finish) {
+        disconnect();
+        closing.current = false;
+      }
       progress.stopAnimation();
       progress.setValue(0);
-      closing.current = false;
       return;
     }
     const motion = Animated.timing(progress, {
@@ -272,21 +286,26 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     setProcessing(true);
   }
 
-  function flushCaptions(session: Session) {
+  function flushCaptions(session: Session, completeTurn = false) {
     clearTimeout(session.captionTimer);
     session.captionTimer = undefined;
     if (current.current !== session || !session.captions.size) return;
-    const captions = [...session.captions.values()];
-    session.captions.clear();
+    const captions = [...session.captions.values()].filter(caption => caption.role === 'assistant' || caption.final || completeTurn);
+    if (!captions.length) return;
+    for (const caption of captions) {
+      session.captions.delete(liveMessageKey(caption.turnId, caption.role));
+      if (caption.role === 'user') session.visibleUserTurns.add(caption.turnId);
+    }
     onCaptions(items => captions.reduce(upsertCaption, items));
   }
 
-  function discardCaptions(session: Session, id: string | undefined) {
+  function discardCaptions(session: Session, id: string | undefined, remove = true) {
     if (!id) return;
     session.closedTurns.add(id);
     session.captions.delete(liveMessageKey(id, 'user'));
     session.captions.delete(liveMessageKey(id, 'assistant'));
-    onCaptions(items => items.filter(item => item.turnId !== id));
+    session.visibleUserTurns.delete(id);
+    if (remove) onCaptions(items => items.filter(item => item.turnId !== id));
   }
 
   async function start() {
@@ -295,7 +314,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
       preRoll: new MicPrefix(420), startup: new MicPrefix(8000), captured: false, language: preferences.language,
       ready: false, captureStarted: false, pendingHistory: false, muted: false, picking: false,
       skipOutput: false, outputOpen: false, manualTurns: false, waiting: false, playing: false, fallbackTurn: createMessageId(),
-      captions: new Map(), closedTurns: new Set() };
+      captions: new Map(), closedTurns: new Set(), visibleUserTurns: new Set() };
     current.current = session;
     setMuted(false); setInputReady(false); setCaptureReady(false); setSpeaking(false); setUserSpeaking(false); setProcessing(false);
     setNotice(''); setPhase('connecting'); setUploading(false); setGalleryFailed(false); setListing(null); setArchiveReview('');
@@ -342,7 +361,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
           catch { fail('Mất kết nối Live. Bạn mở lại phiên nhé.'); }
         },
         speaking(value) {
-          if (current.current !== session) return;
+          if (current.current !== session || closing.current) return;
           if (session.playing === value) return;
           session.playing = value;
           if (value) {
@@ -364,7 +383,10 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
         },
         error: message => { if (current.current === session) fail(message); },
       });
-      const sound = entryCue(session, cueAsset.current);
+      exitCue.current?.stop();
+      const cue = playCue(cues.current.enter);
+      session.stopCue = cue.stop;
+      void cue.done.then(() => { session.stopCue = undefined; });
       // Open the provider connection while audio initializes. Native capture still
       // starts after the chime so it does not record the chime or cut it short.
       const socket = session.socket = openSellerLiveSocket(session.conversationId, preferences);
@@ -395,6 +417,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
               setInputReady(true);
               break;
             case 'audio': {
+              if (session.finish) break;
               session.outputOpen = true;
               if (session.skipOutput || session.picking) break;
               const pcm = toByteArray(event.data);
@@ -421,10 +444,10 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
               session.skipOutput = false;
               session.audio?.flush();
               if (event.clear_captions) discardCaptions(session, event.turn_id ?? session.fallbackTurn);
-              else flushCaptions(session);
+              else flushCaptions(session, true);
               if (!event.turn_id) session.fallbackTurn = createMessageId();
               setProcessing(false);
-              if (session.waiting) {
+              if (session.waiting && !session.finish) {
                 session.waiting = false;
                 for (const frame of session.startup.drain()) forwardFrame(socket, frame);
               }
@@ -434,7 +457,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
               interruptedHistory.current = undefined;
               {
                 const id = event.turn.response.facts.live_turn_id;
-                if (typeof id === 'string') discardCaptions(session, id);
+                if (typeof id === 'string') discardCaptions(session, id, false);
                 else if (event.turn.response.facts.voice) onCaptions([]);
               }
               onSaved(event.turn);
@@ -450,9 +473,14 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
               const id = event.turn_id ?? session.fallbackTurn;
               if (session.closedTurns.has(id)) break;
               const key = liveMessageKey(id, event.role);
-              session.captions.set(key, { turnId: id, role: event.role, text: event.text.slice(-4000) });
-              if (event.unclear || event.final) flushCaptions(session);
-              else session.captionTimer ??= setTimeout(() => flushCaptions(session), 70);
+              session.captions.set(key, { turnId: id, role: event.role,
+                text: event.text.trim(), final: event.final || event.unclear });
+              if (event.final || event.unclear) flushCaptions(session);
+              else if (event.role === 'assistant') {
+                const user = session.captions.get(liveMessageKey(id, 'user'));
+                if (user && !session.visibleUserTurns.has(id)) user.final = true;
+                session.captionTimer ??= setTimeout(() => flushCaptions(session), 100);
+              }
               break;
             }
             case 'draft': setListing(event.draft); break;
@@ -471,14 +499,15 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
               break;
           }
         } catch {
-          fail('Chưa phát được phản hồi Live. Bạn mở lại phiên nhé.');
+          if (session.finish) session.finish();
+          else fail('Chưa phát được phản hồi Live. Bạn mở lại phiên nhé.');
         }
       };
       if (Platform.OS !== 'web') {
         void Haptics.selectionAsync().catch(() => {});
       }
       if (current.current !== session || closing.current) return;
-      await session.audio.start(Platform.OS === 'web' ? undefined : sound);
+      await session.audio.start(Platform.OS === 'web' ? undefined : cue.done);
       if (current.current !== session || closing.current) return;
       session.captureStarted = true;
       watchInput(session);
@@ -489,7 +518,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
 
   useImperativeHandle(ref, () => ({
     start() {
-      if (visible) return;
+      if (visible || closing.current) return;
       onCaptions([]); onResult(null);
       onOpen();
       void start();
@@ -598,28 +627,38 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     if (closing.current) return;
     closing.current = true;
     const session = current.current;
-    const exit = (recoverId?: string) => {
+    transitioning.current = true;
+    const socket = session?.socket;
+    if (session?.ready && socket?.readyState === WebSocket.OPEN) {
+      clearTimeout(session.inputTimeout);
+      session.stopCue?.();
+      session.audio?.close();
+      session.audio = undefined;
+      onDrain(true);
+      session.finish = acknowledged => {
+        const recoverId = acknowledged ? undefined : session.pendingHistory ? session.conversationId : interruptedHistory.current;
+        disconnect();
+        if (!transitioning.current) closing.current = false;
+        onDrain(false, recoverId);
+      };
+      session.finishTimeout = setTimeout(session.finish, 2200);
+      try { socket.send('{"type":"finish"}'); }
+      catch { session.finish(); }
+    } else {
       disconnect();
-      Animated.timing(progress, {
-        toValue: 0, duration: reduceMotion ? 0 : 245,
-        easing: Easing.bezier(.32, 0, .28, 1), useNativeDriver: USE_NATIVE_DRIVER,
-      }).start(({finished}) => {
-        if (!finished) return;
-        setPicking(false);
-        onExit(orderId, recoverId);
-      });
-    };
-    if (!session?.ready || session.socket?.readyState !== WebSocket.OPEN) {
-      exit(session?.pendingHistory ? session.conversationId : interruptedHistory.current);
-      return;
+      onDrain(false, interruptedHistory.current);
     }
-    session.audio?.close();
-    session.audio = undefined;
-    session.finish = acknowledged => exit(acknowledged ? undefined :
-      session.pendingHistory ? session.conversationId : interruptedHistory.current);
-    session.finishTimeout = setTimeout(session.finish, session.manualTurns ? 2300 : 1400);
-    try { session.socket.send('{"type":"finish"}'); }
-    catch { session.finish(); }
+    exitCue.current = playCue(cues.current.exit, true);
+    Animated.timing(progress, {
+      toValue: 0, duration: reduceMotion ? 0 : 170,
+      easing: Easing.out(Easing.cubic), useNativeDriver: USE_NATIVE_DRIVER,
+    }).start(({finished}) => {
+      transitioning.current = false;
+      closing.current = Boolean(current.current?.finish);
+      if (!finished) return;
+      setPicking(false);
+      onExit(orderId);
+    });
   }
 
   if (!visible) return null;

@@ -19,7 +19,7 @@ import { money } from '../dashboard/DashboardScreen';
 import { MessageText } from './MessageText';
 import { ChatReportCard } from './ChatReportCard';
 import { TypingIndicator } from './TypingIndicator';
-import { Message, assistantMessage, latestProductCards, restoreMessages, uploadedImageUris } from './chatMessages';
+import { Message, assistantContent, assistantMessage, chatTimeline, latestProductCards, liveShopResults, restoreMessages, uploadedImageUris } from './chatMessages';
 import { HistoryRow } from './HistoryRow';
 import { MessageEntrance } from './MessageEntrance';
 import { ChatHistoryDrawer } from './ChatHistoryDrawer';
@@ -29,7 +29,6 @@ import { useAuth } from '../auth/AuthProvider';
 import { LiveConversation, type LiveCaption, type LiveConversationHandle, type LiveShopResult } from './live/LiveConversation';
 import { LiveOrb } from './live/LiveOrb';
 import { useLivePreferences } from './live/preferences';
-import { liveMessageKey } from './live/timeline';
 import { encodeProductImage, pickProductImages, type PendingImage } from './productImages';
 
 export type AssistantHandle = { newConversation: () => void; openHistory: () => void; ask: (message: string) => void };
@@ -77,6 +76,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   const [failedMessage, setFailedMessage] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [liveOpen, setLiveOpen] = useState(false);
+  const [liveDraining, setLiveDraining] = useState(false);
   const [liveCaptions, setLiveCaptions] = useState<LiveCaption[]>([]);
   const livePreferences = useLivePreferences();
   const [liveResults, setLiveResults] = useState<LiveShopResult[]>([]);
@@ -108,6 +108,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   const immediateScroll = useRef(false);
   const reportAnchor = useRef<string | null>(null), threadTop = useRef(0);
   const readingReport = useRef(false);
+  const seenLiveReports = useRef(new Set<string>());
   const holdReport = useCallback(() => {
     readingReport.current = true;
     reportAnchor.current = null;
@@ -175,7 +176,11 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
     });
     if (data.product_draft?.status === 'published') onShopChanged?.();
   }
-  function focusReport(id: string, top: number) {
+  function focusReport(id: string, top: number, pendingLive: boolean) {
+    if (pendingLive && !seenLiveReports.current.has(id)) {
+      seenLiveReports.current.add(id);
+      if (nearBottom.current && !readingReport.current) reportAnchor.current = id;
+    }
     if (reportAnchor.current !== id) return;
     readingReport.current = true;
     nearBottom.current = false;
@@ -286,7 +291,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   }
   async function send(value = draft, retry = false) {
     const text = value.trim();
-    if (lock.current || decisionLock.current || imageSelection.current) return;
+    if (lock.current || decisionLock.current || imageSelection.current || liveOpen || liveDraining) return;
     if (retry && pendingChat.current?.phase === 'uploading') {
       const entry = pendingChat.current, version = generation.current;
       lock.current = true; setBusy(true);
@@ -596,34 +601,16 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
   }
   const last = messages[messages.length - 1];
   const decisionPending = decision !== null || productDecision !== null || editBusy !== null;
-  const actionsDisabled = busy || restoring || decisionPending || selectingImages || liveOpen;
+  const actionsDisabled = busy || restoring || decisionPending || selectingImages || liveOpen || liveDraining;
   const liveAvailable = Boolean(active && auth?.user && !inExtension() && livePreferences?.ready);
   const showLiveButton = liveAvailable && !draft.trim() && !pendingImages.length && !busy;
-  const threadMessages = liveCaptions.length ? [...messages, ...liveCaptions.flatMap<Message>(caption => {
-    const id = liveMessageKey(caption.turnId, caption.role);
-    if (caption.role === 'assistant' && !liveCaptions.some(item => item.turnId === caption.turnId && item.role === 'user')) return [];
-    return messages.some(message => message.id === id) ? [] : [
-      { id, text: caption.text, role: caption.role, livePending: true },
-    ];
-  })] : messages;
-  const hasThread = threadMessages.length > 0 || liveResults.length > 0;
-  const savedReportIds = new Set(messages.flatMap(message => {
-    const results = message.response?.facts.live_results;
-    return Array.isArray(results) ? (results as LiveShopResult[]).map(result => result.id) : [];
-  }));
+  const threadMessages = useMemo(() => chatTimeline(messages, liveCaptions, liveResults), [messages, liveCaptions, liveResults]);
+  const hasThread = threadMessages.length > 0;
+  const browserMode = isShopeeExtension();
   const showOrderFromChat = (id: number) => {
     if (liveOpen) live.current?.openOrder(id);
     else { input.current?.blur(); setOrderId(id); }
   };
-  const liveReportRow = (result: LiveShopResult, fallbackKey: string) => (
-    <View key={result.id || fallbackKey} style={ui.assistantMessageRow} testID="live-shop-result">
-      <View style={ui.assistantContent}>
-        {result.report ? <ChatReportCard report={result.report} language={result.language} snapshotKey={result.id} onInteract={holdReport} />
-          : result.language !== 'en' ? <View style={ui.assistantBubble}><MessageText text={result.answer} /></View> : null}
-        {result.order_id ? <OrderChatAction action={{ id: result.order_id }} onOpen={showOrderFromChat} language={result.language} /> : null}
-      </View>
-    </View>
-  );
   const productCardMessageIds = useMemo(() => latestProductCards(messages), [messages]);
   const latestEditCards = useMemo(() => new Map(messages.flatMap(message => {
     const proposal = message.response?.product_edit_proposal;
@@ -673,34 +660,59 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
         <View style={ui.welcome}><BrandLogo size={desktop ? 40 : keyboardVisible ? 40 : 56} /><Text accessibilityRole="header" style={[ui.welcomeTitle, { marginTop: desktop ? 16 : compact ? 16 : 24 }, !desktop && compact && { fontSize: 28, lineHeight: 36 }, keyboardVisible && { fontSize: 23, lineHeight: 30, letterSpacing: -.6 }]}>Mình giúp gì{ '\n' }cho shop hôm nay?</Text></View>
         {!keyboardVisible ? <View style={[ui.promptGrid, compact && { marginTop: 22 }]}>{PROMPTS.map(prompt => <Pressable key={prompt.title} accessibilityRole="button" accessibilityLabel={prompt.title} onPress={() => void send(prompt.message)} style={({ pressed }) => [ui.prompt, !desktop && compact && { minHeight: 84, padding: 12, gap: 8 }, pressed && { opacity: .65 }]}><InterfaceIcon name={prompt.icon} size={desktop ? 18 : compact ? 20 : 22} color={BRAND.navy} /><Text style={ui.promptText}>{prompt.title}</Text></Pressable>)}</View> : null}
       </> : null}
-      {restoring ? <View style={ui.thinking}><ActivityIndicator color={BRAND.navy} /><Text style={ui.thinkingText}>Đang mở hội thoại…</Text></View> : <View style={ui.thread} onLayout={event => { threadTop.current = event.nativeEvent.layout.y; }}>{[
-        ...threadMessages.flatMap(message => {
-          const results = Array.isArray(message.response?.facts.live_results) ? message.response.facts.live_results as LiveShopResult[] : [];
-          return [message.role === 'user'
-        ? <MessageEntrance key={message.id} style={ui.userMessageRow} animate={!message.livePending && message.id === last?.id} reduceMotion={reduceMotion}><View testID="user-message" style={[ui.userBubble, Boolean(message.imageUris?.length) && ui.userBubbleMedia]}>{message.imageUris?.length === 1 ? <ProtectedImage testID="user-image-single" source={{ uri: message.imageUris[0] }} style={ui.userImageSingle} resizeMode="cover" /> : message.imageUris?.length ? <ScrollView testID="user-image-gallery" horizontal style={ui.userImageScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={ui.userImageRow}>{message.imageUris.map((uri, index) => <ProtectedImage key={uri + index} source={{ uri }} style={ui.userImageMultiple} resizeMode="cover" />)}</ScrollView> : null}<Text selectable style={[ui.userText, Boolean(message.imageUris?.length) && ui.userTextWithMedia]}>{message.text}</Text></View></MessageEntrance>
-        : <MessageEntrance key={message.id} style={ui.assistantMessageRow} animate={!message.livePending && !message.response?.facts.voice && message.id === last?.id} reduceMotion={reduceMotion} onLayout={message.response?.report && !message.response.facts.voice ? event => focusReport(message.id, event.nativeEvent.layout.y) : undefined}><View style={ui.assistantContent}><View style={[ui.row, { gap: 7, marginBottom: 8 }]}><BrandLogo size={20} /><Text style={ui.assistantName}>SellerPilot</Text></View><View style={ui.assistantBubble}><MessageText text={message.text} /></View>
+      {restoring ? <View style={ui.thinking}><ActivityIndicator color={BRAND.navy} /><Text style={ui.thinkingText}>Đang mở hội thoại…</Text></View> : <View style={ui.thread} onLayout={event => { threadTop.current = event.nativeEvent.layout.y; }}>
+        {threadMessages.map(message => {
+          if (message.role === 'user') {
+            const images = message.imageUris ?? [];
+            return <MessageEntrance key={message.id} style={ui.userMessageRow}
+              animate={!message.livePending && message.id === last?.id} reduceMotion={reduceMotion}>
+              <View testID="user-message" style={[ui.userBubble, images.length > 0 && ui.userBubbleMedia]}>
+                {images.length === 1 ? <ProtectedImage testID="user-image-single" source={{ uri: images[0] }}
+                  style={ui.userImageSingle} resizeMode="cover" /> : images.length > 1 ?
+                  <ScrollView testID="user-image-gallery" horizontal style={ui.userImageScroller}
+                    showsHorizontalScrollIndicator={false} contentContainerStyle={ui.userImageRow}>
+                    {images.map((uri, index) => <ProtectedImage key={uri + index} source={{ uri }}
+                      style={ui.userImageMultiple} resizeMode="cover" />)}
+                  </ScrollView> : null}
+                <Text selectable style={[ui.userText, images.length > 0 && ui.userTextWithMedia]}>{message.text}</Text>
+              </View>
+            </MessageEntrance>;
+          }
+          const { text, originalText, details, reports, results } = assistantContent(message);
+          const showReports = !browserMode && reports.length > 0;
+          const orderResults = new Map(results.flatMap(result =>
+            result.order_id ? [[result.order_id, result.language] as const] : []));
+          const body = [browserMode ? originalText : text, ...details].filter(Boolean).join('\n\n');
+          return <MessageEntrance key={message.id} style={ui.assistantMessageRow}
+            animate={!message.livePending && !message.response?.facts.voice && message.id === last?.id} reduceMotion={reduceMotion}
+            onLayout={showReports ? event => focusReport(message.id, event.nativeEvent.layout.y, Boolean(message.livePending)) : undefined}>
+          <View style={ui.assistantContent}>
+            <View style={[ui.row, { gap: 7, marginBottom: 8 }]}><BrandLogo size={20} /><Text style={ui.assistantName}>SellerPilot</Text></View>
+            {body || showReports ? <View testID={showReports ? 'assistant-report-group' : undefined}
+              style={[ui.assistantBubble, showReports && ui.assistantReportBubble]}>
+              {body ? <View testID={showReports ? 'assistant-report-copy' : undefined} style={showReports && ui.assistantReportCopy}>
+                <MessageText text={body} />
+              </View> : null}
+              {showReports && reports.map(({key, report, language}, index) => <ChatReportCard key={key} report={report} language={language}
+                separated={Boolean(body) || index > 0} onInteract={holdReport} />)}
+            </View> : null}
           {message.response?.product_edit_proposal && latestEditCards.get(message.response.product_edit_proposal.id) === message.id
             ? <ProductEditCard proposal={message.response.product_edit_proposal} busy={actionsDisabled} error={editErrors[message.response.product_edit_proposal.id]} onDecide={choice => void decideEdit(message.response!.product_edit_proposal!, choice)} /> : null}
-          {message.response?.report && !isShopeeExtension() && !results.some(result => result.report
-            && result.report.title === message.response?.report?.title
-            && result.report.subtitle === message.response.report.subtitle) ? <ChatReportCard report={message.response.report} onInteract={holdReport} /> : null}
-          {!isShopeeExtension() && !results.some(result => result.order_id) ?
-            <OrderChatAction action={message.response?.facts.order_action} onOpen={showOrderFromChat} /> : null}
+          {!browserMode && (orderResults.size ? Array.from(orderResults, ([id, language]) => (
+            <OrderChatAction key={id} action={{ id }} onOpen={showOrderFromChat} language={language} />
+          )) : <OrderChatAction action={message.response?.facts.order_action} onOpen={showOrderFromChat} />)}
           {message.response?.proposal ? <View style={ui.proposal}>
             <View style={ui.proposalBody}><Text style={ui.proposalKicker}>{proposalLabel[message.response.proposal.status]}</Text><Text style={ui.listTitle}>{message.response.proposal.product_name}</Text><Text style={ui.caption}>SKU {message.response.proposal.sku}</Text><View style={ui.priceRow}><Text style={ui.oldPrice}>{money(message.response.proposal.old_price_vnd)}</Text><SystemIcon name="arrow-forward" size={17} color={IOS.secondary} /><Text style={ui.newPrice}>{money(message.response.proposal.new_price_vnd)}</Text></View>
               {decisionErrors[message.response.proposal.id] ? <Text style={ui.error}>{decisionErrors[message.response.proposal.id]}</Text> : null}</View>
             {message.response.proposal.status === 'pending' ? <View style={ui.proposalActions}><Pressable accessibilityRole="button" disabled={actionsDisabled} onPress={() => void decide(message.response!.proposal!, 'reject')} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={ui.secondaryText}>Bỏ qua</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={'Xác nhận đổi giá SKU ' + message.response.proposal.sku} disabled={actionsDisabled} onPress={() => void decide(message.response!.proposal!, 'confirm')} style={[ui.primaryButton, { flex: 1.6, paddingHorizontal: 8 }, actionsDisabled && { opacity: .55 }]}>{decision === message.response.proposal.id ? <ActivityIndicator color="#FFF" size="small" /> : <SystemIcon name="checkmark" size={18} color="#FFF" />}<Text style={ui.primaryText}>Xác nhận đổi giá</Text></Pressable></View> : null}
           </View> : null}
           {productCardMessageIds.has(message.id) && message.response?.product_draft ? <ProductDraftCard draft={message.response.product_draft} busy={actionsDisabled} saving={productDecision === message.response.product_draft.id} error={productErrors[message.response.product_draft.id]} browser={isShopeeExtension()} onDecide={choice => void decideDraft(message.response!.product_draft!, choice)} /> : null}
-          <View style={[ui.messageActions, message.livePending && { minHeight: 44 }]}>
-            {!message.livePending ? <Pressable accessibilityRole="button" accessibilityLabel={Platform.OS === 'web' ? 'Sao chép câu trả lời' : 'Chia sẻ câu trả lời'} onPress={() => void share(message.text)} style={ui.messageAction}><SystemIcon name={Platform.OS === 'web' ? 'copy-outline' : 'share-outline'} size={17} color={IOS.secondary} /></Pressable> : null}
+          {!message.livePending && (originalText || message.response?.mode === 'fallback') ? <View style={ui.messageActions}>
+            {originalText ? <Pressable accessibilityRole="button" accessibilityLabel={Platform.OS === 'web' ? 'Sao chép câu trả lời' : 'Chia sẻ câu trả lời'} onPress={() => void share(originalText)} style={ui.messageAction}><SystemIcon name={Platform.OS === 'web' ? 'copy-outline' : 'share-outline'} size={17} color={IOS.secondary} /></Pressable> : null}
             {message.response?.mode === 'fallback' ? <Text style={ui.sourceText}>{fallbackLabel(message.response.fallback_reason)}</Text> : null}
-          </View>
-        </View></MessageEntrance>, ...results.map((result, index) => liveReportRow(result, message.id + ':report:' + index))];
-        }),
-        ...liveResults.flatMap((result, index) => result.id && savedReportIds.has(result.id)
-          ? [] : [liveReportRow(result, 'live:report:' + index)]),
-      ]}
+          </View> : null}
+          </View></MessageEntrance>;
+        })}
       </View>}
       {busy ? <TypingIndicator active={active} /> : null}
       {error ? <View accessibilityLiveRegion="polite" style={ui.errorCard}><Text style={ui.error}>{error}</Text>{failedMessage ? <Pressable accessibilityRole="button" accessibilityLabel="Thử lại" disabled={busy} onPress={() => void send(failedMessage, true)} style={ui.secondaryButton}><SystemIcon name="refresh" color={BRAND.navy} size={17} /><Text style={ui.secondaryText}>Thử lại</Text></Pressable> : null}{pendingChat.current && !busy ? <Pressable accessibilityRole="button" accessibilityLabel="Dừng yêu cầu" onPress={() => void stop()} style={ui.secondaryButton}><Text style={ui.secondaryText}>Dừng yêu cầu</Text></Pressable> : null}</View> : null}
@@ -728,34 +740,39 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
           <LiveOrb round />
           <SystemIcon name="pulse-outline" size={21} color="#FFF" />
         </Pressable> :
-          <Pressable accessibilityRole="button" accessibilityLabel={busy ? 'Dừng chờ phản hồi' : 'Gửi tin nhắn'} disabled={!busy && ((!draft.trim() && !pendingImages.length) || restoring || decisionPending || selectingImages)} onPress={() => { if (busy) { void stop(); } else void send(); }} style={({ pressed }) => [ui.send, !busy && ((!draft.trim() && !pendingImages.length) || restoring) && ui.sendDisabled, pressed && { opacity: .7 }]}><SystemIcon name={busy ? 'stop' : 'arrow-up'} size={23} color={busy || draft.trim() || pendingImages.length ? '#FFF' : IOS.tertiary} /></Pressable>}
+          <Pressable accessibilityRole="button" accessibilityLabel={busy ? 'Dừng chờ phản hồi' : 'Gửi tin nhắn'} disabled={!busy && ((!draft.trim() && !pendingImages.length) || restoring || decisionPending || selectingImages || liveDraining)} onPress={() => { if (busy) { void stop(); } else void send(); }} style={({ pressed }) => [ui.send, !busy && ((!draft.trim() && !pendingImages.length) || restoring || liveDraining) && ui.sendDisabled, pressed && { opacity: .7 }]}><SystemIcon name={busy ? 'stop' : 'arrow-up'} size={23} color={busy || draft.trim() || pendingImages.length ? '#FFF' : IOS.tertiary} /></Pressable>}
       </View>
       </Animated.View>
       {liveAvailable && livePreferences ? <LiveConversation ref={live} visible={liveOpen} conversationId={conversationId} progress={liveProgress}
         preferences={livePreferences.value} reduceMotion={reduceMotion}
-        onCaptions={setLiveCaptions} onResult={result => setLiveResults(items => result ? [...items, result] : [])} onShopChanged={onShopChanged}
+        onCaptions={setLiveCaptions} onResult={result => setLiveResults(items => {
+          if (!result) return [];
+          const index = result.id ? items.findIndex(item => item.id === result.id) : -1;
+          return index < 0 ? [...items, result] : items.map((item, i) => i === index ? result : item);
+        })} onShopChanged={onShopChanged}
         onSaved={turn => {
           if (generation.current !== liveGeneration.current) return;
           if (turn.response.conversation_id && conversationRef.current !== turn.response.conversation_id) remember(turn.response.conversation_id);
           setMessages(items => items.some(item => item.response?.run_id === turn.response.run_id) ? items : [...items, ...restoreMessages([turn])]);
-          const results = turn.response.facts.live_results;
-          if (Array.isArray(results)) {
-            const ids = new Set((results as LiveShopResult[]).map(result => result.id));
-            setLiveResults(items => items.filter(result => !ids.has(result.id)));
-          }
+          const id = turn.response.facts.live_turn_id;
+          if (typeof id === 'string') setLiveCaptions(items => items.filter(item => item.turnId !== id));
+          const ids = new Set(liveShopResults(turn.response).map(result => result.id).filter(Boolean));
+          setLiveResults(items => items.filter(result => !(id && result.turn_id === id) && !ids.has(result.id)));
         }}
-        onOpen={() => { liveGeneration.current = generation.current; setLiveOpen(true); goBottom(); }}
-        onExit={(orderId, recoverId) => {
+        onOpen={() => { liveGeneration.current = generation.current; seenLiveReports.current.clear(); setLiveOpen(true); goBottom(); }}
+        onExit={orderId => {
           setLiveOpen(false);
-          if (recoverId && (recoverId !== conversationRef.current || liveCaptions.length || liveResults.length)) {
-            const version = liveGeneration.current;
-            void getConversation(recoverId).then(({data}) => {
-              if (generation.current !== version || lock.current || (conversationRef.current && conversationRef.current !== data.id)) return;
-              remember(data.id);
-              setMessages(restoreMessages(data.turns)); setLiveCaptions([]); setLiveResults([]);
-            }).catch(() => {});
-          }
           if (orderId) setOrderId(orderId);
+        }}
+        onDrain={(draining, recoverId) => {
+          setLiveDraining(draining);
+          if (!recoverId) return;
+          const version = liveGeneration.current;
+          void getConversation(recoverId).then(({data}) => {
+            if (generation.current !== version || lock.current || (conversationRef.current && conversationRef.current !== data.id)) return;
+            remember(data.id);
+            setMessages(restoreMessages(data.turns)); setLiveCaptions([]); setLiveResults([]);
+          }).catch(() => {});
         }} /> : null}
       </View>
     </View>

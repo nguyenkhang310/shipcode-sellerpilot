@@ -15,7 +15,7 @@ def _percent(numerator, denominator):
     return round(numerator * 100 / denominator, 2) if denominator else None
 
 
-def business_snapshot(shop, days=7, *, now=None):
+def business_snapshot(shop, days=7, *, now=None, focus_product_id=None):
     if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 30:
         raise ValueError('Business reporting period must be 1–30 days')
     now = now or datetime.now(timezone.utc)
@@ -121,6 +121,7 @@ def business_snapshot(shop, days=7, *, now=None):
     current, previous = periods['current'], periods['previous']
     for item in catalog.values():
         item['order_count'] = len(product_orders.get(item['product_id'], ()))
+        item['order_share_percent'] = _percent(item['order_count'], current['order_count'])
         item['observed_units_per_calendar_day'] = round(item['units_sold'] / days, 2)
         item['stock_cover_days_estimate'] = round(item['available_stock'] * days / item['units_sold'], 1) if item['units_sold'] else None
     sold = sorted((item for item in catalog.values() if item['units_sold']),
@@ -136,9 +137,12 @@ def business_snapshot(shop, days=7, *, now=None):
                        'basis': 'same_elapsed_duration_shifted_by_days',
                        'order_value_delta_vnd': current['order_value_vnd'] - previous['order_value_vnd'],
                        'order_value_change_percent': _percent(current['order_value_vnd'] - previous['order_value_vnd'], previous['order_value_vnd']),
-                       'order_count_delta': current['order_count'] - previous['order_count']},
+                       'order_count_delta': current['order_count'] - previous['order_count'],
+                       'average_order_delta_vnd': current['average_order_vnd'] - previous['average_order_vnd']
+                           if current['order_count'] and previous['order_count'] else None},
         'daily_sales': [{'date': day, **values} for day, values in series.items()],
         'period_top_products': sold[:5], 'promotion_candidates': candidates,
+        'requested_product': catalog.get(focus_product_id),
         'stock_risks': [item for item in sold if item['status'] == 'active'
                         and (item['available_stock'] <= 5 or item['stock_cover_days_estimate'] < 7)][:5],
         'active_products_without_period_sales': sum(item['status'] == 'active' and item['units_sold'] == 0 for item in catalog.values()),

@@ -1,9 +1,11 @@
 """Isolated browser inference. No shop repository, SQL writes or publication tools."""
 import asyncio
 import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone, timedelta
 from time import monotonic
 
 from fastapi import HTTPException
@@ -13,12 +15,51 @@ from app.ai.contracts import AIProviderError
 from app.ai.fallback import extract_price
 from app.ai.gemini import image_parts
 from app.ai.listing_contracts import ListingCopy, listing_validation_context
-from app.ai.money import money_hints, money_mentions
+from app.ai.money import money_hints, money_mentions, plain
+from app.ai.quick_reads import quick_read
+from app.ai.small_talk import social_reply
 from app.ai.quantities import quantity_value
 from app.ai.listing_evidence import commercial_context
-from app.ai.text import assistant_text
+from app.ai.text import conversational_text, reply_format_issue
 
 logger = logging.getLogger(__name__)
+
+
+def browser_sales_reply(payload, platform, availability):
+    today = datetime.now(timezone(timedelta(hours=7))).date()
+    command = quick_read(payload.message, today=today)
+    if (not command or command.intent != 'shop_summary' or command.sales_metric or
+            command.day != today or command.days not in (None, 1) or command.compare_yesterday or command.calendar_period):
+        return None
+    dashboard = payload.shop_context.dashboard if payload.shop_context else None
+    if dashboard:
+        metrics = [metric.model_dump() for metric in dashboard.metrics]
+    else:
+        try:
+            snapshot = json.loads(payload.snapshot.text)
+        except ValueError:
+            snapshot = {}
+        metrics = snapshot.get('metrics', []) if isinstance(snapshot, dict) else []
+    groups = {'orders': set(), 'sales': set()}
+    labels = {'don hang': 'orders', 'orders': 'orders', 'doanh so': 'sales', 'doanh thu': 'sales', 'revenue': 'sales'}
+    for row in metrics[:20] if isinstance(metrics, list) else []:
+        if not isinstance(row, dict) or not isinstance(row.get('label'), str) or not isinstance(row.get('value'), str):
+            continue
+        key = labels.get(plain(row['label']).strip())
+        value = row['value'].strip()
+        if key and re.fullmatch(r'(?:[₫đ]\s*)?\d[\d.,\s]{0,18}(?:[₫đkmb])?', value, re.I):
+            groups[key].add(value)
+    figures = []
+    if len(groups['orders']) == 1:
+        figures.append(f'**{next(iter(groups["orders"]))} đơn**')
+    if len(groups['sales']) == 1:
+        figures.append(f'doanh số **{next(iter(groups["sales"]))}**')
+    if figures:
+        return (f'Lần đọc gần nhất trên {platform} ghi nhận ' + ' và '.join(figures) +
+                '. Mình chưa xác định được kỳ thống kê của các số này.')
+    next_step = (availability['hướng_xử_lý'] if availability else
+                 'Bạn bấm **Cập nhật** cạnh tên shop để đồng bộ số liệu nhé.')
+    return f'Mình chưa đọc được số đơn và doanh số hôm nay từ {platform}. {next_step}'
 
 
 def browser_availability(context):
@@ -77,9 +118,14 @@ async def browser_assist(payload, provider):
                                'Use each resource timestamp, pagination completeness, unknown/conflicting counts '
                                'and list scope; neither the current page alone nor a verified Open API shop database.')
     if payload.mode == 'chat':
-        answer = assistant_text(await provider.respond(payload.message, history=history, facts=facts))
+        platform = 'TikTok Shop' if facts['platform'] == 'tiktok' else 'Shopee'
+        answer = (social_reply(payload.message, ongoing=bool(history))
+                  or browser_sales_reply(payload, platform, facts.get('data_availability')))
+        if answer:
+            return {'answer': answer, 'provider': 'deterministic_parser', 'model': None}
+        answer = conversational_text(await provider.respond(payload.message, history=history, facts=facts))
         answer = browser_answer(answer, payload.shop_context, facts.get('data_availability'))
-        if not answer or len(answer) > 16000:
+        if reply_format_issue(answer) or len(answer) > 16000:
             raise AIProviderError('invalid_response')
         return {'answer': answer, 'provider': getattr(provider, 'response_provider', getattr(provider, 'provider', 'gemini')),
                 'model': getattr(provider, 'response_model', getattr(provider, 'model', None))}

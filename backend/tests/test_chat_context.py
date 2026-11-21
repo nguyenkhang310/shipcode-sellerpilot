@@ -173,6 +173,24 @@ def test_strategy_preparation_answers_in_one_model_turn_with_actual_shop_facts(c
     assert '_prepared_answer' not in result['facts']
 
 
+def test_question_about_slow_sales_keeps_its_business_context(client):
+    provider = PreparedAI({'topic': 'pricing'}, answer='Giá có thể là một yếu tố. Mình cần thêm lượt xem và lượt nhấp để kiểm tra.')
+    client.app.state.ai_provider = provider
+    result = chat(client, 'Shop bán chậm có phải giá cao quá không?')
+    assert result['tool'] == 'get_shop_insights'
+    assert result['facts']['business_advisory']['mode'] == 'performance_analysis'
+    assert provider.preparations[0]['facts']['business_analysis']
+    assert 'pricing_analysis' not in result['facts']
+
+
+def test_missing_traffic_is_never_reported_as_zero(client):
+    provider = PreparedAI(answer='Shop chưa có lượt xem và lượt nhấp nên cần xem lại giá.')
+    client.app.state.ai_provider = provider
+    result = chat(client, 'Shop bán chậm có phải giá cao quá không?')
+    assert provider.answers[0]['facts']['reply_correction']['reason'] == 'unobserved_traffic'
+    assert 'chưa có lượt xem' not in result['answer']
+
+
 def test_bad_prepared_reply_is_corrected_before_display(client):
     provider = PreparedAI(answer='Mình đã đổi giá sản phẩm cho bạn.')
     client.app.state.ai_provider = provider
@@ -180,6 +198,18 @@ def test_bad_prepared_reply_is_corrected_before_display(client):
     assert len(provider.preparations) == len(provider.answers) == 1
     assert 'đã đổi giá' not in result['answer'] and result['mode'] == 'ai'
     assert provider.answers[0]['facts']['reply_correction']['reason'] == 'unexecuted_write_claim'
+
+
+def test_raw_tool_payload_is_corrected_and_duplicate_paragraphs_are_collapsed(client):
+    raw = PreparedAI(answer='{"tool":"get_shop_insights","facts":{"pending_orders":4},"answer":"Đây rồi."}')
+    client.app.state.ai_provider = raw
+    response = chat(client, 'Tư vấn việc cần ưu tiên hôm nay')
+    assert raw.answers[0]['facts']['reply_correction']['reason'] == 'raw_tool_payload'
+    assert 'pending_orders' not in response['answer']
+    repeated = 'Kiểm tra các đơn chờ xác nhận trước khi làm nội dung bán hàng.'
+    client.app.state.ai_provider = PreparedAI(answer=f'{repeated}\n\n{repeated}')
+    response = chat(client, 'Tư vấn việc cần ưu tiên hôm nay')
+    assert response['answer'] == repeated
 
 
 def test_prepared_pricing_still_runs_exact_backend_math_before_final_reply(client):
@@ -210,7 +240,9 @@ def test_preparation_reply_is_never_reused_in_another_conversation(client):
     provider.prepared_answer = 'Đề xuất riêng cho lượt sau.'
     second = chat(client, 'Tư vấn chiến lược bán hàng')
     assert first['conversation_id'] != second['conversation_id']
-    assert first['answer'] == 'Đề xuất của lượt đầu.' and second['answer'] == provider.prepared_answer
+    assert first['answer'].startswith('Đề xuất của lượt đầu.')
+    assert second['answer'].startswith(provider.prepared_answer)
+    assert 'Đề xuất của lượt đầu.' not in second['answer']
 
 
 @pytest.mark.parametrize('message', ['Xin chào', 'Doanh thu hôm nay bao nhiêu?',
@@ -294,7 +326,8 @@ def test_serialized_prepared_answer_is_decoded_before_guard_and_persistence(clie
     provider=PreparedAI(answer=json.dumps({'answer':'Ưu tiên kiểm tra đơn đang chờ.\n\nSau đó rà tồn kho.'},ensure_ascii=False))
     client.app.state.ai_provider=provider
     result=chat(client,'Tư vấn chiến lược bán hàng')
-    assert result['answer']=='Ưu tiên kiểm tra đơn đang chờ.\n\nSau đó rà tồn kho.'
+    assert result['answer'].startswith('Ưu tiên kiểm tra đơn đang chờ.\n\nSau đó rà tồn kho.')
+    assert 'Lịch triển khai và đo kết quả' in result['answer']
     with client.app.state.session_factory() as session:
         assert session.get(AgentRun,result['run_id']).answer==result['answer']
 

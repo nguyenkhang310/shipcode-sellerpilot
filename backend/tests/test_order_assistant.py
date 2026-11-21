@@ -26,6 +26,16 @@ def test_missing_id_is_asked_once_and_bare_reply_resolves(ledger):
     assert next['facts']['order_action']['id'] == 1
 
 
+def test_tracking_followup_after_thanks_answers_only_the_tracking_detail(ledger):
+    client, _ = ledger
+    first = chat(client, 'Theo dõi đơn #1')
+    conversation = first['conversation_id']
+    chat(client, 'Cảm ơn bạn', conversation)
+    result = chat(client, 'Có mã vận đơn của đơn đó chưa?', conversation)
+    assert result['facts']['order_action']['id'] == 1
+    assert result['answer'] == '**Đơn #1** chưa có mã vận đơn.'
+
+
 def test_foreign_order_and_new_conversation_never_reuse_selection(ledger):
     client, _ = ledger
     missing = chat(client, 'theo dõi đơn #2')

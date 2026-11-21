@@ -1,16 +1,17 @@
-import { memo, useId, useRef, useState } from 'react';
-import { Platform, Pressable, Text, View, type ViewInstance } from 'react-native';
-import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
-import { ReportChart as Chart, ReportUnit } from '../../api/types';
-import { count, money } from '../dashboard/formatters';
+import { memo, useRef, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View, type ViewInstance } from 'react-native';
+import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
+import type { ReportChart as Chart, ReportUnit } from '../../api/types';
 import { useTheme } from '../../theme/ThemeProvider';
 import type { LiveLanguage } from './live/locale';
 import { reportText } from './reportLocale';
 
-export function reportValue(value: number | null, unit: ReportUnit): string {
+export function reportValue(value: number | null, unit: ReportUnit, language?: LiveLanguage): string {
   if (value === null || !Number.isFinite(value)) return '—';
-  return unit === 'vnd' ? money(value) : unit === 'percent'
-    ? value.toLocaleString('vi-VN', { maximumFractionDigits: 1 }) + '%' : count(value);
+  const formatted = value.toLocaleString(language === 'en' ? 'en-GB' : 'vi-VN', {
+    maximumFractionDigits: unit === 'percent' ? 1 : 0,
+  });
+  return formatted + (unit === 'vnd' ? '\u202F₫' : unit === 'percent' ? '%' : '');
 }
 
 export function reportLabel(label: string): string {
@@ -19,114 +20,173 @@ export function reportLabel(label: string): string {
   return label.includes('T') ? label.slice(11, 16) + ' · ' + date : date;
 }
 
-function axisValue(value: number): string {
+function axisValue(value: number, unit: ReportUnit, language?: LiveLanguage) {
   const scale = value >= 1e9 ? 1e9 : value >= 1e6 ? 1e6 : value >= 1e3 ? 1e3 : 1;
-  return (value / scale).toLocaleString('vi-VN', { maximumFractionDigits: 1 })
-    + (scale === 1e9 ? ' tỷ' : scale === 1e6 ? ' tr' : scale === 1e3 ? ' k' : '');
+  const suffix = scale === 1e9 ? language === 'en' ? 'B' : ' tỷ'
+    : scale === 1e6 ? language === 'en' ? 'M' : ' tr' : scale === 1e3 ? 'k' : '';
+  return (value / scale).toLocaleString(language === 'en' ? 'en-GB' : 'vi-VN', { maximumFractionDigits: 1 })
+    + suffix + (unit === 'percent' ? '%' : '');
 }
 
-function scaleMaximum(value: number, isCount: boolean) {
-  if (!value) return 1;
-  const base = 10 ** Math.floor(Math.log10(value / 2));
-  const step = ([1, 2, 2.5, 5, 10].find(n => n * base >= value / 2) ?? 10) * base;
-  return (isCount ? Math.max(1, Math.ceil(step)) : step) * 2;
+function tickStep(peak: number, unit: ReportUnit) {
+  if (!peak) return 0;
+  const base = 10 ** Math.floor(Math.log10(peak / 2));
+  const nice = ([1, 2, 2.5, 5, 10].find(n => n * base >= peak / 2) ?? 10) * base;
+  return unit === 'percent' ? nice : Math.max(1, Math.ceil(nice));
 }
 
-export const ReportChart = memo(function ReportChart({ chart, language, onInteract }: {
-  chart: Chart; language?: LiveLanguage; onInteract?: () => void;
-}) {
-  const { IOS, BRAND, ui } = useTheme();
-  const width = useRef(0);
+type ChartProps = { chart: Chart; language?: LiveLanguage; onInteract?: () => void };
+const axisFont = Platform.select({ ios: 'Helvetica Neue', android: 'sans-serif', default: 'system-ui, sans-serif' });
+
+function Trend({ chart, language, onInteract }: ChartProps) {
+  const { IOS, BRAND } = useTheme();
   const plot = useRef<ViewInstance>(null);
-  const en = language === 'en';
-  const [selected, setSelected] = useState<number | null>(null);
-  const [expanded, setExpanded] = useState(false);
-  const gradient = 'report-fill-' + useId().replace(/[^A-Za-z0-9-]/g, '');
-  const points = chart.points.filter(point => Number.isFinite(point.value) && point.value >= 0);
-  const visibleBars = points.length > 6 && !expanded ? points.slice(0, 4) : points;
-  const peak = Math.max(0, ...points.map(p => p.value));
-  const max = chart.kind === 'bar' ? Math.max(1, peak) : scaleMaximum(peak, chart.unit === 'count');
-  const picked = selected === null ? null : points[selected];
-  const positions = points.map((p, i) => ({
-    x: points.length === 1 ? 180 : 50 + i * 254 / Math.max(1, points.length - 1),
-    y: 124 - p.value / max * 100,
-  }));
-  const path = positions.map((p, i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' ');
-  const marks = [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])].filter(i => i >= 0);
-  return <View testID="chat-report-chart" style={{ gap: 10 }}>
-    <Text style={[ui.caption, { color: IOS.label, fontWeight: '700' }]}>{reportText(chart.title, language)}</Text>
-    {peak === 0 ? <View style={{ borderColor: IOS.separator, borderWidth: 1, padding: 14, borderRadius: 13 }}>
-      <Text style={[ui.caption, { color: IOS.label, fontWeight: '600' }]}>{en ? 'No activity in this period' : 'Chưa có số liệu phát sinh'}</Text>
-      <Text style={ui.caption}>{en ? 'Open the data table to review individual values.' :
-        points.length ? 'Bạn có thể xem các mốc bằng bảng số liệu.' : 'Báo cáo chưa có dữ liệu cho kỳ này.'}</Text>
-    </View> : null}
-    {chart.kind === 'bar' ? <View style={{ gap: 10 }}>
-      {visibleBars.map((p, i) => <View key={i} accessible accessibilityLabel={`${reportText(p.label, language)}: ${reportValue(p.value, chart.unit)}`}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginBottom: 3 }}>
-          <Text numberOfLines={2} style={[ui.caption, { flex: 1, color: IOS.label }]}>{reportText(p.label, language)}</Text>
-          <Text style={[ui.caption, { color: IOS.label, fontVariant: ['tabular-nums'], fontWeight: '600' }]}>{reportValue(p.value, chart.unit)}</Text>
-        </View>
-        <View style={{ height: 4, borderRadius: 2, backgroundColor: IOS.fill, overflow: 'hidden' }}>
-          <View style={{ height: 4, width: `${p.value / max * 100}%`, borderRadius: 2, backgroundColor: BRAND.orange }} />
-        </View>
-      </View>)}
-      {points.length > 6 ? <Pressable accessibilityRole="button" onPress={() => { onInteract?.(); setExpanded(value => !value); }}
-        style={{ minHeight: 44, justifyContent: 'center' }}>
-        <Text style={[ui.caption, { color: BRAND.orangeInk }]}>{en ? expanded ? 'Collapse chart' : `Show all ${points.length} items` :
-          expanded ? 'Thu gọn biểu đồ' : `Xem đủ ${points.length} mục`}</Text>
-      </Pressable> : null}
-    </View> : peak > 0 ? <View style={{ gap: 5, paddingHorizontal: 8, paddingTop: 6, borderRadius: 12, backgroundColor: IOS.bg }}>
-      <View style={{ minHeight: 32, paddingHorizontal: 3, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-        <Text accessibilityLiveRegion="polite" numberOfLines={1} style={[ui.caption, { flex: 1, color: IOS.label, fontWeight: picked ? '600' : '400' }]}>
-          {picked ? reportLabel(picked.label) : en ? 'Tap a point to see its value' : 'Chạm biểu đồ để xem từng mốc'}
-        </Text>
-        {picked ? <Text style={[ui.caption, { color: BRAND.orangeInk, fontWeight: '700', fontVariant: ['tabular-nums'] }]}>{reportValue(picked.value, chart.unit)}</Text> : null}
-      </View>
-      <Pressable ref={plot} testID="chat-report-trend" disabled={!points.length}
-        onLayout={event => { width.current = event.nativeEvent.layout.width; }}
-        accessibilityRole="adjustable" accessibilityLabel={reportText(chart.title, language)}
-        aria-valuemin={0} aria-valuemax={Math.max(0, points.length - 1)} aria-valuenow={selected ?? 0}
-        aria-valuetext={picked ? `${reportLabel(picked.label)}: ${reportValue(picked.value, chart.unit)}` : en ? 'Select a time' : 'Chọn mốc thời gian'}
-        accessibilityActions={[{ name: 'increment', label: en ? 'Next point' : 'Mốc tiếp theo' },
-          { name: 'decrement', label: en ? 'Previous point' : 'Mốc trước' }]}
-        onAccessibilityAction={event => {
-          onInteract?.();
-          const step = event.nativeEvent.actionName === 'increment' ? 1 : -1;
-          setSelected(index => Math.max(0, Math.min(points.length - 1, (index ?? 0) + step)));
-        }}
-        onPress={event => {
-          const select = (x: number, measuredWidth: number) => {
-            if (!measuredWidth || !Number.isFinite(x)) return;
-            onInteract?.();
-            const scale = Math.min(measuredWidth / 320, 1);
-            const plotX = (x - (measuredWidth - 320 * scale) / 2) / scale;
-            setSelected(Math.max(0, Math.min(points.length - 1, Math.round((plotX - 50) / 254 * (points.length - 1)))));
-          };
-          if (Platform.OS === 'web') {
-            const rect = (plot.current as unknown as HTMLElement | null)?.getBoundingClientRect();
-            if (rect) select(event.nativeEvent.pageX - rect.left - window.scrollX, rect.width);
-          } else {
-            select(event.nativeEvent.locationX, width.current);
-          }
-        }}>
-        <View pointerEvents="none">
-        <Svg width="100%" height={166} viewBox="0 0 320 166"
-          {...(Platform.OS === 'web' ? { 'aria-hidden': true as const, focusable: false } : { accessible: false })}>
-          <Defs><LinearGradient id={gradient} x1={0} y1={0} x2={0} y2={1}>
-            <Stop offset={0} stopColor={BRAND.orange} stopOpacity={0.25} />
-            <Stop offset={1} stopColor={BRAND.orange} stopOpacity={0.015} />
-          </LinearGradient></Defs>
-          {[0, 0.5, 1].map(part => <Line key={part} x1={50} x2={304} y1={124 - part * 100} y2={124 - part * 100} stroke={IOS.separator} strokeDasharray={part ? '3 4' : undefined} />)}
-          {[0, 0.5, 1].map(part => <SvgText key={part} x={42} textAnchor="end" y={128 - part * 100} fontSize={13} fill={IOS.secondary}>{axisValue(max * part)}</SvgText>)}
-          {positions.length > 1 ? <Path d={path + ' L304,124 L50,124 Z'} fill={'url(#' + gradient + ')'} /> : null}
-          {positions.length ? <Path d={path} stroke={BRAND.orange} strokeWidth={2.5} fill="none" strokeLinejoin="round" strokeLinecap="round" /> : null}
-          {selected !== null && positions[selected] ? <Line x1={positions[selected].x} x2={positions[selected].x} y1={20} y2={124} stroke={BRAND.orangeInk} strokeOpacity={0.42} strokeDasharray="3 4" /> : null}
-          {(selected !== null && positions[selected] ? [selected] : positions.length === 1 ? [0] : []).map(i => <Circle key={i} cx={positions[i]!.x} cy={positions[i]!.y} r={4} fill={BRAND.orange} stroke={IOS.card} strokeWidth={2} />)}
-          {marks.map(i => <SvgText key={i} x={positions[i]!.x} y={151} fontSize={13} fill={IOS.secondary}
-            textAnchor={i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}>{reportLabel(points[i]!.label).split(' · ')[0]}</SvgText>)}
+  const [width, setWidth] = useState(0);
+  const [selection, setSelection] = useState<string | null>(null);
+  const [hover, setHover] = useState<number | null>(null);
+  const points = chart.points;
+  const saved = points.findIndex(p => p.label === selection);
+  const pickedIndex = saved < 0 ? points.length - 1 : saved;
+  const cursorIndex = hover !== null && hover < points.length ? hover : pickedIndex;
+  const cursor = points[cursorIndex]!;
+  const picked = points[pickedIndex]!;
+  const peak = Math.max(...points.map(p => p.value));
+  const step = tickStep(peak, chart.unit);
+  const ticks = step ? [0, step, step * 2] : [0];
+  const labels = ticks.map(value => axisValue(value, chart.unit, language));
+  const axisLeft = Math.max(24, Math.max(...labels.map(label => label.length)) * 6.3 + 12);
+  const axisRight = Math.max(axisLeft + 1, width - 12);
+  const top = 10, baseline = 107, height = 133;
+  const x = (index: number) => points.length === 1 ? (axisLeft + axisRight) / 2
+    : axisLeft + index * (axisRight - axisLeft) / (points.length - 1);
+  const y = (value: number) => baseline - (step ? value / (step * 2) : 0) * (baseline - top);
+  const path = points.map((p, i) => `${i ? 'L' : 'M'}${x(i)},${y(p.value)}`).join(' ');
+  const marks = [...new Set(width >= 360
+    ? [0, Math.round((points.length - 1) / 3), Math.round((points.length - 1) * 2 / 3), points.length - 1]
+    : width >= 200 ? [0, Math.floor((points.length - 1) / 2), points.length - 1] : [0, points.length - 1])];
+  const nearest = (position: number) =>
+    Math.max(0, Math.min(points.length - 1, Math.round((position - axisLeft) * (points.length - 1) / (axisRight - axisLeft))));
+  const select = (index: number) => {
+    onInteract?.();
+    setHover(null);
+    setSelection(points[Math.max(0, Math.min(points.length - 1, index))]!.label);
+  };
+  const browser = Platform.OS === 'web';
+  const browserX = (clientX: number) => {
+    const rect = (plot.current as unknown as HTMLElement | null)?.getBoundingClientRect();
+    return rect && Number.isFinite(clientX) ? clientX - rect.left : null;
+  };
+  const title = reportText(chart.title, language);
+  const format = (value: number) => reportValue(value, chart.unit, language);
+  return <View style={{ gap: 5 }}>
+    <View style={s.lineReadout} testID="chat-report-point">
+      <Text style={[s.caption, { color: IOS.secondary }]}>{reportLabel(cursor.label)}</Text>
+      <Text style={[s.value, { color: IOS.label }]}>{format(cursor.value)}</Text>
+    </View>
+    <Pressable ref={plot} testID="chat-report-trend" style={{ height }} onLayout={event => {
+      setWidth(Math.floor(event.nativeEvent.layout.width));
+    }} accessibilityRole="adjustable" accessibilityLabel={title}
+      aria-valuemin={1} aria-valuemax={points.length} aria-valuenow={pickedIndex + 1}
+      aria-valuetext={reportLabel(picked.label) + ', ' + format(picked.value)}
+      accessibilityActions={[
+        { name: 'increment', label: language === 'en' ? 'Next point' : 'Mốc tiếp theo' },
+        { name: 'decrement', label: language === 'en' ? 'Previous point' : 'Mốc trước' },
+      ]}
+      onAccessibilityAction={event => select(pickedIndex + (event.nativeEvent.actionName === 'increment' ? 1 : -1))}
+      onPress={event => {
+        const native = event.nativeEvent;
+        const position = browser ? browserX(native.pageX - window.scrollX) : native.locationX;
+        // Keyboard activation can lack a pointer position.
+        if (position !== null && Number.isFinite(position) && width > 0) select(nearest(position));
+      }}
+      onPointerMove={browser ? event => {
+        if (event.nativeEvent.pointerType !== 'mouse') return;
+        const position = browserX(event.nativeEvent.clientX);
+        if (position !== null && width > 0) setHover(nearest(position));
+      } : undefined}
+      onPointerLeave={browser ? () => setHover(null) : undefined}
+      onKeyDown={browser ? event => {
+        const moves: Record<string, number> = {
+          ArrowLeft: pickedIndex - 1, ArrowDown: pickedIndex - 1, ArrowRight: pickedIndex + 1,
+          ArrowUp: pickedIndex + 1, Home: 0, End: points.length - 1,
+        };
+        const next = moves[event.nativeEvent.key];
+        if (typeof next !== 'number') return;
+        event.preventDefault();
+        select(next);
+      } : undefined}>
+      {width > 0 ? <View pointerEvents="none">
+        <Svg width={width} height={height} aria-hidden focusable={false}>
+          {ticks.map((value, i) => <Line key={value} x1={axisLeft} x2={axisRight} y1={y(value)} y2={y(value)}
+            stroke={i === 0 ? IOS.secondary : IOS.separator} strokeOpacity={i === 0 ? 0.52 : 1} />)}
+          {ticks.map((value, i) => <SvgText key={value} x={axisLeft - 8} y={y(value) + 4} fontSize={11} fontFamily={axisFont}
+            textAnchor="end" fill={IOS.secondary}>{labels[i]}</SvgText>)}
+          <Line x1={x(cursorIndex)} x2={x(cursorIndex)} y1={top} y2={baseline}
+            stroke={IOS.secondary} strokeOpacity={0.6} strokeDasharray="3 3" />
+          {points.length > 1 ? <Path d={path} fill="none" stroke={BRAND.orange} strokeWidth={2}
+            strokeLinecap="round" strokeLinejoin="round" /> : null}
+          <Circle cx={x(cursorIndex)} cy={y(cursor.value)} r={4.5} fill={BRAND.orangeInk} stroke={IOS.card} strokeWidth={1.75} />
+          {marks.map(i => <SvgText key={i} x={x(i)} y={127} fontSize={11} fontFamily={axisFont} fill={IOS.secondary}
+            textAnchor={points.length === 1 ? 'middle' : i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}>
+            {reportLabel(points[i]!.label).split(' · ')[0]}
+          </SvgText>)}
         </Svg>
-        </View>
-      </Pressable>
-    </View> : null}
+      </View> : null}
+    </Pressable>
   </View>;
+}
+
+function Bars({ chart, language, onInteract }: ChartProps) {
+  const { IOS, BRAND } = useTheme();
+  const { fontScale } = useWindowDimensions();
+  const [expanded, setExpanded] = useState(false);
+  const { points, unit } = chart;
+  const max = Math.max(...points.map(point => point.value));
+  const valueWidth = Math.max(24, reportValue(max, unit, language).length * 8 * fontScale);
+  const visible = expanded ? points : points.slice(0, 6);
+  return <View>
+    {visible.map((point, index) => {
+      const label = reportText(point.label, language);
+      const value = reportValue(point.value, unit, language);
+      return <View key={index} accessible accessibilityLabel={label + ', ' + value} style={[s.barRow,
+        { borderColor: IOS.separator, borderBottomWidth: index < visible.length - 1 ? StyleSheet.hairlineWidth : 0 }]}>
+        <Text style={[s.caption, { flex: 1.4, minWidth: 0, color: IOS.label }]}>{label}</Text>
+        <View style={{ flex: 1, height: 6 }}>
+          {point.value > 0 ? <View style={{ height: 6, minWidth: 1, width: `${point.value / max * 100}%`,
+            borderRadius: 2, backgroundColor: BRAND.orange }} /> : null}
+        </View>
+        <Text style={[s.value, { width: valueWidth, maxWidth: '45%', color: IOS.label }]}>{value}</Text>
+      </View>;
+    })}
+    {points.length > 6 ? <Pressable accessibilityRole="button" aria-expanded={expanded}
+      onPress={() => { onInteract?.(); setExpanded(value => !value); }} style={s.toggle}>
+      <Text style={[s.caption, { color: BRAND.orangeInk, fontWeight: '600' }]}>
+        {language === 'en' ? expanded ? 'Show fewer' : `Show all ${points.length} items`
+          : expanded ? 'Thu gọn' : `Xem đủ ${points.length} mục`}
+      </Text>
+    </Pressable> : null}
+  </View>;
+}
+
+export const ReportChart = memo(function ReportChart(props: ChartProps) {
+  const { IOS } = useTheme();
+  const { chart, language } = props;
+  return <View testID="chat-report-chart" style={{ gap: 11 }}>
+    <View style={s.barLabel}>
+      <Text style={[s.caption, { flex: 1, color: IOS.label, fontWeight: '600' }]}>{reportText(chart.title, language)}</Text>
+      {chart.unit === 'vnd' ? <Text style={[s.caption, { color: IOS.secondary }]}>VND</Text> : null}
+    </View>
+    {!chart.points.length ? <Text style={[s.caption, { color: IOS.secondary }]}>
+      {language === 'en' ? 'No data available for this period.' : 'Chưa có dữ liệu cho kỳ này.'}
+    </Text> : chart.kind === 'line' ? <Trend {...props} /> : <Bars {...props} />}
+  </View>;
+});
+
+const s = StyleSheet.create({
+  caption: { fontSize: 13, lineHeight: 18 },
+  value: { fontSize: 14, lineHeight: 20, textAlign: 'right', fontWeight: '600', fontVariant: ['tabular-nums'] },
+  barLabel: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
+  barRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 33, paddingVertical: 6 },
+  lineReadout: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: 8, minHeight: 22 },
+  toggle: { minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center' },
 });

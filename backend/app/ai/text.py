@@ -2,6 +2,8 @@
 import json
 import re
 
+RESPONSE_FIELDS = {'tool', 'tool_arguments', 'facts', 'intent', 'proposal', 'product_draft', 'run_id'}
+
 
 def reply_format_issue(value: str) -> str | None:
     if not value.strip():
@@ -11,13 +13,27 @@ def reply_format_issue(value: str) -> str | None:
     try:
         envelope = json.loads(fenced.group(1) if fenced else candidate)
     except (ValueError, TypeError):
+        if re.match(r'^(?:```(?:json)?\s*)?\{\s*"(?:answer|tool|facts|intent|tool_arguments)"\s*:', candidate, re.I):
+            return 'invalid_answer_envelope'
         return None
     if isinstance(envelope, str) and not envelope.strip():
         return 'empty_answer'
     if isinstance(envelope, dict) and set(envelope) == {'answer'}:
         if not isinstance(envelope['answer'], str) or not envelope['answer'].strip():
             return 'invalid_answer_envelope'
+    elif isinstance(envelope, dict) and RESPONSE_FIELDS.intersection(envelope):
+        return 'raw_tool_payload'
     return None
+
+
+def conversational_text(value: str) -> str:
+    """Keep one copy when a provider repeats the same paragraph consecutively."""
+    text = assistant_text(value).strip()
+    if '```' in text:
+        return text
+    parts = re.split(r'\n[ \t]*\n+', text)
+    return '\n\n'.join(part for index, part in enumerate(parts)
+                       if not index or parts[index - 1].strip() != part.strip())
 
 
 def assistant_text(value: str) -> str:

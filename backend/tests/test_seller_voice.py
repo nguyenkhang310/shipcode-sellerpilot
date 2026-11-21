@@ -12,10 +12,10 @@ def summary(count=12, value=2450000, **extra):
 
 def test_short_and_model_voice_share_units_and_addressing_without_extra_offer():
     text=read_reply(summary(),today=date(2026,10,19),preferences={})
-    assert text.startswith('Hôm nay shop có **12 đơn**')
-    assert '**2.450.000đ**' in text and '**3 đơn** chờ xác nhận' in text
+    assert text.startswith('Hôm nay shop có **12 đơn hợp lệ**')
+    assert '**2.450.000đ**' in text and 'chờ xác nhận' not in text
     assert 'Bạn có muốn' not in text and 'pending_count' not in text
-    assert 'chưa phải toàn bộ tiền đã thu' in text
+    assert 'đối soát' not in text
 
 
 def test_zero_orders_and_yesterday_do_not_turn_into_predicted_sales():
@@ -30,8 +30,9 @@ def test_zero_orders_and_yesterday_do_not_turn_into_predicted_sales():
 ])
 def test_response_length_respects_affirmed_style_and_negation(style,short):
     text=read_reply(summary(),today=date(2026,10,19),preferences={'response_style':style})
-    assert ('chưa phải toàn bộ tiền đã thu' not in text)==short
-    assert '**12 đơn**' in text and '**2.450.000đ**' in text
+    assert ('đối soát' not in text)==short
+    assert ('**3 đơn** chờ xác nhận' not in text)==short
+    assert '**12 đơn hợp lệ**' in text and '**2.450.000đ**' in text
 
 
 def test_read_renderer_cannot_replace_a_write_confirmation():

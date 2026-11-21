@@ -27,7 +27,7 @@
   {
     "id": "low_stock_threshold",
     "message": "Sản phẩm nào sắp hết dưới 3?",
-    "expected": {"intent": "inventory_query", "inventory_scope": "low_stock", "low_stock_threshold": 3}
+    "expected": {"intent": "inventory_query", "inventory_scope": "low_stock", "low_stock_threshold": 2}
   },
   {
     "id": "out_of_stock",

@@ -100,6 +100,8 @@ export function createMobileStyles(c: typeof LIGHT_IOS, dark: boolean, brand: ty
     assistantContent: { width: '100%', minWidth: 0 },
     assistantName: { fontSize: 12, lineHeight: 18, fontWeight: '600', color: muted },
     assistantBubble: { alignSelf: 'flex-start', width: '100%', borderWidth: StyleSheet.hairlineWidth, borderColor: line, paddingHorizontal: 15, paddingTop: 13, paddingBottom: 11, borderRadius: 18, borderBottomLeftRadius: 6, backgroundColor: card },
+    assistantReportBubble: { paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 },
+    assistantReportCopy: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8 },
     markdown: { fontSize: 16, lineHeight: 25, color: ink },
     markdownParagraph: { marginBottom: 8 },
     messageActions: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 },

@@ -435,7 +435,7 @@ def test_offline_copy_does_not_silently_create_template_and_claim_ready(tmp_path
         assert draft['description'] is None
         assert draft['price_vnd'] == 990000 and draft['stock'] == 20
         assert failed['fallback_reason'] == 'provider_unavailable'
-        assert 'chưa gọi được AI' in failed['answer']
+        assert 'chưa viết xong phần mô tả' in failed['answer']
         assert client.post(f"/api/v1/product-drafts/{draft['id']}/publish").status_code == 409
         client.app.state.ai_provider = CopyProvider()
         assert reply('viết lại nội dung')['product_draft']['status'] == 'ready'

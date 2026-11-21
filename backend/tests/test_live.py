@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import sqlite3
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -83,6 +84,7 @@ def test_live_speech_clarification_keeps_short_commerce_phrases_and_transcript_b
     assert merge_transcript('Năm x', 'ị') == 'Năm xị'
     assert merge_transcript('cho mình xem biểu đồ', 'xem biểu đồ đơn hàng') == 'cho mình xem biểu đồ đơn hàng'
     assert merge_transcript('rất', ' rất đẹp') == 'rất rất đẹp'
+    assert merge_transcript('Shop có ba đơn', 'Shop có') == 'Shop có ba đơn'
 
 
 def test_manual_live_turn_waits_for_the_final_provider_transcription(secured, monkeypatch):
@@ -436,6 +438,75 @@ def test_live_report_uses_the_spoken_period(secured):
     assert ' → ' not in result['report']['subtitle']
 
 
+def test_live_report_preserves_spoken_seven_days_followed_by_chart_request(secured):
+    client, _ = secured
+    state = client.app.state
+    with state.session_factory() as session:
+        result = inspect_shop(session, state.shop_repository, 'Doanh thu hôm nay',
+            'Bảy ngày qua shop có bao nhiêu đơn hàng và tổng giá trị đơn là bao nhiêu? Bạn cho mình xem biểu đồ nhé.')
+    assert result['facts']['days'] == 7
+    assert len(result['report']['charts'][0]['points']) == 7
+
+
+def test_live_report_uses_the_spoken_inventory_threshold(secured):
+    client, _ = secured
+    state = client.app.state
+    with state.session_factory() as session:
+        result = inspect_shop(session, state.shop_repository,
+            'Hàng sắp hết', 'Sản phẩm nào còn dưới ba cái?')
+    assert result['facts']['threshold'] == 2
+    assert result['report']['subtitle'] == 'Tồn kho không quá 2'
+
+
+@pytest.mark.parametrize('language,gender,expected', [
+    ('vi', 'male', 'Iapetus'), ('vi', 'female', 'Erinome'), ('en', 'male', 'Puck'), ('en', 'female', 'Kore'),
+])
+def test_live_voice_preferences_reach_gemini_and_idle_finish(secured, monkeypatch, language, gender, expected):
+    client, _ = secured
+    token = live_token(client)
+    upstream = GeminiFixture()
+    monkeypatch.setattr(client.app.state.settings, 'gemini_api_key', SecretStr('fixture-key'))
+    monkeypatch.setattr(live, 'connect', lambda *_, **__: upstream)
+    with client.websocket_connect('/api/v1/live', headers={'Origin': 'http://localhost:8081'}) as socket:
+        socket.send_json({'type': 'auth', 'token': token, 'turn_protocol': 1,
+                          'preferences': {'language': language, 'voice': gender}})
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'finish'})
+        assert socket.receive_json()['type'] == 'finished'
+        assert len(upstream.sent) == 1
+        assert upstream.sent[0]['setup']['generationConfig']['speechConfig']['voiceConfig']['prebuiltVoiceConfig']['voiceName'] == expected
+
+
+def test_cancel_before_gemini_ready_releases_the_connection(secured, monkeypatch):
+    client, _ = secured
+    token = live_token(client)
+    starting, cancelled = Event(), Event()
+
+    class DelayedGemini(GeminiFixture):
+        async def recv(self):
+            starting.set()
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled.set()
+
+    connections = iter((DelayedGemini(), GeminiFixture()))
+    monkeypatch.setattr(client.app.state.settings, 'gemini_api_key', SecretStr('fixture-key'))
+    monkeypatch.setattr(live, 'connect', lambda *_, **__: next(connections))
+    auth = {'type': 'auth', 'token': token, 'turn_protocol': 1}
+    headers = {'Origin': 'http://localhost:8081'}
+    with client.websocket_connect('/api/v1/live', headers=headers) as socket:
+        socket.send_json(auth)
+        assert starting.wait(2)
+        socket.close()
+        assert cancelled.wait(2)
+    with client.websocket_connect('/api/v1/live', headers=headers) as socket:
+        socket.send_json(auth)
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'finish'})
+        assert socket.receive_json()['type'] == 'finished'
+
+
 def test_voice_relays_audio_and_saves_a_real_draft(secured, monkeypatch):
     client, _ = secured
     token = live_token(client)
@@ -471,7 +542,7 @@ def test_voice_relays_audio_and_saves_a_real_draft(secured, monkeypatch):
     assert {tool['name'] for tool in allowed} == {'prepare_listing', 'inspect_shop', 'prepare_chat_request',
                                                 'prepare_order', 'confirm_action'}
     assert upstream.sent[1]['realtimeInput']['audio']['mimeType'] == 'audio/pcm;rate=16000'
-    assert upstream.sent[0]['setup']['generationConfig']['speechConfig']['voiceConfig']['prebuiltVoiceConfig']['voiceName'] == 'Sulafat'
+    assert upstream.sent[0]['setup']['generationConfig']['speechConfig']['voiceConfig']['prebuiltVoiceConfig']['voiceName'] == 'Erinome'
     replies = upstream.sent[2]['toolResponse']['functionResponses']
     assert [reply['response']['accepted'] for reply in replies] == [False, True, False]
     assert not client.app.state.live_sessions

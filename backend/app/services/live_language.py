@@ -13,8 +13,10 @@ class LivePreferences(BaseModel):
     voice: Literal['male', 'female'] | None = None
 
 
-GEMINI_VOICES = {'male': 'Puck', 'female': 'Kore'}
-VIETNAMESE_VOICE = 'Sulafat'
+GEMINI_VOICES = {
+    'vi': {'male': 'Iapetus', 'female': 'Erinome'},
+    'en': {'male': 'Puck', 'female': 'Kore'},
+}
 COMMON_TERMS = ('SellerPilot', 'UTech Official', 'Shopee', 'TikTok Shop', 'SKU', 'SPX', 'Viettel Post')
 VIETNAMESE_TERMS = ('năm xị', 'hai củ rưỡi', 'giá bán', 'tồn kho', 'mã vận đơn', 'xác nhận đăng',
                     'tiêu đề', 'mô tả', 'bản nháp', 'biểu đồ', 'hàng sắp hết', 'tổng giá trị đơn hàng',
@@ -45,6 +47,9 @@ def merge_transcript(previous, text, *, final=False):
     ):
         return text
     before, incoming = current.split(), candidate.split()
+    if len(incoming) >= 2 and len(incoming) < len(before) and not text[0].isspace():
+        if [plain(word).casefold() for word in incoming] == [plain(word).casefold() for word in before[:len(incoming)]]:
+            return previous
     if final and len(before) >= 4 and len(incoming) >= len(before) - 1:
         shared = sum(a.strip('.,?!').casefold() == b.strip('.,?!').casefold() for a, b in zip(before, incoming))
         if [word.casefold() for word in before[:2]] == [word.casefold() for word in incoming[:2]] and shared >= len(before) * .6:

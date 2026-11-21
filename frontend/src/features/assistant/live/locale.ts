@@ -1,7 +1,7 @@
 export type LiveLanguage = 'vi' | 'en';
 export type LivePreferences = { voice: 'male' | 'female'; language: LiveLanguage };
 
-export const DEFAULT_LIVE_PREFERENCES: LivePreferences = { voice: 'male', language: 'vi' };
+export const DEFAULT_LIVE_PREFERENCES: LivePreferences = { voice: 'female', language: 'vi' };
 
 export const LIVE_TEXT = {
   vi: {
@@ -28,7 +28,8 @@ export function parseLivePreferences(raw: string | null): LivePreferences {
   try {
     const saved = raw ? JSON.parse(raw) : null;
     return {
-      voice: saved?.voice === 'female' ? 'female' : 'male',
+      voice: saved?.voice === 'male' || saved?.voice === 'female' ? saved.voice
+        : saved?.language === 'en' ? 'male' : DEFAULT_LIVE_PREFERENCES.voice,
       language: saved?.language === 'en' ? 'en' : 'vi',
     };
   } catch {

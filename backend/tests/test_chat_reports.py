@@ -30,7 +30,7 @@ def test_daily_report_reconciles_with_text_and_excludes_cancelled_returned(clien
         db.execute('INSERT INTO "order" VALUES (5,800000,\'returned\',\'2026-10-15 04:00:00\')')
     data = ask(client, 'Vẽ biểu đồ doanh thu ngày 15/10/2026')
     report = data['report']
-    assert data['mode'] == 'fallback'  # charts do not depend on an external AI
+    assert data['provider'] == 'deterministic_parser' and data['fallback_reason'] is None
     assert report['metrics'][0]['value'] == data['facts']['order_value_vnd'] == 300000
     assert report['metrics'][1]['value'] == data['facts']['order_count'] == 2
     assert len(report['charts'][0]['points']) == 24
@@ -57,6 +57,8 @@ def test_today_ignores_future_orders_and_has_no_invented_comparison(client, shop
 @pytest.mark.parametrize('message,days,calendar', [
     ('Vẽ biểu đồ doanh thu 7 ngày qua', 7, None),
     ('Cho xem bảng thống kê doanh số 30 ngày', 30, None),
+    ('Vẽ biểu đồ doanh thu bảy ngày qua', 7, None),
+    ('Cho xem bảng thống kê doanh số ba mươi ngày', 30, None),
     ('Hiển thị biểu đồ giá trị đơn hàng tháng này', None, 'month'),
     ('Vẽ biểu đồ doanh thu hôm qua', 1, None),
 ])
@@ -113,7 +115,7 @@ def test_replay_and_history_preserve_snapshot_after_shop_changes(client, shop_db
 
 def test_shop_report_does_not_inherit_the_previous_single_low_stock_sku(client):
     conversation_id = str(uuid4())
-    stock = ask(client, 'Hàng sắp hết dưới 3', conversation_id=conversation_id)
+    stock = ask(client, 'Hàng sắp hết dưới 4', conversation_id=conversation_id)
     assert len(stock['facts']['items']) == 1
     data = ask(client, 'Doanh thu ngày 15/10/2026', conversation_id=conversation_id)
     assert data['tool'] == 'get_shop_summary'
@@ -164,7 +166,7 @@ def test_model_knows_the_report_will_render_without_an_extra_generation(client):
 
     provider = RecordingProvider()
     client.app.state.ai_provider = provider
-    data = ask(client, 'Doanh thu 7 ngày qua')
+    data = ask(client, 'Doanh thu 7 ngày qua, diễn đạt bằng tiếng Anh')
     assert data['report'] and provider.calls == 1
     assert 'report_available' not in data['facts']
 

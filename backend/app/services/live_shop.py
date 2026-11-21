@@ -2,12 +2,14 @@
 from datetime import datetime
 
 from app.ai.fallback import extract_sku, normalize_text, parse_fallback
+from app.ai.quick_reads import quick_read
 from app.services.advisor import read_memory
 from app.services.business_advisor import attach_business_brief, planning_fallback, planning_request
 from app.services.chat import execute_command
 from app.services.chat_reports import build_chat_report
+from app.services.marketplace_performance import EXPERIMENTS
 from app.services.conversations import (
-    ASK_PRODUCT, conversation_memory, conversation_product, has_product_reference, history_messages,
+    ASK_PRODUCT, contextual_read, conversation_memory, conversation_product, has_product_reference, history_messages,
     refers_to_published_product,
 )
 from app.services.order_assistant import order_answer
@@ -15,9 +17,13 @@ from app.services.order_assistant import order_answer
 
 def inspect_shop(session, shop, question, spoken='', *, conversation_id=None):
     today = datetime.now(shop.timezone).date()
-    command = parse_fallback(question, today=today)
+    # A complete spoken read carries the seller's actual date, SKU and stock
+    # threshold. The Live model's tool description can paraphrase those slots.
     runs, since = conversation_memory(session, shop, conversation_id)
-    order = None if command.intent == 'shop_summary' else order_answer(shop, question, runs)
+    request = spoken or question
+    direct = quick_read(request, today=today) or contextual_read(request, runs, today=today)
+    command = direct or parse_fallback(question, today=today)
+    order = None if direct or command.intent == 'shop_summary' else order_answer(shop, question, runs)
     if order is not None:
         facts = order['facts']
         spoken = {}
@@ -31,15 +37,15 @@ def inspect_shop(session, shop, question, spoken='', *, conversation_id=None):
                     if field in row} | {'has_tracking': bool(row.get('tracking_number'))} for row in rows]
         return {'answer': order['answer'], 'facts': spoken, 'order_id': facts.get('order_action', {}).get('id')}
 
-    if spoken and command.intent == 'shop_summary':
+    if spoken and not direct and command.intent == 'shop_summary':
         spoken_command = parse_fallback(spoken, today=today)
         if spoken_command.intent == 'shop_summary':
             # The model can expand "hôm nay" into a full date that also
             # contains "tháng 11". Use the seller's actual reporting period.
             command = spoken_command
     history = history_messages(runs)
-    planning_message = spoken if planning_request(spoken, history) else question
-    planning = planning_request(planning_message, history)
+    planning_message = spoken if not direct and planning_request(spoken, history) else question
+    planning = not direct and planning_request(planning_message, history)
     product_context = {}
     if planning:
         sku = extract_sku(normalize_text(spoken))
@@ -58,16 +64,30 @@ def inspect_shop(session, shop, question, spoken='', *, conversation_id=None):
         command = command.model_copy(update={'intent': 'sales_advice', 'sku': sku})
     if command.intent not in {'shop_summary', 'inventory_query', 'product_search', 'sales_advice'}:
         return None
-    result = execute_command(session, shop, command)
+    preferences = read_memory(session, shop, 'shop')
+    result = execute_command(session, shop, command, preferences=preferences)
     facts = result['facts']
     facts.update(product_context)
     answer = result['answer']
+    spoken_summary = None
 
     if command.intent == 'sales_advice':
-        brief = attach_business_brief(shop, facts, message=planning_message, history=history,
-                                      preferences=read_memory(session, shop, 'shop'))
+        brief = attach_business_brief(shop, facts, message=planning_message, history=history, preferences=preferences)
         if brief:
             answer = planning_fallback(facts) or answer
+            if funnel := brief.get('marketplace_funnel'):
+                priority = funnel.get('priority')
+                summary = ('Mình đã tính các tỷ lệ từ số bạn cung cấp. ' + EXPERIMENTS[priority][0] if priority
+                           else 'Mình đã để các tỷ lệ tính được hoặc phần cần kiểm tra lại trong cuộc trò chuyện.')
+                return {'answer': answer, 'facts': {'business_advisory': brief}, 'report': None, 'spoken_summary': summary}
+            name = (brief['focus_product'] or {}).get('name')
+            if brief['mode'] == 'video_script' and brief['shot_list']:
+                spoken_summary = (f'Mình đã soạn kịch bản cho {name} trong cuộc trò chuyện, có hai câu mở đầu và từng cảnh quay. '
+                                  + brief['shot_list']['hooks'][0])
+            elif brief['mode'] == 'measurement_plan':
+                spoken_summary = 'Mình đã để mẫu theo dõi trong cuộc trò chuyện. Bước đầu, đặt mã cho từng video và dùng cùng một cửa sổ đo.'
+            elif name or not facts.get('product_reference_missing'):
+                spoken_summary = 'Kế hoạch chi tiết có trong cuộc trò chuyện. ' + brief['execution']['first_action']
         compact = {key: facts[key] for key in ('period', 'tasks', 'selected_product', 'data_limits')
                    if key in facts}
         if brief:
@@ -85,4 +105,10 @@ def inspect_shop(session, shop, question, spoken='', *, conversation_id=None):
         if isinstance(compact.get('items'), list):
             compact['items'] = compact['items'][:5]
 
-    return {'answer': answer, 'facts': compact, 'report': build_chat_report(result['tool'], facts)}
+    output = {'answer': answer, 'facts': compact, 'report': build_chat_report(result['tool'], facts),
+              'spoken_summary': spoken_summary}
+    if result['tool'] == 'get_shop_summary':
+        output['sales_context'] = {key: facts[key] for key in ('to_date', 'days', 'calendar_period', 'sales_metric',
+                                                             'compare_yesterday', 'all_order_status_counts')
+                                   if key in facts}
+    return output

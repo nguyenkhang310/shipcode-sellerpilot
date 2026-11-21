@@ -49,7 +49,7 @@ def test_chat_summary_calls_real_tool_and_persists_trace(client):
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["intent"] == "shop_summary"
-    assert data["mode"] == "fallback"
+    assert data["mode"] == "ai"
     assert data["tool"] == "get_shop_summary"
     assert data["facts"]["order_count"] == 2
     assert data["facts"]["order_value_vnd"] == 300000
@@ -60,9 +60,9 @@ def test_chat_summary_calls_real_tool_and_persists_trace(client):
     with client.app.state.session_factory() as session:
         run = session.get(AgentRun, data["run_id"])
         assert run is not None
-        assert run.status == "fallback"
+        assert run.status == "completed"
         assert run.provider == "deterministic_parser"
-        assert run.fallback_reason == "provider_unavailable"
+        assert run.fallback_reason is None
         assert run.tool_name == "get_shop_summary"
         assert json.loads(run.facts_json)["order_count"] == 2
 
@@ -81,7 +81,7 @@ def test_chat_inventory_and_low_stock(client):
         "message": "Liệt kê sản phẩm sắp hết dưới 5",
     }).json()["data"]
     assert low_stock["tool"] == "get_low_stock"
-    assert low_stock["facts"]["threshold"] == 5
+    assert low_stock["facts"]["threshold"] == 4
     assert {row["sku"] for row in low_stock["facts"]["items"]} == {"A001", "P001"}
 
 
@@ -232,7 +232,7 @@ def test_chat_records_invalid_ai_response_fallback(client):
 
     client.app.state.ai_provider = InvalidProvider()
     data = client.post("/api/v1/chat", json={
-        "message": "SKU A001 còn bao nhiêu?",
+        "message": "SKU A001 còn bao nhiêu? Trả lời bằng tiếng Anh.",
     }).json()["data"]
     assert data["mode"] == "fallback"
     assert data["provider"] == "deterministic_parser"

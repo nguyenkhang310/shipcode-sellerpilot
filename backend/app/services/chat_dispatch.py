@@ -9,6 +9,7 @@ from app.ai.fallback import parse_fallback
 from app.ai.money import money_mentions
 from app.ai.money import plain
 from app.ai.quantities import quantity_value
+from app.ai.quick_reads import quick_read
 from app.ai.small_talk import social_reply
 from app.integrations.ute_mall import ShopDatabaseError, UTEMallRepository
 from app.schemas.chat import ChatRequest, ChatResponse
@@ -16,7 +17,7 @@ from app.services.advisor import is_forget_request
 from app.services.business_advisor import planning_request
 from app.services.chat import handle_chat, is_casual_message
 from app.services.order_assistant import is_order_question
-from app.services.conversations import recent_runs, history_messages
+from app.services.conversations import contextual_read, conversation_memory, recent_runs, history_messages
 from app.services.product_edit_chat import is_product_edit_request, pending_edit, handle_product_edit
 from app.services.product_archive_chat import archive_target_reply, is_product_archive_request, prepare_product_removal
 from app.ai.fallback import extract_sku
@@ -43,7 +44,18 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
         review_only = session.info.get('review_only', False)
         conversation_id = str(payload.conversation_id) if payload.conversation_id else None
         active_draft = get_active_draft(session, shop, conversation_id)
-        previous=recent_runs(session,shop,conversation_id,limit=24)
+        previous = recent_runs(session, shop, conversation_id, limit=24)
+        today = datetime.now(shop.timezone).date()
+        known_read = quick_read(payload.message, today=today)
+        quantity_reply = (active_draft is not None and not payload.message.rstrip().endswith('?')
+                          and quantity_value(payload.message) is not None)
+        edit = pending_edit(previous)
+        if not known_read and (active_draft is not None or edit or archive_target_reply(payload.message, previous)):
+            memory, _ = conversation_memory(session, shop, conversation_id)
+            known_read = contextual_read(payload.message, memory, today=today)
+        if known_read and not quantity_reply:
+            return ChatResponse(data=await handle_chat(session, shop, provider,
+                message=payload.message, conversation_id=conversation_id))
         if is_product_archive_request(payload.message) or archive_target_reply(payload.message, previous):
             return ChatResponse(data=prepare_product_removal(session, shop, payload.message, conversation_id))
         # Social acknowledgements are not names, captions or edit targets.
@@ -62,14 +74,14 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
             active_draft = create_text_product_draft(session, shop, conversation_id)
             return ChatResponse(data=await advance_product_draft(session, shop, provider, active_draft,
                 message=payload.message, upload_dir=settings.shop_product_upload_dir, review_only=review_only))
-        continue_edit=bool(pending_edit(previous) and not planning_request(payload.message)
+        continue_edit=bool(edit and not planning_request(payload.message)
             and (extract_sku(payload.message.lower()) or re.match(r'\s*(?:tieu de|ten san pham|mo ta|gia|ton|so luong)\s*[:=]',plain(payload.message))
-                 or parse_fallback(payload.message,today=datetime.now(shop.timezone).date()).intent=='unknown'))
+                 or parse_fallback(payload.message,today=today).intent=='unknown'))
         if (is_product_edit_request(payload.message) or continue_edit) and (
                 active_draft is None or extract_sku(payload.message.lower()) or 'đã đăng' in payload.message.lower()):
             return ChatResponse(data=await handle_product_edit(session,shop,provider,message=payload.message,
                 conversation_id=conversation_id))
-        direct = parse_fallback(payload.message, today=datetime.now(shop.timezone).date())
+        direct = parse_fallback(payload.message, today=today)
         asking_shop = direct.intent in {'shop_summary', 'inventory_query', 'product_search'} or (
             direct.intent == 'change_price' and direct.sku is not None) or (
             direct.intent == 'sales_advice' and not _wants_ai_description(payload.message))
@@ -89,7 +101,6 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
                 # not the draft's selling price. Labelled draft edits still resume it.
                 asking_shop = True
                 editing_draft = False
-        quantity_reply = active_draft is not None and quantity_value(payload.message) is not None
         asking_shop = asking_shop and not editing_draft and not quantity_reply
         if active_draft is not None and not labeled_edit:
             # A video caption or a plan to post content is advice, not a change
@@ -116,7 +127,7 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
             status_code=503,
             detail={
                 "code": "shop_database_unavailable",
-                "message": "Không đọc được database Shopee",
+                "message": "Mình chưa đọc được dữ liệu của shop. Bạn thử lại sau một chút nhé.",
             },
         ) from error
     except ProductDraftConflictError as error:

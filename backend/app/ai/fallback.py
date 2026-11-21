@@ -3,9 +3,9 @@ import unicodedata
 from datetime import date, timedelta
 
 from app.ai.contracts import ParsedCommand
-from app.ai.money import money_mentions, affirmed_quote
+from app.ai.money import money_mentions, affirmed_quote, plain
 from app.ai.catalog_query import catalog_lookup
-from app.ai.quick_reads import quick_read
+from app.ai.quick_reads import normalize_reporting_day_words, quick_read, read_text, sales_period, sales_text
 
 
 CHANGE_PRICE_PHRASES = (
@@ -37,16 +37,16 @@ def normalize_text(message: str) -> str:
 
 
 def reporting_days(message: str) -> int | None:
-    text = normalize_text(message)
+    text = normalize_reporting_day_words(plain(normalize_text(message)))
     # A plan's future horizon is not the period whose sales are being read.
-    explicit = re.search(r'\b(\d{1,2})\s+ngày\s+(?:qua|gần đây|vừa rồi)\b', text)
+    explicit = re.search(r'\b(\d{1,2})\s+ngay\s+(?:qua|gan day|vua roi)\b', text)
     if explicit and 1 <= int(explicit.group(1)) <= 30:
         return int(explicit.group(1))
-    if 'hôm nay' in text or 'hom nay' in text:
+    if 'hom nay' in text:
         return 1
-    if any(word in text for word in ('tuần qua', 'tuan qua', 'tuần vừa rồi', 'tuan vua roi')):
+    if any(word in text for word in ('tuan qua', 'tuan vua roi')):
         return 7
-    if any(word in text for word in ('tháng qua', 'thang qua')):
+    if 'thang qua' in text:
         return 30
     return None
 
@@ -63,13 +63,16 @@ def parse_fallback(message: str, *, today: date) -> ParsedCommand:
     # A pricing question is read-only, even when it mentions reducing a price.
     if ('%' in text and any(phrase in text for phrase in CHANGE_PRICE_PHRASES)) or any(phrase in text for phrase in (
         'giá vốn', 'gia von', 'giá nhập', 'gia nhap', 'lợi nhuận', 'loi nhuan',
-        'tiền lời', 'tien loi', 'lời bao nhiêu', 'loi bao nhieu', 'lãi', 'lai ',
+        'tiền lời', 'tien loi', 'lời bao nhiêu', 'loi bao nhieu', 'lãi',
         'hòa vốn', 'hoa von', 'biên lời', 'bien loi', 'biên lợi', 'bien loi',
         'phí sàn', 'phi san', 'chi phí', 'chi phi', 'định giá', 'dinh gia',
         'chưa biết giá', 'chua biet gia', 'không biết giá', 'khong biet gia',
         'chiến lược', 'chien luoc', 'tăng doanh thu', 'tang doanh thu',
         'giữ khách', 'giu khach', 'khách mục tiêu', 'khach muc tieu',
-    )) or re.search(r'\b(?:lời|lãi|loi|lai)\b', text) or re.search(r'(?:có nên|co nen|nên|nen).{0,45}(?:giá|gia|bán|ban|giảm|giam|tăng|tang)', text):
+    )) or re.search(r'\b(?:(?:con|co|tinh|muc|phan|tien|bao nhieu) (?:loi|lai)'
+                    r'|(?:loi|lai) (?:con |duoc )?(?:bao nhieu|nhieu|nhiu|may|khong))\b', plain(text)) or re.search(
+        r'(?:có nên|co nen|nên|nen).{0,45}(?:giá|gia|bán|ban|giảm|giam|tăng|tang)', text
+    ):
         return ParsedCommand(intent='sales_advice', sku=sku, days=reporting_days(message))
 
     if any(phrase in text for phrase in CHANGE_PRICE_PHRASES):
@@ -105,8 +108,7 @@ def parse_fallback(message: str, *, today: date) -> ParsedCommand:
         )
 
     if any(phrase in text for phrase in SUMMARY_PHRASES):
-        days = 7 if any(p in text for p in ("7 ngày", "7 ngay", "tuần", "tuan")) else 30 if any(p in text for p in ("30 ngày", "30 ngay", "tháng", "thang")) else 1 if any(p in text for p in ("hôm nay", "hom nay")) else None
-        return ParsedCommand(intent="shop_summary", day=extract_day(text, today=today), days=days)
+        return ParsedCommand(intent='shop_summary', **sales_period(sales_text(read_text(message)), today=today))
 
     return ParsedCommand(intent="unknown")
 
@@ -156,12 +158,11 @@ def extract_day(text: str, *, today: date) -> date:
 
 
 def extract_threshold(text: str) -> int:
-    if "hết hàng" in text or "het hang" in text:
-        return 0
+    text = plain(text).lower()
     match = re.search(
-        r"(?:dưới|duoi|không quá|khong qua|tối đa|toi da|<=?|ngưỡng|nguong)\s*(\d{1,5})",
+        r"(duoi|khong qua|toi da|<=?|nguong)\s*(\d{1,5})(?![\d.,])",
         text,
     )
-    if not match:
-        return 5
-    return min(int(match.group(1)), 10_000)
+    if match:
+        return min(max(0, int(match[2]) - (match[1] in ('duoi', '<'))), 10_000)
+    return 0 if 'het hang' in text and not re.search(r'(?:sap|gan) het hang', text) else 5

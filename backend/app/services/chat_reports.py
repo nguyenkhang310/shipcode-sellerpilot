@@ -70,6 +70,10 @@ def build_chat_report(tool: str | None, facts: dict) -> dict | None:
 
 def _build_report(tool, facts):
     """Closed set of supported tool results; no chart specs from user/model text."""
+    if facts.get('business_advisory', {}).get('marketplace_funnel'):
+        return None
+    if 'all_order_status_counts' in facts:
+        return None
     report = None
     if tool == 'get_shop_summary' and 'order_count' in facts:
         report = _sales(facts)

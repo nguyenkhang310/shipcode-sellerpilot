@@ -8,12 +8,13 @@ from pydantic import ValidationError
 from sqlalchemy import delete, select, func
 from sqlalchemy.dialects.sqlite import insert
 
-from app.ai.advisor_contracts import AdviceExtraction, AdvicePreparation
+from app.ai.advisor_contracts import AdviceExtraction, AdvicePreparation, EconomicsUpdate
 from app.ai.contracts import AIProviderError
 from app.ai.catalog_query import catalog_lookup
 from app.ai.fallback import extract_sku, normalize_text
 from app.ai.money import money_mentions, single_money, affirmed_quote
 from app.ai.money import plain
+from app.ai.quick_reads import simple_pricing_read
 from app.integrations import management
 from app.integrations.ute_mall import ShopItemNotFoundError
 from app.models.assistant_memory import AssistantMemory
@@ -26,6 +27,13 @@ COST_LABELS = {'unit_cost_vnd': 'giá vốn', 'packaging_vnd': 'đóng gói',
                'shipping_subsidy_vnd': 'phần shop hỗ trợ vận chuyển',
                'ads_per_order_vnd': 'quảng cáo mỗi đơn', 'other_cost_vnd': 'chi phí khác',
                'fee_percent': 'tổng phí theo giá bán'}
+PRICING_LABELS = {
+    'gia von': 'unit_cost_vnd', 'gia nhap': 'unit_cost_vnd', 'von': 'unit_cost_vnd',
+    'dong goi': 'packaging_vnd', 'chi phi khac': 'other_cost_vnd', 'quang cao moi don': 'ads_per_order_vnd',
+    'phi san': 'fee_percent', 'phi nen tang': 'fee_percent', 'tong phi': 'fee_percent',
+    'gia ban': 'selling_price_vnd', 'ban': 'selling_price_vnd',
+}
+PRICING_FIELD = re.compile(r'\b(' + '|'.join(PRICING_LABELS) + r')\s*(?:la\s+|[:=]\s*)?')
 
 
 def is_forget_request(message):
@@ -159,10 +167,40 @@ def _explicit_unit_cost(message):
         mentions = money_mentions(tail)
         if mentions and mentions[0].start == 0 and mentions[0].value is not None and 0 <= mentions[0].value <= 1_000_000_000:
             quote_end = match.end() + len(message[match.end():]) - len(tail) + mentions[0].end
-            from app.ai.advisor_contracts import EconomicsUpdate
             return EconomicsUpdate(field='unit_cost_vnd', value=mentions[0].value,
                                    evidence=message[match.start():quote_end])
     return None
+
+
+def _explicit_pricing_inputs(message):
+    """Read complete labelled arithmetic without losing amounts omitted by the model."""
+    if not simple_pricing_read(message):
+        return []
+    source = normalize_text(message)
+    updates = {}
+    for match in PRICING_FIELD.finditer(plain(source)):
+        field = PRICING_LABELS[match[1]]
+        tail = source[match.end():]
+        if field == 'fee_percent':
+            percent = re.match(r'(\d+(?:[,.]\d+)?)\s*%', tail)
+            if not percent:
+                continue
+            value, length = Decimal(percent[1].replace(',', '.')), percent.end()
+            if value > 100:
+                return []
+        else:
+            amount = next(iter(money_mentions(tail, include_bare=False)), None)
+            if not amount or amount.start != 0 or amount.value is None:
+                continue
+            value, length = amount.value, amount.end
+        if field in updates and updates[field].value != value:
+            return []
+        quote = source[match.start():match.end() + length]
+        update = EconomicsUpdate(field=field, value=value, evidence=quote)
+        if not _grounded_number(update, message):
+            return []
+        updates[field] = update
+    return list(updates.values())
 
 
 def _valid_preference(update, message):
@@ -262,10 +300,17 @@ def calculate_pricing(values):
     return result
 
 
-def pricing_reply(pricing):
+def pricing_reply(pricing, *, selling_profit_first=False):
     if pricing['status'] in {'missing_cost', 'infeasible'}:
         return pricing['question']
     fmt = lambda value: f"{value:,}".replace(',', '.') + 'đ'
+    if selling_profit_first and (selling := pricing.get('at_selling_price')):
+        margin = f"{selling['margin_percent']:g}".replace('.', ',')
+        answer = (f"Bán **{fmt(selling['price_vnd'])}**, bạn lời ước tính "
+                  f"**{fmt(selling['profit_per_unit_vnd'])}/sản phẩm**, biên lời **{margin}%**.")
+        if missing := pricing['unaccounted_costs']:
+            answer += ' Mức này chưa tính ' + ', '.join(missing) + '.'
+        return answer
     answer = f"Với các chi phí bạn đã cho, mức hòa vốn ước tính là **{fmt(pricing['break_even_price_vnd'])}/sản phẩm**."
     if pricing.get('at_selling_price'):
         item = pricing['at_selling_price']
@@ -370,6 +415,7 @@ async def enrich_advice(session, shop, provider, *, message, resolved, conversat
         normalized_updates.append(update)
         source_messages.append(source)
     valid_updates = [update for update, source in zip(normalized_updates, source_messages) if _grounded_number(update, source)]
+    valid_updates = _explicit_pricing_inputs(message) or valid_updates
     labelled_cost = _explicit_unit_cost(message)
     if (labelled_cost is None and draft and selected is None and not extraction.new_scenario
             and 'unit_cost_vnd' not in economics and not any(item.field == 'unit_cost_vnd' for item in valid_updates)):

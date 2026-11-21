@@ -60,9 +60,8 @@ def test_gateway_restriction_explains_missing_ai_without_losing_draft_or_publish
         draft = result['product_draft']
         assert result['mode'] == 'fallback'
         assert result['fallback_reason'] == 'free_tier_restricted'
-        assert 'OpenCode đang chặn' in result['answer']
-        assert 'Ảnh và thông tin bản nháp vẫn được giữ' in result['answer']
-        assert 'chưa có sản phẩm nào được đăng' in result['answer']
+        assert 'Ảnh và thông tin bạn gửi vẫn còn trong bản nháp' in result['answer']
+        assert 'OpenCode' not in result['answer']
         assert draft['price_vnd'] == 500000 and draft['stock'] == 20
         assert draft['status'] == 'collecting' and draft['published_product_id'] is None
         assert len(list(upload_dir.iterdir())) == 1
@@ -214,7 +213,7 @@ def test_failed_natural_edit_never_claims_the_draft_was_updated(tmp_path):
         result = reply('Để giá mềm hơn một chút nhé')
         assert result['product_draft']['price_vnd'] == 990000
         assert result['fallback_reason'] == 'provider_unavailable'
-        assert 'chưa xử lý được' in result['answer']
+        assert 'chưa sửa được bản nháp' in result['answer']
         assert 'đã cập nhật' not in result['answer']
 
 
@@ -475,7 +474,7 @@ def test_invalid_listing_keeps_failure_stage_without_claiming_network_failure(tm
         result = reply('Tự soạn nội dung cho sản phẩm này')
         assert result['fallback_reason'] == 'invalid_response'
         assert result['facts']['ai_failure'] == {'reason':'invalid_response','stage':'listing_validation'}
-        assert 'AI đã phản hồi' in result['answer']
+        assert 'chưa soạn được nội dung đủ tin cậy' in result['answer']
         assert 'chưa gọi được AI' not in result['answer']
 
 
