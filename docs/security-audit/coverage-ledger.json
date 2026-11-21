@@ -1,0 +1,218 @@
+{
+  "project": "shipcode-sellerpilot",
+  "audit_standard": "Cloudflare Security Audit Skill (Full 16 + AI/LLM Mapping)",
+  "version": "1.0.0",
+  "units": [
+    {
+      "id": "SEC-UNIT-01",
+      "name": "Clickjacking & UI-Redress",
+      "target_components": ["FastAPI", "Flask UTE MALL"],
+      "cloudflare_attack_class": "CLIENT-SIDE.md#ui-redress-framing",
+      "user_criterion_id": 2,
+      "status": "pending_hardening",
+      "checks": [
+        "X-Frame-Options response header present",
+        "CSP frame-ancestors directive configured"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-02",
+      "name": "MIME Sniffing & Core Security Headers",
+      "target_components": ["FastAPI", "Flask UTE MALL"],
+      "cloudflare_attack_class": "CLIENT-SIDE.md#security-headers",
+      "user_criterion_id": 11,
+      "status": "pending_hardening",
+      "checks": [
+        "X-Content-Type-Options: nosniff header present",
+        "Referrer-Policy header present",
+        "Permissions-Policy configured"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-03",
+      "name": "Cross-Site Scripting (XSS)",
+      "target_components": ["FastAPI", "Flask UTE MALL", "Frontend React"],
+      "cloudflare_attack_class": "CLIENT-SIDE.md#dom-injection",
+      "user_criterion_id": 1,
+      "status": "pending_verification",
+      "checks": [
+        "Jinja2 autoescape enabled on all templates",
+        "React DOM safely renders untrusted strings as text",
+        "Input sanitization escapes HTML payloads"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-04",
+      "name": "SQL & NoSQL Injection",
+      "target_components": ["FastAPI", "Flask UTE MALL"],
+      "cloudflare_attack_class": "WEB-PROTOCOL-AND-AUTH.md#injection",
+      "user_criterion_id": 3,
+      "status": "verified_safe",
+      "checks": [
+        "SQLAlchemy parameterized queries used everywhere",
+        "No raw string concatenation in db.session.execute"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-05",
+      "name": "CSRF & Origin Verification",
+      "target_components": ["Flask UTE MALL", "FastAPI"],
+      "cloudflare_attack_class": "WEB-PROTOCOL-AND-AUTH.md#csrf",
+      "user_criterion_id": 5,
+      "status": "verified_safe",
+      "checks": [
+        "Flask-WTF CSRFProtect active on form POSTs",
+        "Cookie SameSite=Lax and HttpOnly configured",
+        "FastAPI Bearer tokens stateless"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-06",
+      "name": "Authentication & Password Hashing",
+      "target_components": ["FastAPI", "Flask UTE MALL"],
+      "cloudflare_attack_class": "WEB-PROTOCOL-AND-AUTH.md#auth-protocols",
+      "user_criterion_id": 6,
+      "status": "verified_safe",
+      "checks": [
+        "scrypt password hashing with unique salt",
+        "No plaintext credentials in database or memory",
+        "Session rotation on login"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-07",
+      "name": "Broken Access Control & IDOR",
+      "target_components": ["FastAPI", "Flask UTE MALL"],
+      "cloudflare_attack_class": "DATA-ISOLATION-AND-LIFECYCLE.md#tenant-isolation",
+      "user_criterion_id": 7,
+      "status": "verified_safe",
+      "checks": [
+        "Server-side user/shop ownership checked on item retrieval",
+        "No hidden-input client-controlled ID trusts"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-08",
+      "name": "Information Disclosure & Secret Leaks",
+      "target_components": ["FastAPI", "Flask UTE MALL", "Frontend"],
+      "cloudflare_attack_class": "ATTACK-CLASSES.md#secret-leakage",
+      "user_criterion_id": 8,
+      "status": "verified_safe",
+      "checks": [
+        "API keys encapsulated in SecretStr",
+        "No stack trace leakage in 500 error responses",
+        "No credentials committed to git"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-09",
+      "name": "SSRF & Internal IP Protection",
+      "target_components": ["FastAPI", "Flask UTE MALL"],
+      "cloudflare_attack_class": "WEB-PROTOCOL-AND-AUTH.md#ssrf",
+      "user_criterion_id": 9,
+      "status": "pending_hardening",
+      "checks": [
+        "Outbound HTTP client validates destination IP",
+        "Loopback 127.0.0.1, 10.x, 192.168.x, 169.254.169.254 blocked for user-supplied URLs"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-10",
+      "name": "File Upload Hardening",
+      "target_components": ["FastAPI CatalogFiles", "Flask UTE MALL"],
+      "cloudflare_attack_class": "WEB-PROTOCOL-AND-AUTH.md#file-upload-abuse",
+      "user_criterion_id": 10,
+      "status": "verified_safe",
+      "checks": [
+        "Magic bytes verification (PNG/JPG/WEBP)",
+        "Secure random filename generation (UUID)",
+        "Executable extensions blocked"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-11",
+      "name": "CORS Strict Configuration",
+      "target_components": ["FastAPI"],
+      "cloudflare_attack_class": "CLIENT-SIDE.md#cors-misconfiguration",
+      "user_criterion_id": 11,
+      "status": "verified_safe",
+      "checks": [
+        "allow_origins restricted to local dev ports and LAN regex",
+        "Wildcard origin * prohibited with credentials"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-12",
+      "name": "Open Redirect",
+      "target_components": ["Flask UTE MALL", "FastAPI"],
+      "cloudflare_attack_class": "WEB-PROTOCOL-AND-AUTH.md#open-redirect",
+      "user_criterion_id": 12,
+      "status": "verified_safe",
+      "checks": [
+        "is_safe_url check implemented on redirect targets"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-13",
+      "name": "Supply Chain & Dependency Audit",
+      "target_components": ["Root package.json", "Python venvs"],
+      "cloudflare_attack_class": "SUPPLY-CHAIN-AND-RELEASE.md#dependency-audit",
+      "user_criterion_id": 13,
+      "status": "verified_safe",
+      "checks": [
+        "Lockfile integrity maintained",
+        "Zero high/critical unpatched vulnerabilities"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-14",
+      "name": "Race Conditions & Transaction Locking",
+      "target_components": ["FastAPI", "Flask UTE MALL"],
+      "cloudflare_attack_class": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#race-conditions",
+      "user_criterion_id": 14,
+      "status": "verified_safe",
+      "checks": [
+        "Database transactions atomic",
+        "Order stock reservation serialized"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-15",
+      "name": "Rate Limiting & Abuse Prevention",
+      "target_components": ["Flask UTE MALL", "FastAPI"],
+      "cloudflare_attack_class": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#rate-limiting",
+      "user_criterion_id": 15,
+      "status": "verified_safe",
+      "checks": [
+        "Flask-Limiter active on login & checkout",
+        "FastAPI concurrency controls in ChatRequestManager"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-16",
+      "name": "Browser Extension MV3 Security",
+      "target_components": ["Chrome Extension shopee-connector"],
+      "cloudflare_attack_class": "SUPPLY-CHAIN-AND-RELEASE.md#extension-security",
+      "user_criterion_id": 16,
+      "status": "verified_safe",
+      "checks": [
+        "No dangerous permissions (cookies, debugger, webRequestBlocking)",
+        "onMessage checks sender.id === chrome.runtime.id",
+        "Strict CSP extension_pages"
+      ]
+    },
+    {
+      "id": "SEC-UNIT-17",
+      "name": "AI & LLM Guardrails (Gemini)",
+      "target_components": ["FastAPI GeminiClient", "ChatRequestManager"],
+      "cloudflare_attack_class": "AI-AND-LLM.md#prompt-injection-and-tools",
+      "user_criterion_id": 17,
+      "status": "pending_hardening",
+      "checks": [
+        "Prompt injection patterns filtered / neutralized",
+        "Tool execution requires explicit human confirmation (Human-in-the-loop)",
+        "PII / credentials scrubbed before sending to Gemini"
+      ]
+    }
+  ]
+}

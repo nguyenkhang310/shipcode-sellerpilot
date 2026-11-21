@@ -59,6 +59,15 @@ app.config['REMEMBER_COOKIE_SECURE'] = os.environ.get('COOKIE_SECURE', '').strip
 # CSRF config for AJAX
 app.config['WTF_CSRF_HEADERS'] = ['X-CSRFToken', 'X-CSRF-Token']
 
+@app.after_request
+def apply_security_headers(response):
+    if os.environ.get('ENABLE_STRICT_SECURITY', '1').strip().lower() in ['1', 'true', 'yes']:
+        response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+        response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+        response.headers.setdefault('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+    return response
+
 # Shared shop config
 app.config['SHOP_INFO'] = {
     'name': os.environ.get('SHOP_NAME', 'Shopee').strip() or 'Shopee',

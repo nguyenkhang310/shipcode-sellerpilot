@@ -11,6 +11,7 @@ from app.ai.factory import create_provider
 from app.api.v1.router import router
 from app.core.config import LOCAL_WEB_ORIGIN, Settings
 from app.core.logging import configure_logging
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.db.session import build_engine
 from app.integrations.ute_mall import UTEMallRepository, ShopDatabaseError
 from app.services.chat_requests import ChatRequestManager
@@ -53,6 +54,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+    if settings.enable_strict_security:
+        app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
