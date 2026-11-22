@@ -684,7 +684,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
             result.order_id ? [[result.order_id, result.language] as const] : []));
           const body = [browserMode ? originalText : text, ...details].filter(Boolean).join('\n\n');
           return <MessageEntrance key={message.id} style={ui.assistantMessageRow}
-            animate={!message.livePending && !message.response?.facts.voice && message.id === last?.id} reduceMotion={reduceMotion}
+            animate={!message.livePending && !message.response?.facts?.voice && message.id === last?.id} reduceMotion={reduceMotion}
             onLayout={showReports ? event => focusReport(message.id, event.nativeEvent.layout.y, Boolean(message.livePending)) : undefined}>
           <View style={ui.assistantContent}>
             <View style={[ui.row, { gap: 7, marginBottom: 8 }]}><BrandLogo size={20} /><Text style={ui.assistantName}>SellerPilot</Text></View>
@@ -700,7 +700,7 @@ export const AssistantChat = forwardRef<AssistantHandle, { onShopChanged?: () =>
             ? <ProductEditCard proposal={message.response.product_edit_proposal} busy={actionsDisabled} error={editErrors[message.response.product_edit_proposal.id]} onDecide={choice => void decideEdit(message.response!.product_edit_proposal!, choice)} /> : null}
           {!browserMode && (orderResults.size ? Array.from(orderResults, ([id, language]) => (
             <OrderChatAction key={id} action={{ id }} onOpen={showOrderFromChat} language={language} />
-          )) : <OrderChatAction action={message.response?.facts.order_action} onOpen={showOrderFromChat} />)}
+          )) : <OrderChatAction action={message.response?.facts?.order_action} onOpen={showOrderFromChat} />)}
           {message.response?.proposal ? <View style={ui.proposal}>
             <View style={ui.proposalBody}><Text style={ui.proposalKicker}>{proposalLabel[message.response.proposal.status]}</Text><Text style={ui.listTitle}>{message.response.proposal.product_name}</Text><Text style={ui.caption}>SKU {message.response.proposal.sku}</Text><View style={ui.priceRow}><Text style={ui.oldPrice}>{money(message.response.proposal.old_price_vnd)}</Text><SystemIcon name="arrow-forward" size={17} color={IOS.secondary} /><Text style={ui.newPrice}>{money(message.response.proposal.new_price_vnd)}</Text></View>
               {decisionErrors[message.response.proposal.id] ? <Text style={ui.error}>{decisionErrors[message.response.proposal.id]}</Text> : null}</View>
