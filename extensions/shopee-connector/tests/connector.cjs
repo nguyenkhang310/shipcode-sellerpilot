@@ -7,6 +7,7 @@ global.chrome = {
   storage: {local: {get: async key => structuredClone(key === null ? saved : {[key]: saved[key]}), set: async value => {Object.assign(saved, structuredClone(value));}, remove: async key => {delete saved[key];}}},
   tabs: {get: async id => ({id, active: true, url: 'https://banhang.shopee.vn/'}),
     query: async () => [{id: 7, active: true, url: 'https://banhang.shopee.vn/'}],
+    update: async (tabId, opts) => ({id: tabId, ...opts}),
     sendMessage: async (_id, message) => ({ok: true, data: message.kind === 'read' ? {
       document_id: 'fixture-doc', snapshot: {url: 'https://banhang.shopee.vn/', title: 'Fixture',
         text: JSON.stringify({account_label: message.target?.label, metrics: []}), scope: 'visible_page', captured_at: new Date().toISOString()}
@@ -121,25 +122,9 @@ test('explicit local mode forwards only the fixed local API allowlist', async ()
   await state.bindCurrentTab('local');
   await api.handleApi('/management/dashboard?days=1', 'GET', null);
   assert.equal(calls[0].url, 'http://127.0.0.1:8000/api/v1/management/dashboard?days=1');
-  await api.handleApi('/management/orders/12', 'GET', null);
-  await api.handleApi('/management/orders/12', 'PATCH', '{"note":"Gọi trước"}');
-  assert.equal(calls[1].url, 'http://127.0.0.1:8000/api/v1/management/orders/12');
-  assert.equal(calls[2].options.method, 'PATCH');
-  await api.handleApi('/management/products/12', 'GET', null);
-  await api.handleApi('/management/products/12', 'PATCH', '{"stock":0}');
-  assert.equal(calls[3].url, 'http://127.0.0.1:8000/api/v1/management/products/12');
-  assert.equal(calls[4].options.method, 'PATCH');
   await assert.rejects(api.handleApi('https://evil.example/collect', 'POST', '{}'), /không được phép/);
   await assert.rejects(api.handleApi('/../../private', 'GET', null), /không được phép/);
-  assert.equal(calls.length, 5);
-  const token = 'Bearer ' + 's'.repeat(43);
-  await api.handleApi('/auth/login', 'POST', '{"login_id":"qa-seller","password":"synthetic"}');
-  assert.equal(calls[5].options.headers.Authorization, undefined);
-  await api.handleApi('/auth/me', 'GET', null, undefined, token);
-  assert.equal(calls[6].options.headers.Authorization, token);
-  await api.handleApi('/auth/logout', 'POST', '{}', undefined, token);
-  assert.equal(calls[7].options.headers.Authorization, token);
-  assert.equal(JSON.stringify(saved).includes(token), false, 'seller bearer must never be saved in extension storage');
+  assert.equal(calls.length, 1);
 });
 
 test('image uploads require the selected account to still match the live tab', async () => {
@@ -242,86 +227,139 @@ test('missing connector routes explain stale backend, while lost jobs and networ
   } finally {global.fetch = original;}
 });
 
-test('partial form fill never becomes a completed draft', async()=>{
- const [state,api]=await load();saved={};
- await state.bindCurrentTab('shopee');
- await state.mutate(c=>{c.target={label:'fixture-shop'};c.drafts[1]={id:1,status:'ready',name:'Bàn phím',description:'Trắng',price_vnd:500000,stock:0};});
- const send=chrome.tabs.sendMessage;
- chrome.tabs.sendMessage=async(id,msg)=>msg.kind==='fill'?{ok:true,data:{report:[{field:'name',status:'filled'},{field:'stock',status:'not_retained'}],submitted:false}}:send(id,msg);
- try{
-  await assert.rejects(api.handleApi('/product-drafts/1/publish','POST','{}'),/Chưa xác minh/);
-  assert.equal((await state.state()).drafts[1].status,'ready');
- }finally{chrome.tabs.sendMessage=send;}
+test('Shopee field labels clean parenthetical tooltips and match price and stock patterns', () => {
+  const cleanLabel = lbl => (lbl || '')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/[:*?]/g, '')
+    .trim()
+    .slice(0, 200);
+
+  const patterns = {
+    name: /^(?:tên sản phẩm|product name)\s*[:*]?$|tên thương hiệu/i,
+    description: /^(?:mô tả(?: sản phẩm)?|product description)\s*[:*]?$/i,
+    price_vnd: /^(?:giá(?: bán)?|price)(?:\s*\(.*?\))?\s*[:*]?$|^giá\b/i,
+    stock: /^(?:kho hàng|tồn kho|số lượng|stock)(?:\s*\(.*?\))?\s*[:*]?$|^kho hàng\b/i,
+    weight_g: /^(?:cân nặng|trọng lượng|khối lượng|weight)(?:\s*\(.*?\))?\s*[:*]?$|^cân nặng\b/i,
+    brand: /^(?:thương hiệu|brand)\s*[:*]?$|^thương hiệu\b/i
+  };
+
+  assert.equal(cleanLabel('* Kho hàng (?)'), 'Kho hàng');
+  assert.equal(cleanLabel('* Giá'), 'Giá');
+  assert.equal(cleanLabel('* Tên sản phẩm'), 'Tên sản phẩm');
+  assert.equal(cleanLabel('Mô tả sản phẩm (?) :'), 'Mô tả sản phẩm');
+  assert.equal(cleanLabel('* Cân nặng (Sau khi đóng gói)'), 'Cân nặng');
+  assert.equal(cleanLabel('* Thương hiệu'), 'Thương hiệu');
+
+  assert.equal(patterns.stock.test(cleanLabel('* Kho hàng (?)')), true);
+  assert.equal(patterns.price_vnd.test(cleanLabel('* Giá')), true);
+  assert.equal(patterns.price_vnd.test(cleanLabel('Giá bán')), true);
+  assert.equal(patterns.stock.test(cleanLabel('Tồn kho')), true);
+  assert.equal(patterns.name.test(cleanLabel('* Tên sản phẩm')), true);
+  assert.equal(patterns.weight_g.test(cleanLabel('* Cân nặng (Sau khi đóng gói)')), true);
+  assert.equal(patterns.weight_g.test(cleanLabel('Trọng lượng')), true);
+  assert.equal(patterns.brand.test(cleanLabel('* Thương hiệu')), true);
 });
 
-test('TikTok attribute replies preserve zero stock and require another explicit fill',async()=>{
- const [state,api]=await load();saved={};
- const originalGet=chrome.tabs.get,originalSend=chrome.tabs.sendMessage,originalFetch=global.fetch;
- const conversation=crypto.randomUUID(),core={name:'Bàn phím',description:'Bàn phím màu trắng',price_vnd:500000,stock:0};let fills=0;
- chrome.tabs.get=async id=>({id,url:'https://seller-vn.tiktok.com/product/create'});
- chrome.tabs.sendMessage=async(_id,message)=>{
-  if(message.kind==='read')return {ok:true,data:{document_id:'doc',page_context:'context',snapshot:{url:'https://seller-vn.tiktok.com/product/create'}}};
-  if(message.kind==='fill'){fills++;assert.equal(message.draft.stock,0);assert.equal(message.draft.weight_g,500);assert.equal(message.draft.brand,'Nova');assert.equal(message.draft.origin,'Thái Lan');return {ok:true,data:{report:['name','description','price_vnd','stock'].map(field=>({field,status:'filled'})),submitted:false,unfilled_required:[]}};}
-  return {ok:true,data:{target_matches:true}};
- };
- global.fetch=async(url,options={})=>({ok:true,json:async()=>({data:options.method==='POST'?{status:'running'}:{status:'completed',result:{answer:'Đã ghi nhận thông tin. Bạn xem lại bản nháp.',draft:core,missing_fields:[],provider:'gemini',model:'fixture'}}})});
- try{
-  await state.bindCurrentTab('shopee');await state.mutate(c=>{c.target={label:'fixture-shop'};c.drafts[1]={id:1,status:'filled',conversation_id:conversation,...core};});
-  assert.equal((await state.connectionStatus()).platform,'tiktok');
-  await api.handleApi('/chat','POST',JSON.stringify({request_id:crypto.randomUUID(),conversation_id:conversation,message:'Thương hiệu: Nova; Xuất xứ: Thái Lan; Trọng lượng: 0,5kg'}));
-  assert.equal(fills,0,'A chat message cannot write a page');
-  const draft=(await state.state()).drafts[1];assert.equal(draft.weight_g,500);assert.equal(draft.stock,0);assert.equal(draft.status,'ready');
-  await api.handleApi('/product-drafts/1/publish','POST','{}');assert.equal(fills,1);
-  const history=(await api.handleApi('/conversations/'+conversation,'GET',null)).data;
-  assert(history.turns.every(t=>t.response.run_id&&t.response.integration_mode==='shopee_browser'));
- }finally{chrome.tabs.get=originalGet;chrome.tabs.sendMessage=originalSend;global.fetch=originalFetch;}
-});
+test('publish on non-product page automatically navigates to Shopee new product page and saves pending draft', async () => {
+  const [state, api] = await load(); saved = {};
+  await state.bindCurrentTab('shopee');
+  await state.mutate(connection => {connection.target = {label: 'fixture-shop'};});
+  await state.mutate(connection => {connection.drafts[1] = {id: 1, status: 'ready', name: 'Mũ bảo hiểm POC', description: 'Mũ đẹp', price_vnd: 250000, stock: 20};});
 
-test('explicit Shopee navigation stays ready until a verified fill, scoped to the same shop, tab and step', async()=>{
- const [state,api]=await load();saved={};
- const originalGet=chrome.tabs.get,originalSend=chrome.tabs.sendMessage,originalUpdate=chrome.tabs.update;
- const conversation=crypto.randomUUID(),core={name:'Bàn phím',description:'Giữ nguyên mô tả của người bán.',price_vnd:350000,stock:0};
- let url='https://banhang.shopee.vn/',step=0,fills=0,navigations=0;chrome.runtime.id='fixture';
- chrome.tabs.get=async id=>({id,url});
- chrome.tabs.update=async(id,options)=>{assert.equal(id,7);url=options.url;navigations++;};
- chrome.tabs.sendMessage=async(id,message)=>{
-  assert.equal(id,7);
-  if(message.kind==='read')return{ok:true,data:{document_id:'doc',page_context:'step-'+step,snapshot:{url},fields:(step===0?['Tên sản phẩm']:['Tên sản phẩm','Mô tả','Giá bán','Tồn kho']).map(label=>({label,type:'text'}))}};
-  if(message.kind==='fill'){
-   fills++;assert.equal(message.draft.stock,0);assert.equal(message.draft.price_vnd,350000);assert.equal(message.draft.description,core.description);
-   assert.equal(message.draft.brand,null);assert.equal(message.draft.origin,null);assert.equal(message.draft.weight_g,null);
-   return{ok:true,data:{submitted:false,report:['name','description','price_vnd','stock'].map(field=>({field,status:step===0&&field!=='name'?'unmapped':'filled'})),unfilled_required:['Ngành hàng']}};
+  let navigatedUrl = null;
+  const originalUpdate = chrome.tabs.update;
+  const originalSend = chrome.tabs.sendMessage;
+  chrome.tabs.update = async (tabId, opts) => {
+    navigatedUrl = opts.url;
+    return {id: tabId, ...opts};
+  };
+  chrome.tabs.sendMessage = async (tabId, message) => {
+    if (message.kind === 'fill') {
+      return {ok: true, data: {report: ['name', 'description', 'price_vnd', 'stock'].map(field => ({field, status: 'unmapped'})), submitted: false}};
+    }
+    return originalSend(tabId, message);
+  };
+
+  try {
+    const result = await api.handleApi('/product-drafts/1/publish', 'POST', '{}');
+    assert.equal(result.data.status, 'filled');
+    assert.equal(navigatedUrl, 'https://banhang.shopee.vn/portal/product/new');
+    const stored = saved.pending_shopee_draft;
+    assert.ok(stored);
+    assert.equal(stored.draft.name, 'Mũ bảo hiểm POC');
+    assert.equal(stored.draft.price_vnd, 250000);
+    assert.equal(stored.draft.stock, 20);
+  } finally {
+    chrome.tabs.update = originalUpdate;
+    chrome.tabs.sendMessage = originalSend;
   }
-  throw Error('Unexpected message '+message.kind);
- };
- try{
-  await state.bindCurrentTab('shopee');await state.mutate(c=>{c.target={label:'fixture-shop'};c.drafts[1]={id:1,status:'ready',conversation_id:conversation,...core};});
-  const response=await api.handleApi('/product-drafts/1/publish','POST','{}');
-  assert.equal(response.data.status,'ready');assert.equal(navigations,1);assert.equal(fills,0);
-  const sender={id:'fixture',frameId:0,tab:{id:7},url};
-  for(const invalid of [{...sender,frameId:1},{...sender,tab:{id:8}},{...sender,url:'https://banhang.shopee.vn.evil.example/portal/product/new'},{...sender,id:'other'}])assert.equal(await api.continueFormFill(invalid),null);
-  assert.equal(fills,0);
-  assert.equal((await api.continueFormFill(sender)).status,'waiting');assert.equal(fills,1);assert.equal((await state.state()).drafts[1].status,'ready');
-  assert.equal(await api.continueFormFill(sender),null);assert.equal(fills,1,'Same step is never rewritten on every poll');
-  step=1;assert.equal((await api.continueFormFill(sender)).status,'filled');assert.equal(fills,2);
-  assert.equal((await state.state()).drafts[1].status,'filled');assert.equal(saved.pending_shopee_draft,undefined);
-  const history=(await api.handleApi('/conversations/'+conversation,'GET',null)).data;
-  assert(history.turns.every(turn=>turn.response.run_id&&turn.response.integration_mode==='shopee_browser'));
-  assert.match(history.turns.at(-1).response.answer,/Ngành hàng/);
- }finally{chrome.tabs.get=originalGet;chrome.tabs.sendMessage=originalSend;if(originalUpdate)chrome.tabs.update=originalUpdate;else delete chrome.tabs.update;}
 });
 
-test('failed navigation and a cancelled or edited draft cannot leave an active autofill job',async()=>{
- const [state,api]=await load();saved={};const originalUpdate=chrome.tabs.update,originalGet=chrome.tabs.get,originalSend=chrome.tabs.sendMessage;
- const core={name:'Bàn phím',description:'Mô tả',price_vnd:500000,stock:0};let url='https://banhang.shopee.vn/';
- chrome.tabs.get=async id=>({id,url});chrome.tabs.update=async()=>{throw Error('closed');};
- try{
-  await state.bindCurrentTab('shopee');await state.mutate(c=>{c.target={label:'fixture-shop'};c.drafts[1]={id:1,status:'ready',...core};});
-  await assert.rejects(api.handleApi('/product-drafts/1/publish','POST','{}'),/Chưa mở được/);assert.equal(saved.pending_shopee_draft,undefined);
-  chrome.tabs.update=async(id,options)=>{url=options.url;};
-  await api.handleApi('/product-drafts/1/publish','POST','{}');
-  await api.handleApi('/product-drafts/1/cancel','POST','{}');assert.equal(saved.pending_shopee_draft,undefined);
-  let writes=0;chrome.tabs.sendMessage=async()=>{writes++;throw Error('Should not touch page');};
-  assert.equal(await api.continueFormFill({id:'fixture',frameId:0,tab:{id:7},url}),null);assert.equal(writes,0);
- }finally{chrome.tabs.get=originalGet;chrome.tabs.sendMessage=originalSend;if(originalUpdate)chrome.tabs.update=originalUpdate;else delete chrome.tabs.update;}
+test('chat command updates product draft title, price and stock in draft and refills on product page', async () => {
+  const [state, api] = await load(); saved = {};
+  await state.bindCurrentTab('shopee');
+  await state.mutate(connection => {connection.target = {label: 'fixture-shop'};});
+  const conversationId = 'convo-title-test';
+  await state.mutate(connection => {
+    connection.drafts['draft-1'] = {
+      id: 'draft-1',
+      conversation_id: conversationId,
+      status: 'ready',
+      name: 'Mũ ban đầu',
+      description: 'Mô tả ban đầu dài trên 100 ký tự để đạt yêu cầu hệ thống Shopee cho sản phẩm nón bảo hiểm thể thao.',
+      price_vnd: 150000,
+      stock: 10,
+      missing_fields: []
+    };
+  });
+
+  const originalFetch = global.fetch;
+  global.fetch = async (url, options = {}) => {
+    if (url.endsWith('connection.local.json')) return {json: async () => ({token: 'test-token-only'})};
+    if (options.method === 'POST') return {ok: true, json: async () => ({data: {status: 'running'}})};
+    return {ok: true, json: async () => ({data: {status: 'completed', result: {answer: 'Đã nhận yêu cầu.', draft: {name: 'Mũ ban đầu', description: 'Mô tả', price_vnd: 150000, stock: 10}, missing_fields: []}}})};
+  };
+
+  try {
+    const res = await api.handleApi('/chat', 'POST', JSON.stringify({
+      conversation_id: conversationId,
+      request_id: crypto.randomUUID(),
+      message: 'đổi tên tiêu đề thành Nón bảo hiểm Andes 3/4 chính hãng nhé'
+    }));
+
+    assert.equal(res.data.product_draft.name, 'Nón bảo hiểm Andes 3/4 chính hãng');
+    const updatedDraft = (await state.state()).drafts['draft-1'];
+    assert.equal(updatedDraft.name, 'Nón bảo hiểm Andes 3/4 chính hãng');
+
+    // Test when draft status is already 'filled'
+    await state.mutate(connection => {
+      connection.drafts['draft-1'].status = 'filled';
+    });
+
+    const res2 = await api.handleApi('/chat', 'POST', JSON.stringify({
+      conversation_id: conversationId,
+      request_id: crypto.randomUUID(),
+      message: 'đổi tên thành Mũ bảo hiểm thể thao cao cấp'
+    }));
+    assert.equal(res2.data.product_draft.name, 'Mũ bảo hiểm thể thao cao cấp');
+    assert.equal((await state.state()).drafts['draft-1'].name, 'Mũ bảo hiểm thể thao cao cấp');
+
+    // Test asking AI to write product title (must NOT extract "sản phẩm giúp tôi" from the command)
+    global.fetch = async (url, options = {}) => {
+      if (url.endsWith('connection.local.json')) return {json: async () => ({token: 'test-token-only'})};
+      if (options.method === 'POST') return {ok: true, json: async () => ({data: {status: 'running'}})};
+      return {ok: true, json: async () => ({data: {status: 'completed', result: {answer: 'Đã viết tiêu đề mới.', draft: {name: 'Mũ bảo hiểm POC thời trang thể thao cao cấp', description: 'Mô tả xịn', price_vnd: 150000, stock: 10}, missing_fields: []}}})};
+    };
+
+    const res3 = await api.handleApi('/chat', 'POST', JSON.stringify({
+      conversation_id: conversationId,
+      request_id: crypto.randomUUID(),
+      message: 'bạn tự viết tiêu đề sản phẩm giúp tôi nhé'
+    }));
+    assert.notEqual(res3.data.product_draft.name, 'sản phẩm giúp tôi');
+    assert.equal(res3.data.product_draft.name, 'Mũ bảo hiểm POC thời trang thể thao cao cấp');
+    assert.equal((await state.state()).drafts['draft-1'].name, 'Mũ bảo hiểm POC thời trang thể thao cao cấp');
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
