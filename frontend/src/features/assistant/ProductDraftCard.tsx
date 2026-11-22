@@ -33,9 +33,9 @@ export function ProductDraftCard({ draft, busy, saving, error, browser, onDecide
       {longDescription ? <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded(value => !value)} style={ui.linkHit}><Text style={ui.textLink}>{expanded ? 'Thu gọn mô tả' : 'Xem toàn bộ mô tả'}</Text></Pressable> : null}
       {error ? <Text accessibilityRole="alert" style={ui.error}>{error}</Text> : null}
     </View>
-    {['collecting', 'ready'].includes(draft.status) ? <View style={ui.proposalActions}>
+    {['collecting', 'ready'].includes(draft.status) || (browser && draft.status === 'filled') ? <View style={ui.proposalActions}>
       <Pressable accessibilityRole="button" accessibilityLabel="Hủy bản nháp sản phẩm" disabled={busy} onPress={() => onDecide('cancel')} style={[ui.secondaryButton, { flex: 1, paddingHorizontal: 8 }]}><Text style={ui.secondaryText}>Hủy</Text></Pressable>
-      {draft.status === 'ready' ? <Pressable accessibilityRole="button" accessibilityLabel={browser ? 'Điền bản nháp vào form người bán' : 'Đăng sản phẩm lên UTech Official'} disabled={busy} onPress={() => onDecide('publish')} style={[ui.primaryButton, { flex: 1.7, paddingHorizontal: 8 }, busy && { opacity: .55 }]}>{saving ? <ActivityIndicator color="#FFF" size="small" /> : <SystemIcon name="cloud-upload-outline" size={18} color="#FFF" />}<Text style={ui.primaryText}>{browser ? 'Điền vào form' : 'Đăng sản phẩm'}</Text></Pressable> : null}
+      {draft.status === 'ready' || (browser && draft.status === 'filled') ? <Pressable accessibilityRole="button" accessibilityLabel={browser ? 'Điền bản nháp vào form người bán' : 'Đăng sản phẩm lên UTech Official'} disabled={busy} onPress={() => onDecide('publish')} style={[ui.primaryButton, { flex: 1.7, paddingHorizontal: 8 }, busy && { opacity: .55 }]}>{saving ? <ActivityIndicator color="#FFF" size="small" /> : <SystemIcon name="cloud-upload-outline" size={18} color="#FFF" />}<Text style={ui.primaryText}>{browser ? (draft.status === 'filled' ? 'Điền lại vào form' : 'Điền vào form') : 'Đăng sản phẩm'}</Text></Pressable> : null}
     </View> : null}
   </View>;
 }

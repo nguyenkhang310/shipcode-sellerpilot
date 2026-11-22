@@ -1,5 +1,5 @@
 import {state, connectionStatus, bindCurrentTab, pageMessage, listScopes, restoreScope, selectTarget, completeTarget, autoConnectShopee, SOURCE} from './state.js';
-import {handleApi, backend, continueFormFill} from './api.js';
+import {handleApi, backend, handleStep2Completed} from './api.js';
 import {syncShopeeData, getCachedPage, getSyncStatus, cancelSync} from './shopee-sync.js';
 const active = new Map();
 const chatJobs = new Map();
@@ -15,7 +15,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     }).then(data => reply({ok: true, data}), error => reply({ok: false, error: error.message}));
     return true;
   }
-  if (message?.kind === 'autofill_continue' && sender.id === chrome.runtime.id && sender.tab) {
+  if (message?.kind === 'autofill_step2_completed' && sender.id === chrome.runtime.id && sender.tab) {
     Promise.resolve().then(() => handleStep2Completed(message.scan))
       .then(data => reply({ok: true, data}), error => reply({ok: false, error: error.message}));
     return true;
@@ -89,14 +89,13 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       chatKey = value.id + ':' + body.request_id;
       const existing = chatJobs.get(chatKey);
       if (existing) {
-        if (value.mode === 'local' && existing.authorization !== message.authorization) throw Object.assign(Error('Vui lòng đăng nhập lại.'), {status: 401});
         if (existing.body !== message.body) throw Error('Mã tin nhắn đã dùng cho nội dung khác.');
         return existing.promise;
       }
     }
     active.set(message.id, controller);
-    const promise = handleApi(message.path, message.method, message.body, controller.signal, message.authorization);
-    if (chatKey) chatJobs.set(chatKey, {body: message.body, controller, promise, authorization: message.authorization});
+    const promise = handleApi(message.path, message.method, message.body, controller.signal);
+    if (chatKey) chatJobs.set(chatKey, {body: message.body, controller, promise});
     try {return await promise;}
     finally {active.delete(message.id); if (chatKey) chatJobs.delete(chatKey);}
   }).then(data => reply({ok: true, data}), error => reply({ok: false, status: error.status || 503, error: error.message}));
