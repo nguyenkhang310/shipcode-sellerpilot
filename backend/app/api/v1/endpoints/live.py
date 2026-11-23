@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from contextlib import AsyncExitStack
+from math import ceil
 from time import monotonic
 from uuid import UUID, uuid4
 
@@ -29,8 +30,8 @@ from app.services.conversations import has_product_reference
 from app.services.live_actions import LiveActions
 from app.services.live_history import LiveHistory
 from app.services.live_language import (
-    GEMINI_VOICES, LIVE_GREETINGS, LivePreferences, REPEAT_QUESTION, copy_choice, spoken_listing_name,
-    transcription_config, unclear_vietnamese,
+    GEMINI_VOICES, LIVE_GREETINGS, LivePreferences, copy_choice, incomplete_shop_phrase, listing_opening,
+    repeat_question, spoken_listing_name, transcription_config, unclear_vietnamese,
 )
 from app.services.live_shop import inspect_shop, is_sales_question, strategy_summary
 from app.services.product_archive_chat import is_product_archive_request
@@ -47,37 +48,25 @@ MAX_PACKET = 48_000
 MAX_IMAGE_BASE64 = 700_000
 MAX_SESSIONS = 3
 LIVE_CONNECT_BUDGET = 18
+LIVE_BILLING_COOLDOWN = 900
 MAX_TOOLS_PER_TURN = 10
-INSTRUCTION = '''Bạn là SellerPilot, trợ lý dành cho người bán do ShipCODE phát triển.
-Nói theo nhịp tự nhiên, tách nhẹ ở ranh giới ý và đọc trọn chữ cuối câu. Hỏi tiêu đề bằng giọng tò mò, xác nhận số tiền bằng giọng rõ và chậm hơn, nói về lỗi bằng giọng bình tĩnh. Khen vừa phải khi người bán hoàn tất một bước. Điều chỉnh nhịp theo yêu cầu.
-Vào thẳng việc người bán vừa hỏi. Chào hỏi, cảm ơn, đồng ý hoặc tạm biệt thì đáp bằng một câu phù hợp. Chỉ giới thiệu lại SellerPilot khi được hỏi. Nếu đã đủ dữ kiện để trả lời, chốt ý rồi nhường lượt nói, tránh hỏi «bạn cần gì nữa không» ở cuối.
-Đọc tiền, ngày và chữ viết tắt theo ngôn ngữ phiên. Không đọc markdown, JSON, SKU dài, URL, bảng hay toàn bộ một báo cáo. Chỉ nói điều quan trọng nhất rồi chừa khoảng cho người bán trao đổi tiếp.
-Khi âm thanh nghe không rõ, bị lẫn tiếng, hoặc câu nhận diện rời rạc, chỉ hỏi người bán nói lại chỗ đó. Không đoán tên sản phẩm hay yêu cầu của người bán từ âm không rõ hoặc từ ảnh có sẵn.
-Khi hỏi số liệu, tồn, sản phẩm, trạng thái đơn, kế hoạch bán hàng, quảng cáo hoặc TikTok, gọi inspect_shop trước. Truyền câu hỏi độc lập bằng tiếng Việt, giữ nguyên kỳ, mã đơn, SKU, mục tiêu và điều kiện người bán đã nói. Nếu câu tiếp nối, điền tham chiếu đã rõ từ đoạn nói trước. Khi công cụ trả detailed_plan=true, hướng người bán xem nội dung trong cuộc trò chuyện và đọc điểm chính từ answer.
-Với câu «shop bán được bao nhiêu», đọc số đơn và tổng giá trị đơn đã kiểm tra trong kỳ. Chỉ hỏi lại nếu không xác định được phạm vi từ lời người bán và lịch sử.
-Khi inspect_shop trả answer cho câu hỏi thống kê, đọc theo câu trả lời đó, giữ nguyên kỳ, chỉ số và các con số. Nếu được hỏi về lợi nhuận, tiền thực thu, lượt xem hoặc quảng cáo mà công cụ thiếu dữ liệu, nói rõ chỉ số nào chưa xác minh được.
-Khi người bán hỏi cách bán «sản phẩm này», «món đó» hay «món vừa đăng», mỗi lần đều gọi inspect_shop và giữ nguyên cụm tham chiếu. Mở đầu câu trả lời bằng tên sản phẩm lấy từ business_advisory.focus_product để bạn biết đang nói về món nào. Nếu thiếu focus thì hỏi tên hoặc SKU. Lịch sử chỉ dùng để tham khảo. Chỉ xác nhận thao tác từ lời nói mới trong phiên.
-Chỉ dùng dữ liệu từ công cụ cho các con số thực tế. Với chiến lược, nói một phát hiện và một việc nên làm trước, tách giả định và số đã đo. Không khẳng định đã chi tiền, chạy quảng cáo hoặc có doanh số từ một kênh khi không có số liệu nguồn.
-Khi công cụ gửi detailed_plan, chỉ nói một bước ưu tiên và mời xem kế hoạch trong chat. Dừng ở khoảng hai câu, giữ nguyên nội dung chi tiết trong chat.
-Khi inspect_shop trả report_available=true, báo người bán biểu đồ đã xuất hiện trong cuộc chat nếu họ hỏi về biểu đồ. Thiếu dữ liệu thì nói rõ kỳ nào chưa phát sinh.
-Khi bạn muốn đăng bán, gọi prepare_listing với dữ kiện đã có hoặc prepare_chat_request nếu chưa xác định mặt hàng. Giữ nguyên các dữ kiện đã xác nhận; không tự đoán giá, tồn, bảo hành hoặc ngành hàng. Năm xị thường là năm trăm nghìn đồng; phân biệt giá vốn với giá bán. Tồn kho 0 hợp lệ.
-Khi người bán đọc nguyên văn tiêu đề hoặc mô tả, giữ nguyên lời họ. Nếu nội dung ngắn, dùng câu hỏi từ công cụ để xin phép cải thiện. Nếu họ chủ động nhờ gợi ý hoặc đồng ý với đề xuất, gọi prepare_chat_request để viết ngay nội dung được yêu cầu. Dùng tiêu đề và mô tả từ bản nháp công cụ trả về.
-Để thêm hình, nói «Bạn bấm Thêm ảnh ở thanh Live rồi chọn ảnh nhé. Mình sẽ lưu ảnh vào bản nháp.» Nếu bạn nói không thêm hình: có ảnh thì dùng các ảnh hiện tại; chưa có ảnh thì giải thích cần một ảnh để đăng và giữ bản nháp. Đừng nói ứng dụng không tải được ảnh hay yêu cầu đổi sang chat.
-Gọi prepare_chat_request để thực hiện tư vấn, tính giá có lời, viết nội dung, chỉnh tên/mô tả/giá/tồn, tiếp tục hoặc hủy bản nháp, hoặc chuẩn bị xóa một sản phẩm khỏi gian hàng. Khi xóa, giữ đúng tên/SKU người bán vừa nói. Đọc lại tên và yêu cầu nói «xác nhận xóa sản phẩm». Dùng prepare_order để chuẩn bị cập nhật đơn. Với số liệu, tra cứu và theo dõi đơn, vẫn dùng inspect_shop trước.
-Khi công cụ trả review, đọc lại các chi tiết và cụm từ xác nhận của ngôn ngữ phiên rồi dừng để người bán trả lời. Chỉ gọi confirm_action sau lời xác nhận rõ ở lượt nói mới. Không gọi ngay sau bước chuẩn bị. Các câu hỏi, lời nói lấp lửng, điều kiện, phủ định và tiếng của trợ lý trong loa không phải là xác nhận.
-Chỉ báo đã đăng hoặc lưu khi confirm_action xác nhận việc đó đã thực hiện. Nếu chưa đủ dữ liệu, hỏi đúng chỗ còn thiếu. Báo còn chờ xác nhận bằng câu ngắn.'''
+INSTRUCTION = '''Bạn là SellerPilot, trợ lý vận hành làm việc cùng chủ shop.
+
+Nói chuyện như một người cùng làm việc với họ. Theo mạch câu chuyện, hiểu người bán đang nói về việc gì và trả lời điều họ đang cần. Chuyện đơn giản thì đáp gọn, việc có nhiều lựa chọn thì giải thích vừa đủ để họ quyết định. Nếu gặp đoạn không nghe rõ hoặc thiếu thông tin cần thiết, hỏi lại đúng chỗ đó.
+
+Khi người bán hỏi về shop, dùng inspect_shop để lấy số liệu, tồn kho, thông tin sản phẩm hoặc đơn hàng. Giữ đúng món hàng, mã, số tiền và khoảng thời gian họ nhắc tới. Nếu còn thiếu dữ liệu, nói rõ phần nào chưa biết. Với lời khuyên, nêu việc nên ưu tiên và lý do. Nếu có báo cáo hoặc kế hoạch chi tiết trong chat, nói kết quả chính để họ có thể nghe rồi hỏi tiếp.
+
+Khi người bán muốn làm một việc, giúp họ đi tiếp từ chỗ đang dở. Dùng prepare_listing cho thông tin đăng hàng, prepare_order cho thay đổi đơn, và prepare_chat_request khi cần soạn nội dung, lên kế hoạch, tính giá, sửa hoặc xóa sản phẩm. Giữ lời người bán khi họ đọc tiêu đề hoặc mô tả nguyên văn. Nếu cần ảnh, chỉ họ dùng nút Thêm ảnh trong Live.
+
+Khi có bản xem trước, nói rõ việc sắp làm và đọc cụm xác nhận từ kết quả công cụ. Chờ người bán xác nhận ở lượt sau rồi mới gọi confirm_action. Báo kết quả theo trạng thái công cụ trả về.'''
 
 SESSION_LANGUAGE = {
-    'vi': ('Nói tiếng Việt tự nhiên, giọng ấm, rõ thanh điệu và phụ âm cuối. Xưng mình và gọi người bán là bạn. '
-           'Nói theo cụm ý, nhấn vừa phải vào tên, tiền và số lượng. Mở đầu bằng ý cần trả lời, tránh lặp lời chào và câu đệm. '
-           'Đọc VND thành đồng, đọc rõ hàng nghìn và hàng triệu. Chỉ đọc mã dài khi người bán yêu cầu. '
-           'Nghe các giọng vùng miền và cách nói giá như năm xị. '
-           'Cụm duyệt gồm «xác nhận đăng», «xác nhận cập nhật sản phẩm» và «xác nhận cập nhật đơn».'),
-    'en': ('Session language is English. Speak and reply in natural English, including when tools return Vietnamese text. '
-           'Tell the seller to tap Add photos. Use “confirm publish”, “confirm product update”, '
+    'vi': ('Nói tiếng Việt đời thường, xưng mình và gọi người bán là bạn. '
+           'Hiểu cách người bán nói giá theo vùng miền và đọc số tiền bằng đồng.'),
+    'en': ('Speak naturally in English throughout the call. '
+           'The photo button is called Add photos. Use “confirm publish”, “confirm product update”, '
            '“confirm order update”, “confirm draft cancellation”, “confirm product removal” and “confirm memory reset”. '
-           'Send shop tool requests in Vietnamese for tool matching, preserving names, amounts, dates and codes verbatim. '
-           'Never ask the seller to speak Vietnamese.'),
+           'Write shop tool requests in Vietnamese for matching, keeping names, amounts, dates and codes as spoken.'),
 }
 ORDER_FIELDS = {
     'status': {'type': 'STRING', 'enum': ['paid', 'shipped', 'delivered', 'cancelled']},
@@ -177,30 +166,62 @@ class LiveError(RuntimeError):
     pass
 
 
-class LiveKeyError(LiveError):
+LIVE_PROVIDER_MESSAGES = {
+    'billing': 'Các project Gemini Live khả dụng đã hết tín dụng trả trước. Kiểm tra thanh toán trong AI Studio.',
+    'rate_limited': 'Gemini Live đang giới hạn lượt sử dụng. Bạn thử lại sau nhé.',
+    'rejected': 'Các khóa Gemini đã bị từ chối. Kiểm tra quyền sử dụng Live trong AI Studio.',
+    'configuration': 'Gemini từ chối cấu hình phiên Live. Kiểm tra model và quyền sử dụng trong AI Studio.',
+    'unavailable': 'Gemini Live tạm thời chưa kết nối được. Bạn thử lại sau nhé.',
+}
+
+
+class LiveProviderError(LiveError):
     def __init__(self, reason, retry_after=60):
         self.reason = reason
         self.retry_after = retry_after
-        super().__init__('Gemini Live đang giới hạn lượt sử dụng. Bạn thử lại sau nhé.'
-                         if reason == 'rate_limited' else 'Key Gemini chưa có quyền mở Live. Kiểm tra model và project trong AI Studio.')
+        super().__init__(LIVE_PROVIDER_MESSAGES[reason])
+
+    def event(self):
+        return {'type': 'error', 'code': 'live_provider_' + self.reason, 'message': str(self),
+                'retryable': self.reason == 'unavailable',
+                **({'retry_after': ceil(self.retry_after)} if self.reason == 'rate_limited' else {})}
 
 
-def live_key_failure(error):
-    if isinstance(error, LiveKeyError):
+def billing_exhausted(message):
+    message = message.casefold()
+    return any(term in message for term in (
+        'prepayment credits are depleted', 'insufficient credits', 'billing_not_enabled',
+        'billing_disabled', 'billing must be enabled', 'billing is not enabled',
+    ))
+
+
+def live_provider_failure(error):
+    if isinstance(error, LiveProviderError):
         return error
     if isinstance(error, InvalidStatus):
         response = error.response
+        if response.status_code == 402 or billing_exhausted(bytes(response.body or b'').decode(errors='replace')):
+            return LiveProviderError('billing', LIVE_BILLING_COOLDOWN)
         if response.status_code == 429:
-            return LiveKeyError('rate_limited', retry_delay(response.headers.get('Retry-After')))
+            return LiveProviderError('rate_limited', retry_delay(response.headers.get('Retry-After')))
         if response.status_code in (401, 403):
-            return LiveKeyError('rejected')
-    if isinstance(error, ConnectionClosed) and error.rcvd:
-        reason = error.rcvd.reason.casefold()
-        if any(term in reason for term in ('resource_exhausted', 'quota exceeded', 'rate limit', 'too many requests')):
-            return LiveKeyError('rate_limited')
+            return LiveProviderError('rejected')
+        if response.status_code in (408, 500, 502, 503, 504):
+            return LiveProviderError('unavailable')
+        return LiveProviderError('configuration')
+    if isinstance(error, ConnectionClosed):
+        code, reason = (error.rcvd.code, error.rcvd.reason.casefold()) if error.rcvd else (1006, '')
+        if billing_exhausted(reason):
+            return LiveProviderError('billing', LIVE_BILLING_COOLDOWN)
+        if code == 1013 or any(term in reason for term in ('resource_exhausted', 'quota exceeded', 'rate limit', 'too many requests')):
+            return LiveProviderError('rate_limited')
         if any(term in reason for term in ('api key not valid', 'api_key_invalid', 'api key expired',
                                            'permission denied', 'permission_denied', 'unauthenticated')):
-            return LiveKeyError('rejected')
+            return LiveProviderError('rejected')
+        if code in (1002, 1003, 1007, 1008):
+            return LiveProviderError('configuration')
+        if code != 1000:
+            return LiveProviderError('unavailable')
     return None
 
 
@@ -210,11 +231,15 @@ def check_live_provider_error(packet):
         return
     status = error.get('status')
     code = error.get('code')
+    if code == 402 or billing_exhausted(f'{status} {error.get("message", "")}'):
+        raise LiveProviderError('billing', LIVE_BILLING_COOLDOWN)
     if code == 429 or status == 'RESOURCE_EXHAUSTED':
-        raise LiveKeyError('rate_limited')
+        raise LiveProviderError('rate_limited')
     if code in (401, 403) or status in ('UNAUTHENTICATED', 'PERMISSION_DENIED') or rejected_gemini_key(error):
-        raise LiveKeyError('rejected')
-    raise LiveError('Gemini Live gặp lỗi khi xử lý. Bạn thử mở lại phiên nhé.')
+        raise LiveProviderError('rejected')
+    if code in (400, 404) or status in ('INVALID_ARGUMENT', 'NOT_FOUND'):
+        raise LiveProviderError('configuration')
+    raise LiveProviderError('unavailable')
 
 
 class ShopQuestion(BaseModel):
@@ -277,7 +302,13 @@ async def shop_result(socket, question, result, history):
 async def shop_tool(socket, token, name, args, history, actions, traffic, *, sales_only=False):
     try:
         if history.unclear:
-            return {'accepted': False, 'message': REPEAT_QUESTION}
+            return {'accepted': False, 'message': repeat_question(history.language)}
+        if incomplete_shop_phrase(history.user):
+            return {'accepted': False, 'message': repeat_question(history.language)}
+        if name in ('inspect_shop', 'prepare_listing', 'prepare_chat_request') and listing_opening(history.user):
+            if voice_finished(traffic):
+                return await actions.listing_copy()
+            return {'accepted': False, 'message': 'Wait for the seller to finish speaking.'}
         if history.sales_reply:
             return history.sales_reply
         if sales_only or sales_waiting(socket, history):
@@ -306,7 +337,7 @@ async def shop_tool(socket, token, name, args, history, actions, traffic, *, sal
                 if not traffic.get('speech_finished'):
                     return {'accepted': False, 'message': 'Chờ lời người bán rõ và kết thúc. Chưa đọc lại tiêu đề.'}
                 if not history.user:
-                    return {'accepted': False, 'message': REPEAT_QUESTION}
+                    return {'accepted': False, 'message': repeat_question(history.language)}
             return await actions.listing_copy(message) or await actions.ask_chat(message)
         if name == 'prepare_chat_request':
             review = ChatReview.model_validate(args)
@@ -402,6 +433,7 @@ async def forward_microphone(socket, upstream, traffic, actions, *, manual_turns
     async for message in socket.iter_text():
         data = read_json(message, MAX_IMAGE_BASE64 + 100)
         if data.get('type') == 'greet':
+            # Older app bundles still request their welcome over the socket.
             variant = data.get('variant')
             greetings = LIVE_GREETINGS[actions.history.language]
             if (manual_turns and not traffic.get('greeted') and not traffic.get('output_allowed')
@@ -495,8 +527,8 @@ async def forward_microphone(socket, upstream, traffic, actions, *, manual_turns
             await socket.send_json({'type': 'audio_received'})
 
 
-async def save_live_turn(socket, history, *, notify):
-    pending = history.take()
+async def save_live_turn(socket, history, *, notify, completed=False):
+    pending = history.take(completed=completed)
     if pending is None:
         return
     saved = await run_in_threadpool(history.save, pending)
@@ -505,22 +537,25 @@ async def save_live_turn(socket, history, *, notify):
 
 
 async def check_transcription(socket, history, traffic):
-    if (history.language == 'vi' and not history.unclear and voice_finished(traffic)
-            and unclear_vietnamese(history.user)):
+    if history.unclear or not voice_finished(traffic):
+        return
+    fragment = incomplete_shop_phrase(history.user)
+    if fragment or history.language == 'vi' and unclear_vietnamese(history.user):
         history.unclear = True
         await socket.send_json({'type': 'interrupted'})
-        await socket.send_json({'type': 'transcript', 'role': 'user', 'text': 'Lời nói chưa rõ',
+        label = history.user.strip() if fragment else 'Lời nói chưa rõ'
+        await socket.send_json({'type': 'transcript', 'role': 'user', 'text': label,
                                 'snapshot': True, 'unclear': True, 'turn_id': history.turn_id})
 
 
 async def request_spoken_answer(upstream, answer, language, *, greeting=False):
     if language == 'en':
         direction = ('Greet the seller warmly and say exactly this one line.' if greeting else
-                     'Speak this verified answer naturally, keeping all figures and dates.')
+                     'Tell the seller this result in your own conversational voice. Keep the figures and dates.')
         text = f'{direction} Do not use any tools or add anything. {answer}'
     else:
         direction = ('Đọc đúng lời chào sau bằng giọng thân thiện.' if greeting else
-                     'Nói câu trả lời đã kiểm tra sau bằng tiếng Việt, giữ nguyên kỳ và số liệu.')
+                     'Nói kết quả sau như đang trò chuyện với chủ shop, giữ đúng kỳ và số liệu.')
         text = f'{direction} Không gọi công cụ, không thêm nội dung khác. {answer}'
     await upstream.send(json.dumps({'realtimeInput': {'text': text}}, ensure_ascii=False))
 
@@ -542,13 +577,26 @@ def direct_copy_turn(history):
 def listing_waits_for_reply(history):
     if history.listing_reply or history.delegated or planning_request(history.user):
         return False
-    if direct_copy_turn(history):
+    if direct_copy_turn(history) or listing_opening(history.user):
         return True
     if history.language != 'vi':
         return False
     title = spoken_listing_name(history.user, expecting_title=history.expecting_title)
     return bool(listing_request(history.user) or title and (title[1] or history.expecting_title)
                 or history.copy_subject and copy_choice(history.user))
+
+
+def can_stream_reply(history, actions, traffic):
+    if not traffic.get('manual_turns') or not traffic.get('awaiting_turn') or voice_finished(traffic):
+        return True
+    # Some provider transcripts never set finished. After the client closed
+    # the mic turn, a complete sentence can unlock audio for an ordinary reply.
+    # Tool and confirmation authorization still uses voice_finished().
+    speech = history.user.rstrip()
+    return (speech.endswith(('.', '?', '!', '…')) and len(speech.split()) >= 3
+            and not (actions.pending or history.expecting_title or history.copy_subject or history.draft_copy_offer)
+            and not incomplete_shop_phrase(speech)
+            and not (history.language == 'vi' and unclear_vietnamese(speech)))
 
 
 async def forward_response(socket, upstream, token, history, traffic, actions):
@@ -565,6 +613,7 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
     sales_by = None
     generation_complete = False
     waiting_for_tool_reply = False
+    assistant_final = False
     deferred_audio = []
     deferred_size = 0
     deferred_caption = False
@@ -649,6 +698,7 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
             await socket.send_json({'type': 'interrupted'})
             first_audio_at = None
             tool_seconds = 0.0
+            assistant_final = False
         for key, role in (('inputTranscription', 'user'), ('outputTranscription', 'assistant')):
             transcription = content.get(key) or {}
             text = transcription.get('text')
@@ -661,6 +711,7 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
                             or not history.delegated and is_product_archive_request(history.user)):
                         continue
                     waiting_for_tool_reply = False
+                    assistant_final = final or assistant_final
                 previous = history.user if role == 'user' else history.assistant
                 if role == 'user' and final:
                     traffic['speech_finished'] = True
@@ -670,13 +721,13 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
                     await check_transcription(socket, history, traffic)
                     if (traffic.get('awaiting_turn') and not history.unclear and listing_waits_for_reply(history)
                             and (history.user != previous or final)):
-                        listing_by = loop.time() + (.45 if final else .9)
+                        listing_by = loop.time() + (.28 if final and listing_opening(history.user) else .45 if final else .9)
                     if traffic.get('awaiting_turn') and (history.user != previous or final):
                         sales_by = loop.time() + .9 if sales_waiting(socket, history) else None
                 if not history.unclear:
                     snapshot = history.user if role == 'user' else history.assistant
                     if snapshot and (snapshot != previous or final):
-                        if role == 'assistant' and traffic.get('manual_turns') and traffic.get('awaiting_turn') and not voice_finished(traffic):
+                        if role == 'assistant' and not can_stream_reply(history, actions, traffic):
                             deferred_caption = True
                         else:
                             if role == 'assistant':
@@ -698,8 +749,11 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
         hold_reply = (sales_waiting(socket, history) or listing_waits_for_reply(history) or
                       not history.delegated and is_product_archive_request(history.user))
         if not content.get('interrupted') and not history.unclear and not hold_reply:
+            streaming = can_stream_reply(history, actions, traffic)
+            if streaming and (deferred_audio or deferred_caption):
+                await release_output()
             for encoded in model_audio(content):
-                if traffic.get('manual_turns') and traffic.get('awaiting_turn') and not voice_finished(traffic):
+                if not streaming:
                     if deferred_size + len(encoded) <= 512_000:
                         deferred_audio.append(encoded)
                         deferred_size += len(encoded)
@@ -733,20 +787,27 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
         if listing_by is not None and not listing_waits_for_reply(history):
             listing_by = None
         completed = content.get('turnComplete') and content.get('interactionStatus') != 'IN_PROGRESS'
+        if (traffic.get('manual_turns') and content.get('generationComplete') and generation_complete
+                and first_audio_at is not None and not hold_reply and not actions.pending):
+            # Gemini can hold turnComplete while it estimates speaker playback.
+            # The client already tracks actual playback and can queue the next turn.
+            completed = True
         now = loop.time()
         if sales_by is not None and not sales_waiting(socket, history):
             sales_by = None
-        if sales_by is not None and now >= sales_by:
+        expedited = any(value is not None and now >= value for value in (sales_by, listing_by))
+        if expedited:
             complete_by = now
-            sales_by = None
-        if listing_by is not None and now >= listing_by:
-            complete_by = now
-            listing_by = None
         if traffic.get('manual_turns') and (completed or complete_by is not None):
-            if (content or replies) and (tool_count < MAX_TOOLS_PER_TURN or not waiting_for_tool_reply):
+            if not expedited and (content or replies) and (tool_count < MAX_TOOLS_PER_TURN or not waiting_for_tool_reply):
                 # Audio and both transcriptions can follow an early turnComplete.
                 # Keep those chunks in the same turn until output settles.
-                tail = 7.0 if waiting_for_tool_reply else .55 if generation_complete else 1.45
+                if waiting_for_tool_reply:
+                    tail = 7.0
+                elif generation_complete:
+                    tail = .12 if assistant_final else .45
+                else:
+                    tail = 1.45
                 if traffic.get('awaiting_turn') and not traffic.get('speech_finished'):
                     tail = max(tail, .75)
                 complete_by = now + tail
@@ -759,6 +820,7 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
             audio_finished = generation_complete
             generation_complete = False
             waiting_for_tool_reply = False
+            assistant_final = False
             traffic['settled_input'] = True
             await check_transcription(socket, history, traffic)
             unclear = history.unclear
@@ -778,8 +840,8 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
                     continue
             spoken_title = spoken_listing_name(history.user)
             if (not unclear and not history.delegated and not history.listing_reply and voice_finished(traffic)
-                    and (direct_copy_turn(history) or history.copy_subject or history.expecting_title or listing_request(history.user)
-                         or spoken_title and spoken_title[1])
+                    and (listing_opening(history.user) or direct_copy_turn(history) or history.copy_subject
+                         or history.expecting_title or listing_request(history.user) or spoken_title and spoken_title[1])
                     and not planning_request(history.user)):
                 if reply := await actions.listing_copy():
                     history.assistant = ''
@@ -824,14 +886,13 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
             first_audio_at = None
             tool_count = 0
             tool_seconds = 0.0
-            saved = traffic['save_task'] = asyncio.create_task(save_live_turn(socket, history, notify=True))
+            saved = traffic['save_task'] = asyncio.create_task(save_live_turn(socket, history, notify=True, completed=True))
             await asyncio.shield(saved)
             traffic.pop('save_task', None)
             if traffic.get('provider_draining'):
                 return
             if unclear:
-                await upstream.send(json.dumps({'realtimeInput': {'text':
-                    'Thông báo ứng dụng: lượt nói vừa rồi không rõ. Chỉ nói đúng một câu sau rồi chờ. ' + REPEAT_QUESTION}}))
+                await request_spoken_answer(upstream, repeat_question(history.language), history.language)
 
 
 async def relay(socket, upstream, token, history, *, manual_turns, started):
@@ -852,10 +913,15 @@ async def relay(socket, upstream, token, history, *, manual_turns, started):
         for task in done:
             try:
                 task.result()
-            except ConnectionClosed:
+            except ConnectionClosed as error:
                 if not manual_turns:
                     raise
                 reconnect = True
+                if problem := live_provider_failure(error):
+                    raise problem from None
+            except LiveProviderError:
+                reconnect = manual_turns
+                raise
         finishing = microphone in done and microphone.exception() is None and microphone.result() is True
         reconnect = reconnect or manual_turns and microphone not in done
     finally:
@@ -883,7 +949,7 @@ async def open_live_transport(socket, attempt, transport, setup, history_message
         ready = read_json(await upstream.recv(), 1_000_000)
         check_live_provider_error(ready)
         if 'setupComplete' not in ready:
-            raise LiveError('Gemini chưa mở được phiên Live. Kiểm tra quyền sử dụng model trong AI Studio.')
+            raise LiveProviderError('unavailable')
         if history_messages:
             await upstream.send(json.dumps({'clientContent': {'turnComplete': True, 'turns': [
                 {'role': 'model' if row['role'] == 'assistant' else 'user',
@@ -911,41 +977,64 @@ async def open_live_transport(socket, attempt, transport, setup, history_message
 async def connect_live(socket, keys, voice, history, *, manual_turns):
     started = monotonic()
     tried = set()
+    transient_failure = None
     messages, focus = await run_in_threadpool(history.initial_context)
     setup = json.dumps(live_setup(history.model, voice, history.language, manual_turns=manual_turns,
                                   initial_history=bool(messages), focus=focus), ensure_ascii=False)
     while credential := keys.available(excluded=tried, reserve=True):
         remaining = LIVE_CONNECT_BUDGET - (monotonic() - started)
         if remaining <= 0:
-            raise TimeoutError
+            raise LiveProviderError('unavailable')
         tried.add(credential.slot)
+        attempt_started = monotonic()
         connected = False
         try:
             async with AsyncExitStack() as attempt:
-                async with asyncio.timeout(min(remaining, 12)):
+                async with asyncio.timeout(min(remaining, 7)):
                     transport = connect(
                         GEMINI_LIVE_URL, additional_headers={'x-goog-api-key': credential.secret},
-                        open_timeout=min(remaining, 8), close_timeout=2, max_size=1_000_000, max_queue=8,
+                        open_timeout=min(remaining, 7), close_timeout=2, max_size=1_000_000, max_queue=8,
                     )
                     upstream = await open_live_transport(socket, attempt, transport, setup, messages)
                 connected = True
                 logger.info('Live upstream ready: slot=%d model=%s elapsed_ms=%d',
                             credential.slot, history.model, round((monotonic() - started) * 1000))
                 return await relay(socket, upstream, history.token, history, manual_turns=manual_turns, started=started)
-        except (LiveKeyError, ConnectionClosed, InvalidStatus) as error:
-            problem = live_key_failure(error)
+        except (LiveProviderError, WebSocketException, OSError) as error:
+            problem = live_provider_failure(error)
             if problem is None:
-                raise
-            if problem.reason == 'rate_limited':
-                keys.rate_limited(credential, problem.retry_after)
-            else:
+                if connected:
+                    raise
+                problem = LiveProviderError('unavailable')
+            if problem.reason in ('rate_limited', 'billing'):
+                keys.rate_limited(credential, problem.retry_after, reason=problem.reason)
+            elif problem.reason == 'rejected':
                 keys.disable(credential)
-            logger.warning('Gemini Live key unavailable: slot=%d reason=%s', credential.slot, problem.reason)
-            # A live turn may already have changed shop data. Preserve its history
-            # instead of replaying that turn on a new upstream session.
-            if connected:
+            elif problem.reason == 'unavailable':
+                transient_failure = problem
+            logger.warning('Gemini Live connection failed: slot=%d model=%s stage=%s reason=%s error=%s elapsed_ms=%d',
+                           credential.slot, history.model, 'session' if connected else 'setup', problem.reason,
+                           type(error).__name__, round((monotonic() - attempt_started) * 1000))
+            if problem.reason == 'configuration':
                 raise problem from None
-    raise LiveKeyError('rejected' if all(key.disabled for key in keys.credentials) else 'rate_limited')
+            # A live turn may already have changed shop data. Preserve its history
+            # and let the client open a fresh connection without replaying audio.
+            if connected:
+                if manual_turns and keys.available():
+                    return {'type': 'reconnecting'}
+                raise problem from None
+    if transient_failure:
+        raise transient_failure from None
+    eligible = [key for key in keys.credentials if not key.disabled]
+    if not eligible:
+        raise LiveProviderError('rejected')
+    cooldowns = [cooldown for key in eligible if (cooldown := keys.cooldown(key))]
+    limits = [seconds for reason, seconds in cooldowns if reason == 'rate_limited']
+    if limits:
+        raise LiveProviderError('rate_limited', min(limits))
+    if cooldowns:
+        raise LiveProviderError('billing')
+    raise LiveProviderError('unavailable')
 
 
 @router.websocket('/live')
@@ -994,16 +1083,17 @@ async def live(socket: WebSocket):
     except WebSocketDisconnect:
         return
     except (LiveError, HTTPException, TimeoutError, WebSocketException, OSError, RuntimeError) as error:
-        if isinstance(error, HTTPException):
+        if isinstance(error, LiveProviderError):
+            failure = error.event()
+        elif isinstance(error, HTTPException):
             message = (error.detail.get('message') if isinstance(error.detail, dict) else error.detail)
+            failure = {'type': 'error', 'message': message}
         elif isinstance(error, LiveError):
-            message = str(error)
-        elif isinstance(error, (ConnectionClosed, InvalidStatus)):
-            message = 'Gemini Live chưa sẵn sàng. Kiểm tra model, quyền API và hạn mức trong AI Studio.'
+            failure = {'type': 'error', 'message': str(error)}
         else:
-            message = 'Chưa kết nối được Live. Kiểm tra mạng rồi thử lại.'
+            failure = LiveProviderError('unavailable').event()
         try:
-            await socket.send_json({'type': 'error', 'message': message})
+            await socket.send_json(failure)
         except (WebSocketDisconnect, RuntimeError, OSError):
             pass
     finally:

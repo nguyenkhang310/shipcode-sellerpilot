@@ -20,9 +20,12 @@ if (command === 'setup') {
   console.log('Đã tạo khóa ghép nối local; không in khóa ra terminal. Khởi động lại backend sau khi setup lần đầu.');
 } else if (command === 'build') {
   if (!fs.existsSync(configFile)) throw Error('Chạy npm run extension:setup trước.');
-  const built = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build', '--workspace', 'frontend'], {
+  const windows = process.platform === 'win32';
+  const buildArgs = ['run', 'build', '--workspace', 'frontend'];
+  const built = spawnSync(windows ? 'cmd.exe' : 'npm', windows ? ['/d', '/c', 'npm.cmd', ...buildArgs] : buildArgs, {
     cwd: root, stdio: 'inherit', env: {...process.env, EXPO_NO_TELEMETRY: '1', CI: '1', EXPO_PUBLIC_API_URL: 'http://127.0.0.1:8000/api/v1', EXPO_PUBLIC_STORE_URL: 'http://127.0.0.1:5011'},
   });
+  if (built.error) throw built.error;
   if (built.status !== 0) process.exit(built.status || 1);
   const output = path.join(source, 'dist');
   fs.rmSync(output, {recursive: true, force: true});

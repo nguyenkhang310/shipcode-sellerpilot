@@ -2,49 +2,37 @@ export const REPLY_SAMPLE_RATE = 24_000;
 export const MAX_PLAYBACK_SECONDS = 45;
 export const NATIVE_REPLY_RATE = 1.08;
 export const WEB_REPLY_RATE = 1.05;
-const MIN_VOICE_GAIN = 2.15;
-const MAX_VOICE_GAIN = 3.65;
-const TARGET_VOICE_RMS = .20;
+const MAX_VOICE_GAIN = 5.25;
+const TARGET_VOICE_RMS = .27;
 const GAIN_WINDOW = REPLY_SAMPLE_RATE / 50;
 
-const PAUSE_BLOCK = REPLY_SAMPLE_RATE / 50;
-const QUIET_BLOCKS = 7;
-const MIN_LEAD_SAMPLES = REPLY_SAMPLE_RATE * .9;
-const LEAD_AHEAD_BYTES = REPLY_SAMPLE_RATE * 2 * .34;
-
-/** Find one quiet join for starting native playback before a long reply finishes. */
-export class ReplyLead {
-  private samples = 0;
-  private energy = 0;
-  private quiet = 0;
-  private hasSpeech = false;
-  private cut = 0;
-
-  observe(pcm: Uint8Array, bufferedBytes: number) {
-    if (!this.cut && this.samples < REPLY_SAMPLE_RATE * 5) {
-      const samples = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-      for (let offset = 0; offset + 1 < pcm.length; offset += 2) {
-        const sample = samples.getInt16(offset, true) / 32768;
-        this.energy += sample * sample;
-        this.samples++;
-        if (this.samples % PAUSE_BLOCK) continue;
-        const quiet = this.energy / PAUSE_BLOCK <= .008 ** 2;
-        this.energy = 0;
-        if (quiet) this.quiet++;
-        else { this.quiet = 0; this.hasSpeech = true; }
-        if (this.hasSpeech && this.samples >= MIN_LEAD_SAMPLES && this.quiet >= QUIET_BLOCKS) {
-          this.cut = 2 * this.samples - PAUSE_BLOCK * QUIET_BLOCKS;
-          break;
-        }
-      }
+/** Start playback quickly and prefer a quiet boundary in each subsequent clip. */
+export function replyClipBytes(pcm: Uint8Array, first: boolean) {
+  const bytesPerMs = REPLY_SAMPLE_RATE * 2 / 1000;
+  const end = (first ? 440 : 760) * bytesPerMs;
+  if (pcm.length < end) return 0;
+  const samples = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  const window = 10 * bytesPerMs;
+  for (let offset = end; offset > end - 110 * bytesPerMs; offset -= window) {
+    let energy = 0;
+    for (let i = offset - window; i < offset; i += 2) {
+      const value = samples.getInt16(i, true);
+      energy += value * value;
     }
-    return this.cut && bufferedBytes - this.cut >= LEAD_AHEAD_BYTES ? this.cut : 0;
+    if (energy / (window / 2) < (32768 * .008) ** 2) return offset - window / 2;
   }
+  let cut = end;
+  let smallest = Infinity;
+  for (let offset = end - 5 * bytesPerMs; offset < end; offset += 2) {
+    const peak = Math.abs(samples.getInt16(offset - 2, true)) + Math.abs(samples.getInt16(offset, true));
+    if (peak < smallest) { smallest = peak; cut = offset; }
+  }
+  return cut;
 }
 
 /** Normalize gradually across PCM packets and limit peaks before output. */
 export class ReplyVolume {
-  private gain = 2.75;
+  private gain = 3.3;
   private target = this.gain;
   private energy = 0;
   private count = 0;
@@ -54,7 +42,7 @@ export class ReplyVolume {
     if (++this.count === GAIN_WINDOW) {
       const rms = Math.sqrt(this.energy / this.count);
       // Keep the last gain through quiet parts, including breaths and pauses.
-      if (rms > .025) this.target = Math.min(MAX_VOICE_GAIN, Math.max(MIN_VOICE_GAIN, TARGET_VOICE_RMS / rms));
+      if (rms > .015) this.target = Math.min(MAX_VOICE_GAIN, Math.max(1, TARGET_VOICE_RMS / rms));
       this.energy = this.count = 0;
     }
     this.gain += (this.target - this.gain) * (this.target < this.gain ? .003 : .0006);

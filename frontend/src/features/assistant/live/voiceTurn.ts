@@ -1,9 +1,47 @@
-const START_MS = 65;
+const START_MS = 60;
 const SHORT_PAUSE_MS = 850;
 const LONG_PAUSE_MS = 1120;
 
 export const LIVE_WAVE_POINTS = 12;
-export type MicFrame = { pcm: Uint8Array; rate: number };
+export type MicFrame = { pcm: Uint8Array; rate: number; rms: number };
+
+/** Reduce low-frequency rumble and raise quiet speech. Detect speech before applying gain. */
+export class MicSignal {
+  private previousInput = 0;
+  private previousOutput = 0;
+  private gain = 1;
+
+  reset() {
+    this.previousInput = this.previousOutput = 0;
+    this.gain = 1;
+  }
+
+  process(raw: Uint8Array, rate: number): MicFrame {
+    const source = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+    const pcm = new Uint8Array(raw.length);
+    const output = new DataView(pcm.buffer);
+    const coefficient = Math.exp(-2 * Math.PI * 78 / rate);
+    let energy = 0;
+    for (let offset = 0; offset + 1 < raw.length; offset += 2) {
+      const input = source.getInt16(offset, true);
+      const filtered = coefficient * (this.previousOutput + input - this.previousInput);
+      this.previousInput = input;
+      this.previousOutput = filtered;
+      energy += filtered * filtered;
+      output.setInt16(offset, Math.max(-32768, Math.min(32767, filtered)), true);
+    }
+    const rms = Math.sqrt(energy / Math.max(1, raw.length >> 1)) / 32768;
+    const target = rms >= .004 ? Math.max(1, Math.min(3.2, .08 / rms)) : 1;
+    const previousGain = this.gain;
+    this.gain += (target - this.gain) * (target > this.gain ? .45 : .7);
+    for (let offset = 0; offset + 1 < pcm.length; offset += 2) {
+      const gain = previousGain + (this.gain - previousGain) * (offset + 2) / pcm.length;
+      const sample = Math.max(-31456, Math.min(31456, output.getInt16(offset, true) * gain));
+      output.setInt16(offset, Math.round(sample), true);
+    }
+    return { pcm, rate, rms };
+  }
+}
 
 /** Keep a bounded prefix while connecting or waiting for the next utterance. */
 export class MicPrefix {
@@ -79,8 +117,12 @@ export class VoiceTurn {
   }
 
   audible(level: number) {
-    const threshold = this.active ? this.floor * 1.45 + .001 : this.floor * 2.2 + .0015;
-    return level >= Math.max(this.active ? .003 : .004, Math.min(.013, threshold));
+    return level >= this.threshold();
+  }
+
+  private threshold() {
+    const level = this.active ? this.floor * 1.45 + .0008 : this.floor * 2 + .0012;
+    return Math.max(this.active ? .0024 : .0033, Math.min(.013, level));
   }
 
   finish() {
@@ -94,11 +136,12 @@ export class VoiceTurn {
     if (!this.active) {
       if (!voice) {
         this.floor += (Math.max(.0004, level) - this.floor) * .12;
-        this.onsetMs = 0;
+        this.onsetMs = Math.max(0, this.onsetMs - durationMs * .55);
         return 'hold';
       }
       this.onsetMs += durationMs;
-      if (this.onsetMs < START_MS) return 'hold';
+      const onset = level >= this.threshold() * 2.2 ? 40 : START_MS;
+      if (this.onsetMs < onset) return 'hold';
       this.speechMs = this.onsetMs;
       this.active = true;
       return 'start';

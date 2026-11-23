@@ -108,6 +108,8 @@ async function ready(url, timeout = 45_000) {
   while (!stopping && Date.now() < deadline) {
     try {
       const response = await fetch(url, {signal: AbortSignal.timeout(1500)});
+      // Drain the body before the development server closes its connection.
+      await response.arrayBuffer();
       if (response.ok) return;
     } catch { /* service is still starting */ }
     await new Promise(resolve => setTimeout(resolve, 350));
@@ -130,13 +132,14 @@ async function main() {
     if (probe.status !== 0) throw new Error(`Môi trường ${folder}/.venv cần Python 3.11 trở lên có hỗ trợ scrypt. Cài lại môi trường theo README; giữ nguyên .env và database shop.`);
   }
   if (!existsSync(path.join(root, 'UTE MALL/.env'))) throw new Error('Chưa cấu hình Shopee Demo. Chạy bootstrap_demo.py theo README trước.');
+  const pythonEnv = windows ? {PYTHONIOENCODING: 'utf-8', ...process.env} : process.env;
   await new Promise((resolve, reject) => {
-    const check = spawn(python('backend'), ['-m', 'app.scripts.check_store'], {cwd: path.join(root, 'backend'), env: process.env, stdio: 'inherit'});
+    const check = spawn(python('backend'), ['-m', 'app.scripts.check_store'], {cwd: path.join(root, 'backend'), env: pythonEnv, stdio: 'inherit'});
     check.on('error', reject);
     check.on('exit', code => code === 0 ? resolve() : reject(new Error('Chưa khởi động vì nguồn dữ liệu app và Kênh Người Bán không khớp.')));
   });
   const migration = spawnSync(python('backend'), ['-m', 'app.scripts.migrate', '--check'], {
-    cwd: path.join(root, 'backend'), env: process.env, stdio: 'inherit',
+    cwd: path.join(root, 'backend'), env: pythonEnv, stdio: 'inherit',
   });
   if (migration.status !== 0) throw new Error('Migration chưa sẵn sàng. Làm theo hướng dẫn phía trên rồi chạy lại npm run demo.');
   // An external STORE_DATABASE_PATH is supported; the store/API startup validates it.
@@ -144,7 +147,7 @@ async function main() {
   if (process.argv.includes('--check')) { console.log('Môi trường và cổng 5011/8000/8081 sẵn sàng.'); return; }
   process.on('SIGINT', () => stop('SIGINT'));
   process.on('SIGTERM', () => stop());
-  const env = {...process.env, HOST: '0.0.0.0', PYTHONUNBUFFERED: '1'};
+  const env = {...pythonEnv, HOST: '0.0.0.0', PYTHONUNBUFFERED: '1'};
   const backend = path.join(root, 'backend');
   // Run migrations before API startup, just like backend/run_api.sh.
   await new Promise((resolve, reject) => {

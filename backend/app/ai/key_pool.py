@@ -66,7 +66,7 @@ class GeminiKeyPool:
         self.rpm = rpm
         self._cursor = 0
         self._used = defaultdict(deque)
-        self._cooldown = defaultdict(float)
+        self._cooldown = {}
 
     def available(self, *, excluded=(), reserve=False):
         now = monotonic()
@@ -78,7 +78,7 @@ class GeminiKeyPool:
             while used and used[0] <= now - 60:
                 used.popleft()
             if (credential.slot in excluded or credential.disabled
-                    or self._cooldown[credential.cooldown_scope] > now
+                    or self.cooldown(credential, now=now)
                     or (self.rpm is not None and len(used) >= self.rpm)):
                 continue
             if reserve:
@@ -88,9 +88,16 @@ class GeminiKeyPool:
             return credential
         return None
 
-    def rate_limited(self, credential, seconds=60):
+    def cooldown(self, credential, *, now=None):
+        until, reason = self._cooldown.get(credential.cooldown_scope, (0, ''))
+        remaining = until - (monotonic() if now is None else now)
+        return (reason, remaining) if remaining > 0 else None
+
+    def rate_limited(self, credential, seconds=60, *, reason='rate_limited'):
         scope = credential.cooldown_scope
-        self._cooldown[scope] = max(self._cooldown[scope], monotonic() + seconds)
+        until = monotonic() + seconds
+        if until >= self._cooldown.get(scope, (0, ''))[0]:
+            self._cooldown[scope] = (until, reason)
 
     def disable(self, credential):
         credential.disabled = True

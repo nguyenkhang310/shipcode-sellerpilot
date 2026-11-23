@@ -70,7 +70,10 @@ export function createLiveAudio(callbacks: AudioCallbacks): LiveAudio {
       };
       const capture = navigator.mediaDevices.getUserMedia({ audio: constraints }).then(captured => {
         if (closed) captured.getTracks().forEach(track => track.stop());
-        else stream = captured;
+        else {
+          stream = captured;
+          captured.getAudioTracks().forEach(track => { track.enabled = !muted; });
+        }
         return captured;
       }, () => { throw new Error('Chưa mở được micro. Cho phép truy cập micro trong trình duyệt rồi thử lại.'); });
       const module = context.audioWorklet.addModule(script).finally(() => URL.revokeObjectURL(script));

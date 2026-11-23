@@ -14,10 +14,11 @@ import { money } from '../../dashboard/formatters';
 import { pickProductImages, type PendingImage } from '../productImages';
 import { createLiveAudio } from './audio';
 import type { LiveAudio } from './audioTypes';
+import { GreetingRotation, LIVE_GREETINGS } from './greetings';
 import { LiveOrb } from './LiveOrb';
 import { noteNativeAudioRelease, runNativeAudioWork, waitForNativeAudioRelease } from './nativeAudioSession';
-import { LIVE_WAVE_POINTS, MicPrefix, pcmLevel, readMicWave, VoiceTurn, type MicFrame } from './voiceTurn';
-import { LIVE_TEXT, type LiveLanguage, type LivePreferences } from './locale';
+import { LIVE_WAVE_POINTS, MicPrefix, MicSignal, pcmLevel, readMicWave, VoiceTurn, type MicFrame } from './voiceTurn';
+import { LIVE_TEXT, liveErrorMessage, type LiveLanguage, type LivePreferences } from './locale';
 import { liveMessageKey, upsertCaption, type LiveCaption } from './timeline';
 
 export type { LiveCaption } from './timeline';
@@ -33,7 +34,7 @@ export type LiveShopResult = {
   sales_context?: { sales_metric?: string; compare_yesterday?: boolean };
 };
 type LiveEvent =
-  | { type: 'ready'; turn_protocol?: number; greeting_count?: number }
+  | { type: 'ready'; turn_protocol?: number }
   | { type: 'audio_received' | 'interrupted' | 'audio_end' | 'finished' | 'reconnecting' }
   | { type: 'turn_end'; clear_captions?: boolean; turn_id?: string }
   | { type: 'audio'; data: string; review?: boolean }
@@ -43,11 +44,13 @@ type LiveEvent =
   | { type: 'archive_review'; name: string }
   | { type: 'action_done'; changed: boolean; message: string; draft: ProductDraft | null }
   | { type: 'shop_result' } & LiveShopResult
-  | { type: 'error' | 'ended' | 'image_rejected'; message: string };
+  | { type: 'error'; message: string; code?: string; retryable?: boolean }
+  | { type: 'ended' | 'image_rejected'; message: string };
 
 type Session = {
   conversationId: string;
   voice: VoiceTurn;
+  micSignal: MicSignal;
   preRoll: MicPrefix;
   startup: MicPrefix;
   captured: boolean;
@@ -69,7 +72,6 @@ type Session = {
   fallbackTurn: string;
   captions: Map<string, LiveCaption>;
   closedTurns: Set<string>;
-  visibleUserTurns: Set<string>;
   captionTimer?: ReturnType<typeof setTimeout>;
   muted: boolean;
   picking: boolean;
@@ -95,17 +97,36 @@ type Props = {
 export type LiveConversationHandle = { start: () => void; openOrder: (id: number) => void };
 
 const USE_NATIVE_DRIVER = Platform.OS !== 'web';
-const ENTER_CUE = require('../../../../assets/sellerpilot-live-enter.wav');
 const EXIT_CUE = require('../../../../assets/sellerpilot-live-exit.wav');
+const GREETING_TIMEOUT = 6500;
+const MAX_RECONNECTS = 2;
+const STABLE_CONNECTION_MS = 15_000;
+const greetingRotation = new GreetingRotation();
 
 function sendPcm(socket: WebSocket, pcm: Uint8Array, rate: number) {
-  const size = Math.floor(rate / 2) * 2;
+  const size = Math.min(30_000, Math.floor(rate / 2) * 2);
   for (let offset = 0; offset < pcm.length; offset += size) {
     socket.send(JSON.stringify({ type: 'audio', rate, data: fromByteArray(pcm.subarray(offset, offset + size)) }));
   }
 }
 
-function playCue(source: number | string, afterNativeRelease = false) {
+function sendPrefix(socket: WebSocket, frames: MicFrame[]) {
+  const rate = frames[0]?.rate;
+  if (!rate) return;
+  if (frames.some(frame => frame.rate !== rate)) {
+    for (const frame of frames) sendPcm(socket, frame.pcm, frame.rate);
+    return;
+  }
+  const prefix = new Uint8Array(frames.reduce((bytes, frame) => bytes + frame.pcm.length, 0));
+  let offset = 0;
+  for (const { pcm } of frames) {
+    prefix.set(pcm, offset);
+    offset += pcm.length;
+  }
+  sendPcm(socket, prefix, rate);
+}
+
+function playCue(source: number, { afterNativeRelease = false, timeout = 700, rate = 1 } = {}) {
   let stop = () => {};
   const done = new Promise<void>(resolve => {
     let player: ReturnType<typeof createAudioPlayer> | undefined;
@@ -126,12 +147,15 @@ function playCue(source: number | string, afterNativeRelease = false) {
       } catch { /* The chime is optional when audio is unavailable. */ }
       resolve();
     };
-    const timer = setTimeout(finish, 700);
+    const timer = setTimeout(finish, timeout);
     stop = finish;
     async function play() {
       try {
+        const asset = Asset.fromModule(source);
         if (Platform.OS === 'web') {
-          media = new Audio(typeof source === 'string' ? source : Asset.fromModule(source).uri);
+          media = new Audio(asset.localUri ?? asset.uri);
+          media.volume = 1;
+          media.playbackRate = rate;
           media.onended = finish;
           media.onerror = finish;
           await media.play();
@@ -139,10 +163,15 @@ function playCue(source: number | string, afterNativeRelease = false) {
         }
         await runNativeAudioWork(async () => {
           if (afterNativeRelease) await waitForNativeAudioRelease();
-          if (active) await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+          if (active) await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldRouteThroughEarpiece: false });
         });
         if (!active) return;
-        player = createAudioPlayer(source, { keepAudioSessionActive: true, updateInterval: 40 });
+        player = createAudioPlayer(asset.localUri ?? source, { keepAudioSessionActive: true, updateInterval: 40 });
+        player.volume = 1;
+        if (rate !== 1) {
+          player.shouldCorrectPitch = true;
+          player.setPlaybackRate(rate, 'high');
+        }
         subscription = player.addListener('playbackStatusUpdate', state => {
           if (state.didJustFinish || state.duration > 0 && state.currentTime >= state.duration - .02) finish();
         });
@@ -167,16 +196,16 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
   const microphone = useRef(new Float32Array(LIVE_WAVE_POINTS));
   const lastVoiceAt = useRef(0);
   const voiceActive = useRef(false);
-  const cues = useRef<{ enter: number | string; exit: number | string }>({ enter: ENTER_CUE, exit: EXIT_CUE });
   const exitCue = useRef<ReturnType<typeof playCue> | null>(null);
-  const nextGreeting = useRef<Partial<Record<LiveLanguage, number>>>({});
   const [phase, setPhase] = useState<'idle' | 'connecting' | 'reconnecting' | 'live'>('idle');
   const [muted, setMuted] = useState(false);
   const [inputReady, setInputReady] = useState(false);
   const [captureReady, setCaptureReady] = useState(false);
   const [userSpeaking, setUserSpeaking] = useState(false);
+  const [turnActive, setTurnActive] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [greeting, setGreeting] = useState(false);
   const [listing, setListing] = useState<ProductDraft | null>(null);
   const [archiveReview, setArchiveReview] = useState('');
   const [notice, setNotice] = useState('');
@@ -204,12 +233,15 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
   }
 
   useEffect(() => {
-    // A native Metro asset can take longer to load than the chime itself.
-    for (const kind of ['enter', 'exit'] as const) {
-      const asset = Asset.fromModule(kind === 'enter' ? ENTER_CUE : EXIT_CUE);
-      void asset.downloadAsync().then(() => { if (asset.localUri) cues.current[kind] = asset.localUri; }).catch(() => {});
+    // Preload the chosen voice as soon as the chat screen can open Live.
+    const sources = [...LIVE_GREETINGS[preferences.language][preferences.voice], EXIT_CUE];
+    if (Platform.OS === 'web') {
+      void Promise.allSettled(sources.map(source => fetch(Asset.fromModule(source).uri, { cache: 'force-cache' })
+        .then(response => response.blob())));
+    } else {
+      void Asset.loadAsync(sources).catch(() => {});
     }
-  }, []);
+  }, [preferences.language, preferences.voice]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {
@@ -223,7 +255,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
       if (state === 'background') {
         if (session.finish) { session.finish(); return; }
         disconnect();
-        setSpeaking(false); setPhase('idle'); setUploading(false); setPicking(false);
+        setSpeaking(false); setGreeting(false); setPhase('idle'); setUploading(false); setPicking(false);
         setNotice('Phiên đã dừng khi bạn rời màn hình.');
       }
     });
@@ -280,25 +312,22 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
 
   function fail(message: string) {
     disconnect();
-    setSpeaking(false); setPhase('idle'); setNotice(message); setPicking(false); setUploading(false);
+    setSpeaking(false); setGreeting(false); setPhase('idle'); setNotice(message); setPicking(false); setUploading(false);
   }
 
   function sendTurn(session: Session, socket: WebSocket) {
     socket.send('{"type":"turn"}');
     session.waiting = session.manualTurns;
+    setTurnActive(false);
     setProcessing(true);
   }
 
-  function flushCaptions(session: Session, completeTurn = false) {
+  function flushCaptions(session: Session) {
     clearTimeout(session.captionTimer);
     session.captionTimer = undefined;
     if (current.current !== session || !session.captions.size) return;
-    const captions = [...session.captions.values()].filter(caption => caption.role === 'assistant' || caption.final || completeTurn);
-    if (!captions.length) return;
-    for (const caption of captions) {
-      session.captions.delete(liveMessageKey(caption.turnId, caption.role));
-      if (caption.role === 'user') session.visibleUserTurns.add(caption.turnId);
-    }
+    const captions = [...session.captions.values()];
+    session.captions.clear();
     onCaptions(items => captions.reduce(upsertCaption, items));
   }
 
@@ -307,51 +336,42 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     session.closedTurns.add(id);
     session.captions.delete(liveMessageKey(id, 'user'));
     session.captions.delete(liveMessageKey(id, 'assistant'));
-    session.visibleUserTurns.delete(id);
     if (remove) onCaptions(items => items.filter(item => item.turnId !== id));
   }
 
   async function start() {
     if (current.current || closing.current) return;
     const session: Session = { conversationId: conversationId ?? interruptedHistory.current ?? createMessageId(),
-      voice: preferences.language === 'vi' ? new VoiceTurn(1370, 970) : new VoiceTurn(),
-      preRoll: new MicPrefix(420), startup: new MicPrefix(8000), captured: false, language: preferences.language,
+      voice: preferences.language === 'vi' ? new VoiceTurn(1050, 900) : new VoiceTurn(), micSignal: new MicSignal(),
+      preRoll: new MicPrefix(1400), startup: new MicPrefix(8000), captured: false, language: preferences.language,
       ready: false, captureStarted: false, pendingHistory: false, muted: false, picking: false,
       skipOutput: false, outputOpen: false, manualTurns: false, waiting: false, playing: false, fallbackTurn: createMessageId(),
-      captions: new Map(), closedTurns: new Set(), visibleUserTurns: new Set() };
+      captions: new Map(), closedTurns: new Set() };
     current.current = session;
-    setMuted(false); setInputReady(false); setCaptureReady(false); setSpeaking(false); setUserSpeaking(false); setProcessing(false);
+    setMuted(false); setInputReady(false); setCaptureReady(false); setSpeaking(false); setUserSpeaking(false); setTurnActive(false); setProcessing(false);
     setNotice(''); setPhase('connecting'); setUploading(false); setGalleryFailed(false); setListing(null); setArchiveReview('');
     try {
-      let welcomePending = true;
-      let greetingCount = 0;
-      function greet() {
-        const socket = session.socket;
-        if (!welcomePending || session.stopCue || !session.captureStarted || !session.ready || greetingCount < 1 ||
-            current.current !== session || closing.current || socket?.readyState !== WebSocket.OPEN) return;
-        welcomePending = false;
-        if (session.voice.hasSpeech || session.waiting || session.picking) return;
-        const variant = (nextGreeting.current[session.language] ?? Math.floor(Math.random() * greetingCount)) % greetingCount;
-        socket.send(JSON.stringify({ type: 'greet', variant }));
-        nextGreeting.current[session.language] = (variant + 1) % greetingCount;
-      }
-      function forwardFrame(socket: WebSocket, frame: MicFrame, rms = pcmLevel(frame.pcm)) {
+      const copy = LIVE_TEXT[session.language];
+      function forwardFrame(socket: WebSocket, frame: MicFrame) {
         if (session.waiting) {
           session.startup.add(frame);
           return;
         }
-        const { pcm, rate } = frame;
+        const { pcm, rate, rms } = frame;
         const signal = session.voice.observe(rms, pcm.length * 500 / rate);
+        if (signal === 'start') {
+          setTurnActive(true);
+          setNotice(message => message === copy.repeatAfterReconnect ? '' : message);
+        }
         if (session.manualTurns) {
           if (signal === 'hold') {
             session.preRoll.add(frame);
             return;
           }
           if (signal === 'start') {
-            welcomePending = false;
             socket.send('{"type":"speech_start"}');
             session.pendingHistory = true;
-            for (const prefix of session.preRoll.drain()) sendPcm(socket, prefix.pcm, prefix.rate);
+            sendPrefix(socket, session.preRoll.drain());
           }
         }
         if (socket.bufferedAmount > 900_000) throw new Error('live_audio_backlog');
@@ -360,7 +380,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
       }
       session.audio = createLiveAudio({
         vietnamese: session.language === 'vi',
-        microphone(pcm, rate) {
+        microphone(raw, rate) {
           const socket = session.socket;
           if (current.current !== session || session.muted || session.picking || session.stopCue || session.readingReview) return;
           if (!session.captured) {
@@ -368,14 +388,13 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
             clearTimeout(session.inputTimeout);
             setCaptureReady(true);
           }
-          const rms = pcmLevel(pcm);
-          meterMicrophone(pcm, rms, session.voice.audible(rms));
-          const frame = { pcm, rate };
+          const frame = session.micSignal.process(raw, rate);
+          meterMicrophone(frame.pcm, frame.rms, session.voice.audible(frame.rms));
           if (!session.ready || socket?.readyState !== WebSocket.OPEN) {
             session.startup.add(frame);
             return;
           }
-          try { forwardFrame(socket, frame, rms); }
+          try { forwardFrame(socket, frame); }
           catch { fail('Mất kết nối Live. Bạn mở lại phiên nhé.'); }
         },
         speaking(value) {
@@ -397,48 +416,61 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
             watchInput(session);
           }
           setSpeaking(value);
-          if (!value) level.current = 0;
+          if (!value) {
+            level.current = 0;
+            watchInput(session);
+          }
         },
         error: message => { if (current.current === session) fail(message); },
       });
       exitCue.current?.stop();
-      const cue = playCue(cues.current.enter);
+      const cue = playCue(greetingRotation.take(preferences), { timeout: GREETING_TIMEOUT, rate: 1.08 });
       session.stopCue = cue.stop;
+      setGreeting(true);
       void cue.done.then(() => {
         session.stopCue = undefined;
-        greet();
+        if (current.current === session && !closing.current) {
+          setGreeting(false);
+          watchInput(session);
+        }
       });
       // Open the provider connection while audio initializes. Native capture still
-      // starts after the chime so it does not record the chime or cut it short.
+      // starts after the greeting so it does not record it or cut it short.
       let reconnects = 0;
       function attach() {
         const socket = session.socket = openSellerLiveSocket(session.conversationId, preferences);
-        function reconnect() {
+        let readyAt = 0;
+        function reconnect(message = copy.reconnectFailed) {
           if (current.current !== session || session.socket !== socket || closing.current) return;
-          if ((!session.ready && reconnects === 0) || reconnects >= 2) {
-            fail('Mình chưa nối lại được Live. Bạn có thể mở lại để tiếp tục.');
+          if (readyAt && Date.now() - readyAt >= STABLE_CONNECTION_MS) reconnects = 0;
+          if (reconnects >= MAX_RECONNECTS) {
+            fail(message);
             return;
           }
-          welcomePending = false;
           reconnects++;
           const droppedSpeech = session.voice.hasSpeech || session.waiting;
           session.socket = undefined;
           clearTimeout(session.watchdog);
           clearTimeout(session.inputTimeout);
           session.voice.reset();
+          session.micSignal.reset();
           session.preRoll.drain();
-          session.startup.drain();
+          if (session.ready) session.startup.drain();
           session.waiting = session.ready = session.outputOpen = session.skipOutput = false;
           session.readingReview = false;
-          session.audio?.flush();
-          setProcessing(false); setInputReady(false); setPhase('reconnecting');
-          setNotice(droppedSpeech ? 'Mất kết nối giữa chừng. Khi Live nối lại, bạn nói lại câu vừa rồi nhé.' : '');
+          session.audio?.interrupt();
+          level.current = lastVoiceAt.current = 0;
+          voiceActive.current = false;
+          microphone.current.fill(0);
+          setUserSpeaking(false); setTurnActive(false); setProcessing(false); setInputReady(false); setPhase('reconnecting');
+          if (droppedSpeech) setNotice(copy.repeatAfterReconnect);
           socket.close();
           session.reconnectTimer = setTimeout(() => {
-            if (current.current === session && !closing.current) attach();
+            if (current.current !== session || closing.current) return;
+            try { attach(); } catch { fail(copy.reconnectFailed); }
           }, reconnects * 500);
         }
-        session.watchdog = setTimeout(() => reconnects ? reconnect() : fail('Live kết nối quá lâu. Kiểm tra máy chủ rồi thử lại.'), 24_000);
+        session.watchdog = setTimeout(() => fail(copy.connectionTimeout), 24_000);
         socket.onerror = () => {
           if (current.current !== session || session.socket !== socket) return;
           if (session.finish) session.finish(); else reconnect();
@@ -454,13 +486,11 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
             switch (event.type) {
               case 'ready':
                 clearTimeout(session.watchdog);
+                readyAt = Date.now();
                 session.manualTurns = event.turn_protocol === 1;
-                greetingCount = typeof event.greeting_count === 'number' && Number.isInteger(event.greeting_count)
-                  ? event.greeting_count : 0;
                 if (session.manualTurns) setInputReady(true);
                 session.ready = true; setPhase('live');
                 for (const frame of session.startup.drain()) forwardFrame(socket, frame);
-                greet();
                 watchInput(session);
                 break;
               case 'audio_received':
@@ -495,7 +525,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
                 session.skipOutput = false;
                 session.audio?.flush();
                 if (event.clear_captions) discardCaptions(session, event.turn_id ?? session.fallbackTurn);
-                else flushCaptions(session, true);
+                else flushCaptions(session);
                 if (!event.turn_id) session.fallbackTurn = createMessageId();
                 setProcessing(false);
                 if (session.waiting && !session.finish) {
@@ -528,11 +558,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
                 session.captions.set(key, { turnId: id, role: event.role,
                   text: event.text.trim(), final: event.final || event.unclear });
                 if (event.final || event.unclear) flushCaptions(session);
-                else if (event.role === 'assistant') {
-                  const user = session.captions.get(liveMessageKey(id, 'user'));
-                  if (user && !session.visibleUserTurns.has(id)) user.final = true;
-                  session.captionTimer ??= setTimeout(() => flushCaptions(session), 100);
-                }
+                else session.captionTimer ??= setTimeout(() => flushCaptions(session), 80);
                 break;
               }
               case 'draft': setListing(event.draft); break;
@@ -549,11 +575,16 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
                 else reconnect();
                 break;
               case 'ended':
-              case 'error':
                 if (session.finish) session.finish();
-                else if (reconnects && !session.ready) reconnect();
                 else fail(event.message);
                 break;
+              case 'error': {
+                const message = liveErrorMessage(session.language, event.code, event.message);
+                if (session.finish) session.finish();
+                else if (event.retryable === true) reconnect(message);
+                else fail(message);
+                break;
+              }
             }
           } catch {
             if (session.finish) session.finish();
@@ -569,7 +600,6 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
       await session.audio.start(Platform.OS === 'web' ? undefined : cue.done);
       if (current.current !== session || closing.current) return;
       session.captureStarted = true;
-      greet();
       watchInput(session);
     } catch (error) {
       if (current.current === session) fail(error instanceof Error ? error.message : 'Chưa mở được Live.');
@@ -592,6 +622,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     setCaptureReady(false);
     if (session.manualTurns && session.voice.hasSpeech) session.waiting = true;
     session.voice.reset();
+    session.micSignal.reset();
     session.preRoll.drain();
     session.startup.drain();
     clearTimeout(session.inputTimeout);
@@ -600,12 +631,13 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     lastVoiceAt.current = 0;
     voiceActive.current = false;
     setUserSpeaking(false);
-    if (session.socket?.readyState === WebSocket.OPEN) session.socket.send('{"type":"mute"}');
+    setTurnActive(false);
+    if (session.ready && session.socket?.readyState === WebSocket.OPEN) session.socket.send('{"type":"mute"}');
   }
 
   function watchInput(session: Session) {
     clearTimeout(session.inputTimeout);
-    if (!session.ready || !session.captureStarted || session.captured || session.playing) return;
+    if (!session.ready || !session.captureStarted || session.captured || session.playing || session.muted || session.picking || session.stopCue) return;
     session.inputTimeout = setTimeout(() => {
       if (current.current === session && !session.captured && !session.playing && !session.muted && !session.picking && !closing.current) {
         fail('Chưa nhận được âm thanh từ micro. Kiểm tra micro rồi bấm Mở lại Live.');
@@ -615,7 +647,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
 
   function toggleMicrophone() {
     const session = current.current;
-    if (!session?.ready || session.picking) return;
+    if (!session || session.picking) return;
     session.muted = !session.muted;
     setMuted(session.muted);
     if (session.muted) pauseMicrophone(session);
@@ -633,7 +665,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
 
   async function selectPhoto(retry = false) {
     const session = current.current;
-    if (!session?.ready || session.picking || closing.current) return;
+    if (!session?.ready || session.picking || session.stopCue || closing.current) return;
     const limit = 6 - (listing?.status === 'collecting' || listing?.status === 'ready' ? listing.image_count : 0);
     if (!retry && limit < 1) { setNotice('Bản nháp đã có đủ 6 ảnh.'); return; }
     session.picking = true;
@@ -708,7 +740,8 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
       disconnect();
       onDrain(false, interruptedHistory.current);
     }
-    exitCue.current = playCue(cues.current.exit, true);
+    setGreeting(false);
+    exitCue.current = playCue(EXIT_CUE, { afterNativeRelease: true });
     Animated.timing(progress, {
       toValue: 0, duration: reduceMotion ? 0 : 170,
       easing: Easing.out(Easing.cubic), useNativeDriver: USE_NATIVE_DRIVER,
@@ -723,12 +756,12 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
 
   if (!visible) return null;
   const copy = LIVE_TEXT[current.current?.language ?? preferences.language];
-  const listening = phase === 'live' && inputReady && captureReady && !muted && !speaking && !picking;
-  const status = phase === 'reconnecting' ? copy.reconnecting :
+  const listening = phase === 'live' && inputReady && captureReady && !muted && !speaking && !greeting && !picking;
+  const status = greeting ? copy.greeting : phase === 'reconnecting' ? copy.reconnecting :
     phase === 'connecting' ? captureReady ? copy.buffering : copy.connecting : phase === 'idle' ? copy.retry :
     uploading ? copy.uploading : picking ? copy.choosing : speaking ? copy.speaking : muted ? copy.muted :
     userSpeaking ? copy.userSpeaking : processing ? copy.processing : captureReady ? copy.listening : copy.openingMic;
-  const canSendTurn = listening && Boolean(current.current?.voice.hasSpeech) && !processing;
+  const canSendTurn = listening && turnActive && !processing;
   const meterLabel = phase === 'idle' ? copy.retry : speaking ? copy.interrupt : canSendTurn ? copy.send : status;
   const finishSpeaking = () => {
     const session = current.current;
@@ -737,7 +770,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     try { sendTurn(session, socket); }
     catch { fail('Mất kết nối Live. Bạn mở lại phiên nhé.'); }
   };
-  const glowing = phase !== 'idle' && (!muted || speaking) && !picking;
+  const glowing = phase !== 'idle' && (!muted || speaking || greeting) && !picking;
   function control(icon: React.ComponentProps<typeof SystemIcon>['name'], label: string, action: () => void, disabled = false, end = false) {
     return <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled}
       style={({pressed}) => [styles.control, { backgroundColor: end ? IOS.redSoft : IOS.card, borderColor: end ? 'transparent' : IOS.separator },
@@ -767,7 +800,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
       </Text>
     </View> : null}
     <View style={[styles.controls, { backgroundColor: IOS.card, borderColor: IOS.separator }]}>
-      {control('images-outline', copy.addPhotos, () => void selectPhoto(), phase !== 'live' || picking)}
+      {control('images-outline', copy.addPhotos, () => void selectPhoto(), phase !== 'live' || picking || greeting)}
       <Animated.View style={[styles.meterSlot, {transform: [
         {translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [60, 0] })},
         {scaleX: progress.interpolate({ inputRange: [0, .77, 1], outputRange: [.42, 1.035, 1] })},
@@ -779,7 +812,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
         <Text testID="live-status" style={styles.status} numberOfLines={1}>{status}</Text>
       </Pressable>
       </Animated.View>
-      {control(muted ? 'mic-off-outline' : 'mic-outline', muted ? copy.enableMic : copy.disableMic, toggleMicrophone, phase !== 'live' || picking)}
+      {control(muted ? 'mic-off-outline' : 'mic-outline', muted ? copy.enableMic : copy.disableMic, toggleMicrophone, phase === 'idle' || picking)}
       {control('call-outline', copy.finish, () => close(), false, true)}
     </View>
   </Animated.View>;

@@ -10,7 +10,7 @@ from app.models.agent_run import AgentRun
 from app.services.auth import verify_seller
 from app.services.conversation_state import ensure_conversation_open
 from app.services.conversations import conversation_memory, conversation_product, history_messages, turn_data
-from app.services.live_language import merge_transcript, REPEAT_QUESTION
+from app.services.live_language import incomplete_shop_phrase, merge_transcript, repeat_question
 
 
 @dataclass
@@ -88,7 +88,7 @@ class LiveHistory:
         if selection:
             self.product_selection = selection
 
-    def take(self):
+    def take(self, *, completed=False):
         user, assistant, results = self.user.strip(), self.assistant.strip(), self.results
         delegated, decision, unclear = self.delegated, self.decision, self.unclear
         selection = self.product_selection
@@ -112,7 +112,9 @@ class LiveHistory:
         if not user and not delegated:
             return None
         if unclear and not decision:
-            user, assistant = 'Lời nói chưa rõ', REPEAT_QUESTION
+            if not incomplete_shop_phrase(user):
+                user = 'Unclear speech' if self.language == 'en' else 'Lời nói chưa rõ'
+            assistant = repeat_question(self.language)
         elif decision:
             assistant = decision[2]
         elif listing_reply:
@@ -131,8 +133,14 @@ class LiveHistory:
             elif not assistant and not delegated:
                 assistant = advice.get('answer') or advice.get('message') or ''
         elif not assistant and not delegated:
-            assistant = ('\n\n'.join(result.get('spoken_summary') or result['answer'] for result in results) if results else
-                         'Live ended before a reply.' if self.language == 'en' else 'Phiên Live đã kết thúc trước khi có câu trả lời.')
+            if results:
+                assistant = '\n\n'.join(result.get('spoken_summary') or result['answer'] for result in results)
+            elif completed:
+                assistant = ('I couldn’t answer that just now. Could you try again?' if self.language == 'en'
+                             else 'Mình chưa trả lời được câu vừa rồi. Bạn thử nói lại nhé.')
+            else:
+                assistant = ('Live ended before a reply.' if self.language == 'en'
+                             else 'Phiên Live đã kết thúc trước khi có câu trả lời.')
         return SpokenTurn(identifier, user, assistant, results, decision, delegated, selection,
                           self.copy_subject, self.copy_amounts, copy_changed, self.expecting_title)
 

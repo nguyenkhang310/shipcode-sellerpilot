@@ -350,6 +350,102 @@ def test_end_of_microphone_audio_does_not_authorize_a_partial_confirmation():
     assert not live.voice_finished({**speech, 'speech_finished': True, 'awaiting_turn': False})
 
 
+def test_live_streams_an_ordinary_reply_while_gemini_is_still_speaking(secured, monkeypatch):
+    client, _ = secured
+    heard_audio = Event()
+
+    class StreamingVoice(GeminiFixture):
+        finished_after_audio = False
+
+        async def send(self, value):
+            realtime = json.loads(value).get('realtimeInput', {})
+            if 'activityEnd' not in realtime:
+                return
+            await self.events.put(json.dumps({'serverContent': {'inputTranscription': {
+                'text': 'Bạn có khỏe không?',
+            }}}))
+            await self.events.put(json.dumps({'serverContent': {'modelTurn': {'parts': [
+                {'inlineData': {'mimeType': 'audio/pcm', 'data': 'AAABAA=='}},
+            ]}}}))
+
+            async def finish_generation():
+                self.finished_after_audio = await asyncio.to_thread(heard_audio.wait, 3)
+                await self.events.put(json.dumps({'serverContent': {
+                    'outputTranscription': {'text': 'Mình khỏe, cảm ơn bạn.', 'finished': True},
+                    'generationComplete': True,
+                }}))
+
+            asyncio.create_task(finish_generation())
+
+    upstream = StreamingVoice()
+    monkeypatch.setattr(client.app.state.settings, 'gemini_api_key', SecretStr('fixture-key'))
+    monkeypatch.setattr(live, 'connect', lambda *_, **__: upstream)
+    with client.websocket_connect('/api/v1/live') as socket:
+        socket.send_json({'type': 'auth', 'token': live_token(client), 'turn_protocol': 1})
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'speech_start'})
+        socket.send_json({'type': 'audio', 'rate': 16000, 'data': 'AAA='})
+        assert socket.receive_json()['type'] == 'audio_received'
+        socket.send_json({'type': 'turn'})
+        assert socket.receive_json()['role'] == 'user'
+        assert socket.receive_json()['type'] == 'audio'
+        heard_audio.set()
+        while (event := socket.receive_json())['type'] != 'turn_saved':
+            assert event['type'] in ('transcript', 'audio_end', 'turn_end')
+        assert upstream.finished_after_audio
+        assert 'cảm ơn bạn' in event['turn']['response']['answer']
+
+
+@pytest.mark.parametrize(('language', 'phrase', 'prompt'), [
+    ('vi', 'Muốn đăng sản phẩm.', 'Bạn muốn đăng món gì?'),
+    ('en', 'I want to list a product.', 'What would you like to list?'),
+    ('vi', 'sản phẩm', 'Bạn nói lại'),
+])
+def test_live_resolves_a_listing_opening_or_clipped_phrase_without_guessing(secured, monkeypatch, language, phrase, prompt):
+    client, _ = secured
+
+    class ListingVoice(GeminiFixture):
+        async def send(self, value):
+            packet = json.loads(value)
+            self.sent.append(packet)
+            realtime = packet.get('realtimeInput', {})
+            if 'activityEnd' in realtime:
+                await self.events.put(json.dumps({'serverContent': {'inputTranscription': {
+                    'text': phrase, 'finished': True,
+                }}}))
+                await self.events.put(json.dumps({'serverContent': {
+                    'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm', 'data': 'AAAAAA=='}}]},
+                    'outputTranscription': {'text': 'A guessed search result.'},
+                    'turnComplete': True,
+                }}))
+            if 'text' in realtime:
+                assert prompt in realtime['text']
+                await self.events.put(json.dumps({'serverContent': {
+                    'outputTranscription': {'text': prompt, 'finished': True},
+                    'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm', 'data': 'AAABAA=='}}]},
+                    'generationComplete': True, 'turnComplete': True,
+                }}))
+
+    upstream = ListingVoice()
+    monkeypatch.setattr(client.app.state.settings, 'gemini_api_key', SecretStr('fixture-key'))
+    monkeypatch.setattr(live, 'connect', lambda *_, **__: upstream)
+    with client.websocket_connect('/api/v1/live') as socket:
+        socket.send_json({'type': 'auth', 'token': live_token(client), 'preferences': {'language': language}, 'turn_protocol': 1})
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'speech_start'})
+        socket.send_json({'type': 'audio', 'rate': 16000, 'data': 'AAA='})
+        assert socket.receive_json()['type'] == 'audio_received'
+        socket.send_json({'type': 'turn'})
+        events = []
+        while not ({'audio', 'turn_saved'} <= {event['type'] for event in events}):
+            events.append(socket.receive_json())
+        saved = next(event['turn'] for event in events if event['type'] == 'turn_saved')
+        assert saved['message'] == phrase
+        assert prompt in saved['response']['answer']
+        assert not saved['response']['product_draft']
+        assert [event['data'] for event in events if event['type'] == 'audio'] == ['AAABAA==']
+
+
 def test_late_completion_cannot_close_the_next_turn_while_the_mic_is_active(secured, monkeypatch):
     client, _ = secured
 
@@ -578,6 +674,112 @@ def test_live_rotates_when_a_key_is_rejected_during_websocket_setup(secured, mon
         socket.send_json({'type': 'finish'})
         assert socket.receive_json()['type'] == 'finished'
     assert calls == ['fixture-invalid', 'fixture-valid']
+
+
+@pytest.mark.parametrize('transport', ['close', 'http', 'packet'])
+def test_live_skips_the_entire_prepaid_project_before_the_session_is_ready(secured, monkeypatch, caplog, transport):
+    client, _ = secured
+    settings = client.app.state.settings
+    for suffix, key, project in (('', 'first', 'depleted'), ('_2', 'second', 'depleted'), ('_3', 'third', 'working')):
+        monkeypatch.setattr(settings, 'gemini_api_key' + suffix, SecretStr('fixture-' + key))
+        monkeypatch.setattr(settings, 'gemini_project_id' + suffix, project)
+    calls = []
+
+    class Depleted(GeminiFixture):
+        async def recv(self):
+            if transport == 'close':
+                raise ConnectionClosedError(Close(1011, 'Your prepayment credits are depleted.'), None)
+            return '{"error":{"code":402,"message":"Your prepayment credits are depleted."}}'
+
+    def connect(_url, *, additional_headers, **_):
+        key = additional_headers['x-goog-api-key']
+        calls.append(key)
+        if key == 'fixture-first' and transport == 'http':
+            raise InvalidStatus(Response(402, 'Payment Required', Headers()))
+        return Depleted() if key == 'fixture-first' else GeminiFixture()
+
+    monkeypatch.setattr(live, 'connect', connect)
+    token = live_token(client)
+    for _ in range(2):
+        with client.websocket_connect('/api/v1/live') as socket:
+            socket.send_json({'type': 'auth', 'token': token, 'turn_protocol': 1})
+            assert socket.receive_json()['type'] == 'ready'
+            socket.send_json({'type': 'finish'})
+            assert socket.receive_json()['type'] == 'finished'
+    assert calls == ['fixture-first', 'fixture-third', 'fixture-third']
+    assert 'stage=setup reason=billing' in caplog.text
+    assert not any(key in caplog.text for key in calls)
+
+
+@pytest.mark.parametrize(('failure', 'code', 'retryable'), [
+    (Close(1011, 'Your prepayment credits are depleted.'), 'billing', False),
+    (Close(1008, 'Quota exceeded'), 'rate_limited', False),
+    (Close(1007, 'Unsupported configuration'), 'configuration', False),
+    (Close(1011, 'Internal error encountered'), 'unavailable', True),
+])
+def test_live_reports_a_specific_safe_error_when_no_key_can_open(secured, monkeypatch, failure, code, retryable):
+    client, _ = secured
+    monkeypatch.setattr(client.app.state.settings, 'gemini_api_key', SecretStr('fixture-key'))
+
+    class Failed(GeminiFixture):
+        async def recv(self):
+            raise ConnectionClosedError(failure, None)
+
+    calls = []
+
+    def connect(*_, **__):
+        calls.append(True)
+        return Failed()
+
+    monkeypatch.setattr(live, 'connect', connect)
+    token = live_token(client)
+    for _ in range(2):
+        with client.websocket_connect('/api/v1/live') as socket:
+            socket.send_json({'type': 'auth', 'token': token, 'turn_protocol': 1})
+            error = socket.receive_json()
+            assert error['type'] == 'error' and error['code'] == 'live_provider_' + code
+            assert error['retryable'] is retryable and error['message'] != failure.reason
+            if code == 'rate_limited':
+                assert 1 <= error['retry_after'] <= 60
+    assert len(calls) == (1 if code in ('billing', 'rate_limited') else 2)
+
+
+def test_live_recovers_after_billing_close_mid_session_without_replaying_audio(secured, monkeypatch):
+    client, _ = secured
+    settings = client.app.state.settings
+    monkeypatch.setattr(settings, 'gemini_api_key', SecretStr('fixture-first'))
+    monkeypatch.setattr(settings, 'gemini_api_key_2', SecretStr('fixture-second'))
+
+    class ExhaustedMidSession(GeminiFixture):
+        async def send(self, raw):
+            packet = json.loads(raw)
+            if 'audio' in packet.get('realtimeInput', {}):
+                await self.events.put(None)
+            self.sent.append(packet)
+
+        async def __anext__(self):
+            await self.events.get()
+            raise ConnectionClosedError(Close(1011, 'Your prepayment credits are depleted.'), None)
+
+    first, second = ExhaustedMidSession(), GeminiFixture()
+    attempts = iter((first, second))
+    monkeypatch.setattr(live, 'connect', lambda *_, **__: next(attempts))
+    token = live_token(client)
+    auth = {'type': 'auth', 'token': token, 'turn_protocol': 1, 'conversation_id': str(uuid4())}
+    with client.websocket_connect('/api/v1/live') as socket:
+        socket.send_json(auth)
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'speech_start'})
+        socket.send_json({'type': 'audio', 'rate': 16000, 'data': 'AAAAAA=='})
+        assert socket.receive_json()['type'] == 'audio_received'
+        assert socket.receive_json()['type'] == 'reconnecting'
+    assert not second.sent
+    with client.websocket_connect('/api/v1/live') as socket:
+        socket.send_json(auth)
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'finish'})
+        assert socket.receive_json()['type'] == 'finished'
+    assert not any('audio' in packet.get('realtimeInput', {}) for packet in second.sent)
 
 
 def test_live_does_not_replay_an_active_conversation_on_another_key(secured, monkeypatch):

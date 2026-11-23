@@ -22,7 +22,7 @@ from app.services.advisor import forget_memory, is_forget_request
 from app.services.auth import verify_seller
 from app.services.conversation_state import ensure_conversation_open
 from app.services.conversations import recent_runs
-from app.services.live_language import copy_choice, spoken_listing_name
+from app.services.live_language import copy_choice, listing_opening, spoken_listing_name
 from app.services.live_shop import strategy_summary
 from app.services.product_archive_chat import archive_target_reply
 from app.services.product_drafts import (
@@ -103,6 +103,13 @@ class LiveActions:
         if self.history.listing_reply:
             return self.history.listing_reply
         speech = self.history.user
+        if listing_opening(speech):
+            self.history.expecting_title = True
+            self.history.copy_choice_touched = True
+            self.history.listing_reply = {'accepted': True, 'answer': self.say(
+                'Được. Bạn muốn đăng món gì? Bạn có thể nói tên sản phẩm hoặc gửi ảnh nhé.',
+                'Sure. What would you like to list? You can tell me the product name or send a photo.')}
+            return self.history.listing_reply
         if self.history.draft_copy_offer and listing_copy_choice(speech) is not None:
             self.history.listing_reply = await self.ask_chat(speech)
             return self.history.listing_reply

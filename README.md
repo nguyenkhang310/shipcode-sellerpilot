@@ -362,8 +362,15 @@ vào bản nháp ngay khi chọn xong. Khi trợ lý đọc lại thông tin, b�
 «xác nhận đăng» để đăng vào gian hàng đang dùng. Nếu không chọn ảnh mới, Live
 giữ lại các ảnh đã có trong bản nháp.
 
-Live tối đa 3 phút và chỉ gửi micro sau khi bạn bắt đầu. Bản chép lời và báo cáo
+Live phát lời chào lưu sẵn theo ngôn ngữ và giọng đã chọn trong lúc kết nối.
+Micro bắt đầu nghe sau lời chào. Dùng nút mic để tắt hoặc bật trong phiên và
+chỉnh âm lượng bằng nút âm lượng của thiết bị. Live tối đa 3 phút. Bản chép lời và báo cáo
 được lưu trong cùng cuộc chat. SellerPilot không lưu bản ghi âm Live.
+
+Khi Gemini báo hết tín dụng trả trước hoặc giới hạn lượt dùng, Live thử các khóa
+khả dụng trong cùng lần kết nối. Các khóa có cùng `GEMINI_PROJECT_ID` chia sẻ thời
+gian tạm nghỉ. Lỗi mạng tạm thời được tự thử lại, còn lỗi thanh toán dẫn đến
+thông báo kiểm tra project trong AI Studio khi không còn khóa khả dụng.
 Hạn mức phụ thuộc project trong AI Studio.
 [Tài liệu Gemini Live](https://aistudio.google.com/docs/live-api).
 

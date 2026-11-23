@@ -39,6 +39,8 @@ VIETNAMESE_TERMS = ('năm xị', 'hai củ rưỡi', 'giá bán', 'tồn kho', '
                     'tiêu đề là', 'giữ nguyên tiêu đề', 'viết lại mô tả', 'bản nháp', 'biểu đồ',
                     'hàng sắp hết', 'tổng giá trị đơn hàng', 'kế hoạch bảy ngày', 'bảy ngày tới',
                     'bao nhiêu đơn hàng', 'hôm nay', 'bảy ngày qua', 'ba mươi ngày qua',
+                    'doanh thu', 'đơn chờ lấy hàng', 'đơn hoàn', 'đơn hủy', 'giao thành công',
+                    'mã phân loại', 'giá vốn', 'phí sàn', 'lợi nhuận',
                     'sản phẩm này', 'sản phẩm vừa đăng', 'tăng doanh số', 'xóa sản phẩm', 'xác nhận xóa sản phẩm')
 ENGLISH_TERMS = ('order value', 'low stock', 'tracking number', 'confirm publish', 'confirm product update',
                  'confirm order update', 'Vietnamese dong')
@@ -93,6 +95,26 @@ def unclear_vietnamese(text):
 
 
 REPEAT_QUESTION = 'Mình nghe chưa rõ. Bạn nói lại chậm hơn một chút nhé.'
+
+
+def repeat_question(language):
+    return 'I didn’t catch that. Could you say that again?' if language == 'en' else REPEAT_QUESTION
+
+
+def incomplete_shop_phrase(text):
+    return ' '.join(re.sub(r'[^a-z0-9]+', ' ', plain(text)).split()) in {'san pham', 'product', 'products'}
+
+
+def listing_opening(message):
+    text = ' '.join(re.sub(r'[^a-z0-9]+', ' ', plain(message)).split())
+    return bool(re.fullmatch(
+        r'(?:(?:minh|toi|em|anh|chi) )?(?:(?:muon|can|hay|giup (?:minh|toi|em|anh|chi)) )?'
+        r'(?:dang(?: ban)?|them) (?:mot )?(?:san pham|mon hang)(?: moi)?(?: len (?:shop|cua hang))?'
+        r'(?: giup (?:minh|toi|em|anh|chi))?(?: nhe| nha| voi)?'
+        r'|(?:(?:i (?:want|need)|i would like|i d like) to |(?:can|could) you |please )?'
+        r'(?:list|post|add|upload) (?:a |one |my )?(?:new )?(?:product|item)(?: please)?',
+        text,
+    ))
 
 
 def spoken_listing_name(message, *, expecting_title=False):
