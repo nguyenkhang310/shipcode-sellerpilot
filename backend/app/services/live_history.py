@@ -22,6 +22,10 @@ class SpokenTurn:
     decision: tuple | None
     delegated: int | None
     product_selection: dict
+    copy_subject: str | None
+    copy_amounts: list[str]
+    copy_choice_touched: bool
+    expecting_title: bool
 
 
 class LiveHistory:
@@ -39,6 +43,13 @@ class LiveHistory:
         self.decision = None
         self.product_selection = {}
         self.contextual_advice: dict | None = None
+        self.sales_reply: dict | None = None
+        self.copy_subject: str | None = None
+        self.copy_amounts: list[str] = []
+        self.copy_choice_touched = False
+        self.expecting_title = False
+        self.listing_reply: dict | None = None
+        self.draft_copy_offer = False
 
     def initial_context(self):
         shop = self.state.shop_repository
@@ -46,6 +57,13 @@ class LiveHistory:
             verify_seller(shop, session, self.token)
             ensure_conversation_open(session, shop.seller_shop_slug or 'local', self.conversation_id)
             runs, since = conversation_memory(session, shop, self.conversation_id)
+            for run in reversed(runs):
+                facts = json.loads(run.facts_json)
+                if 'live_copy_subject' in facts:
+                    self.copy_subject = facts['live_copy_subject']
+                    self.copy_amounts = facts.get('live_copy_amounts', [])
+                    self.expecting_title = facts.get('live_expecting_title', False)
+                    break
             messages = [{**row, 'content': row['content'][:420]} for row in history_messages(runs[-4:])]
             facts = conversation_product(session, shop, self.conversation_id, runs, since)
         selected = facts.get('selected_product')
@@ -75,6 +93,11 @@ class LiveHistory:
         delegated, decision, unclear = self.delegated, self.decision, self.unclear
         selection = self.product_selection
         advice = self.contextual_advice
+        sales_reply = self.sales_reply
+        listing_reply = self.listing_reply
+        copy_changed = self.copy_choice_touched
+        self.copy_choice_touched = False
+        self.listing_reply = None
         identifier = self.turn_id
         self.turn_id = str(uuid4())
         self.user = self.assistant = ''
@@ -84,6 +107,7 @@ class LiveHistory:
         self.unclear = False
         self.product_selection = {}
         self.contextual_advice = None
+        self.sales_reply = None
         user = user or (results[0]['question'] if results else '')
         if not user and not delegated:
             return None
@@ -91,6 +115,10 @@ class LiveHistory:
             user, assistant = 'Lời nói chưa rõ', REPEAT_QUESTION
         elif decision:
             assistant = decision[2]
+        elif listing_reply:
+            assistant = listing_reply.get('answer') or listing_reply.get('review') or assistant
+        elif sales_reply:
+            assistant = sales_reply['answer']
         elif advice:
             facts = advice.get('facts', {})
             focus = (facts.get('business_advisory') or {}).get('focus_product') or {}
@@ -105,12 +133,17 @@ class LiveHistory:
         elif not assistant and not delegated:
             assistant = ('\n\n'.join(result.get('spoken_summary') or result['answer'] for result in results) if results else
                          'Live ended before a reply.' if self.language == 'en' else 'Phiên Live đã kết thúc trước khi có câu trả lời.')
-        return SpokenTurn(identifier, user, assistant, results, decision, delegated, selection)
+        return SpokenTurn(identifier, user, assistant, results, decision, delegated, selection,
+                          self.copy_subject, self.copy_amounts, copy_changed, self.expecting_title)
 
     def save(self, pending: SpokenTurn):
         shop = self.state.shop_repository
         tenant = shop.seller_shop_slug or 'local'
         facts = {'voice': True, 'live_turn_id': pending.id, 'live_language': self.language, 'live_results': pending.results}
+        if pending.copy_choice_touched:
+            facts['live_copy_subject'] = pending.copy_subject
+            facts['live_copy_amounts'] = pending.copy_amounts
+            facts['live_expecting_title'] = pending.expecting_title
         if pending.product_selection:
             facts['live_product_selection'] = pending.product_selection
         order = next((result['order_id'] for result in pending.results if result.get('order_id')), None)

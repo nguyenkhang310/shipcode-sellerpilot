@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.ai.fallback import extract_price, extract_sku, normalize_text
 from app.ai.contracts import ParsedCommand
 from app.ai.context import bounded_history
-from app.ai.quick_reads import quick_read, read_text, sales_period_followup
+from app.ai.quick_reads import english_sales_text, quick_read, read_text, sales_metric_followup, sales_period_followup
 from app.ai.text import assistant_text
 from app.ai.money import money_mentions
 from app.ai.small_talk import social_reply
@@ -114,7 +114,7 @@ def contextual_read(message, runs, *, today):
     last = next((run for run in reversed(runs) if not (run.tool_name is None and social_reply(run.message))), None)
     if not last:
         return None
-    text = read_text(message)
+    text = english_sales_text(read_text(message))
     facts = json.loads(last.facts_json)
     reports = [item['sales_context'] for item in facts.get('live_results', []) if item.get('sales_context')]
     sales = facts if last.tool_name == 'get_shop_summary' else reports[0] if len(reports) == 1 else None
@@ -122,19 +122,25 @@ def contextual_read(message, runs, *, today):
         period = sales_period_followup(text, today=today)
         if period:
             return ParsedCommand(intent='shop_summary', sales_metric=sales.get('sales_metric'), **period)
-        if re.fullmatch(r'(?:(?:vay|the) )?(?:con |la )?(?:(?:bao nhieu|may|nhieu|nhiu)(?: (?:don|tien|cai|chiec))?'
-                        r'|so don|tong gia tri|xem lai so lieu)(?: thi sao)?', text):
+        related = sales_metric_followup(text, today=today)
+        if related or re.fullmatch(r'(?:(?:vay|the) )?(?:con |la )?(?:(?:bao nhieu|may|nhieu|nhiu)(?: (?:don|tien|cai|chiec))?'
+                                   r'|so don|tong gia tri|xem lai so lieu)(?: thi sao)?', text):
             end = sales.get('to_date') or sales.get('date')
-            metric = sales.get('sales_metric')
-            if text.endswith((' cai', ' chiec')):
+            metric = related.sales_metric if related else sales.get('sales_metric')
+            if related and related.model_fields_set & {'days', 'calendar_period', 'sales_period_issue'}:
+                return related
+            if not related and text.endswith((' cai', ' chiec')):
                 metric = 'units'
-            elif re.search(r'\b(?:tien|don|gia tri)\b', text) and metric == 'units':
-                metric = None
+            elif not related and re.search(r'\b(?:tien|gia tri)\b', text):
+                metric = 'order_value'
+            elif not related and re.search(r'\bdon\b', text):
+                metric = 'orders'
             if 'all_order_status_counts' in sales and metric == sales.get('sales_metric'):
                 return ParsedCommand(intent='shop_summary', sales_metric=metric)
             return ParsedCommand(intent='shop_summary', day=date.fromisoformat(end) if end else today,
                                  days=sales.get('days', 1) if not sales.get('calendar_period') else None,
-                                 calendar_period=sales.get('calendar_period'), sales_metric=metric)
+                                 calendar_period=sales.get('calendar_period'), sales_metric=metric,
+                                 compare_yesterday=sales.get('compare_yesterday', False))
     selected = facts.get('live_product_selection') or facts
     if selected.get('selected_product'):
         selected = selected['selected_product']

@@ -40,6 +40,7 @@ export function createLiveAudio(callbacks: AudioCallbacks): LiveAudio {
   const Stream = AudioModule.AudioStream;
   if (!Stream) throw new Error('Bản app này chưa hỗ trợ micro Live. Cập nhật Expo Go hỗ trợ SDK 58 hoặc mở app bằng web.');
   const stream = new Stream({ sampleRate: 16_000, channels: 1, encoding: 'int16' });
+  const playbackRate = callbacks.vietnamese ? 1.02 : NATIVE_REPLY_RATE;
   let player: ReturnType<typeof createAudioPlayer> | undefined;
   let listener: { remove: () => void } | undefined;
   let file: File | undefined;
@@ -91,13 +92,13 @@ export function createLiveAudio(callbacks: AudioCallbacks): LiveAudio {
       file = item;
       player = createAudioPlayer(item.uri, { keepAudioSessionActive: true });
       player.shouldCorrectPitch = true;
-      player.setPlaybackRate(NATIVE_REPLY_RATE, 'high');
+      player.setPlaybackRate(playbackRate, 'high');
       listener = player.addListener('playbackStatusUpdate', status => {
         if (status.didJustFinish && version === generation) next();
       });
       playbackTimeout = setTimeout(() => {
         if (!closed && version === generation) next();
-      }, Math.ceil(clip.bytes / BYTES_PER_SECOND / NATIVE_REPLY_RATE * 1000) + 2300);
+      }, Math.ceil(clip.bytes / BYTES_PER_SECOND / playbackRate * 1000) + 2300);
       player.play();
     }).catch(async () => {
       await clip.ready.catch(() => {});

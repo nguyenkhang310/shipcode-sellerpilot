@@ -21,11 +21,12 @@ from app.models.product_draft import ProductDraft
 from app.services.advisor import forget_memory
 from app.services.live_actions import LiveActions
 from app.services.live_history import LiveHistory
-from app.services.live_language import merge_transcript, unclear_vietnamese
-from app.services.live_shop import inspect_shop
+from app.services.live_language import LIVE_GREETINGS, merge_transcript, spoken_listing_name, unclear_vietnamese
+from app.services.live_shop import inspect_shop, strategy_summary
 from app.services.product_drafts import publish_product_draft
 from app.services.product_archive_chat import is_product_archive_request
 from test_auth import secured, sign_in  # noqa: F401 - pytest fixture import
+from test_listing_semantics import SemanticProvider
 
 
 class GeminiFixture:
@@ -75,6 +76,192 @@ def live_token(client):
     return response.json()['data']['token']
 
 
+@pytest.mark.parametrize('language', ['vi', 'en'])
+def test_live_greeting_plays_once_per_connection_without_saving_a_chat_turn(secured, monkeypatch, language):
+    client, _ = secured
+    conversation_id = str(uuid4())
+
+    class GreetingVoice(GeminiFixture):
+        async def send(self, value):
+            packet = json.loads(value)
+            self.sent.append(packet)
+            if 'text' in packet.get('realtimeInput', {}):
+                await self.events.put(json.dumps({'serverContent': {
+                    'outputTranscription': {'text': 'Greeting'},
+                    'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm', 'data': 'AAABAA=='}}]},
+                    'generationComplete': True, 'turnComplete': True,
+                }}))
+
+    upstream = GreetingVoice()
+    monkeypatch.setattr(client.app.state.settings, 'gemini_api_key', SecretStr('fixture-key'))
+    monkeypatch.setattr(live, 'connect', lambda *_, **__: upstream)
+    token = live_token(client)
+    with client.websocket_connect('/api/v1/live') as socket:
+        socket.send_json({'type': 'auth', 'token': token, 'turn_protocol': 1,
+                          'conversation_id': conversation_id, 'preferences': {'language': language}})
+        ready = socket.receive_json()
+        assert ready['greeting_count'] == len(set(LIVE_GREETINGS[language])) >= 4
+        socket.send_json({'type': 'greet', 'variant': True})
+        socket.send_json({'type': 'greet', 'variant': 2})
+        socket.send_json({'type': 'greet', 'variant': 3})
+        assert socket.receive_json() == {'type': 'audio', 'data': 'AAABAA=='}
+        assert socket.receive_json() == {'type': 'audio_end'}
+        socket.send_json({'type': 'finish'})
+        assert socket.receive_json()['type'] == 'finished'
+    texts = [packet['realtimeInput']['text'] for packet in upstream.sent if 'text' in packet.get('realtimeInput', {})]
+    assert len(texts) == 1 and texts[0].endswith(LIVE_GREETINGS[language][2])
+    assert client.get(f'/api/v1/conversations/{conversation_id}',
+                      headers={'Authorization': f'Bearer {token}'}).status_code == 404
+
+
+@pytest.mark.parametrize('speech, asked, expected', [
+    ('Tiêu đề là HONDA Wave Alpha – Đỏ Đen 110cc.', False, ('HONDA Wave Alpha – Đỏ Đen 110cc', True)),
+    ('HONDA Wave Alpha – Đỏ Đen 110cc.', True, ('HONDA Wave Alpha – Đỏ Đen 110cc', True)),
+    ('Này là bán xe máy', True, ('xe máy', False)),
+    ('Mình muốn đăng bán một chiếc xe máy', False, ('xe máy', False)),
+    ('Xác nhận đăng', True, None),
+])
+def test_live_distinguishes_a_dictated_title_from_a_product_hint(speech, asked, expected):
+    assert spoken_listing_name(speech, expecting_title=asked) == expected
+
+
+def test_live_copy_choice_survives_reconnect_and_only_rewrites_after_acceptance(secured):
+    client, _ = secured
+    token = live_token(client)
+    history = LiveHistory(client.app.state, token, uuid4(), 'fixture')
+    events = []
+
+    async def send(event):
+        events.append(event)
+
+    async def scenario(history):
+        socket = SimpleNamespace(app=client.app, send_json=send)
+        actions = LiveActions(socket, history)
+        traffic = {'manual_turns': True, 'speech_finished': True, 'turn_signals': 1, 'awaiting_turn': True}
+        history.user = 'Này là bán xe máy, giá 5 xị, tồn kho 20 cái.'
+        result = await live.shop_tool(socket, token, 'prepare_listing', {'name': 'Tiêu đề AI đoán'}, history, actions, traffic)
+        assert 'bắt mắt hơn' in result['answer'] and not events and not actions.load_draft()
+        history.save(history.take())
+        resumed = LiveHistory(client.app.state, token, history.conversation_id, 'fixture')
+        resumed.initial_context()
+        actions = LiveActions(socket, resumed)
+        assert resumed.copy_subject == 'xe máy'
+        resumed.user = 'Giữ nguyên.'
+        await live.shop_tool(socket, token, 'prepare_listing', {}, resumed, actions, traffic)
+        assert actions.load_draft()['name'] == 'xe máy'
+        assert actions.load_draft()['description'] is None
+        assert actions.load_draft()['price_vnd'] == 500000 and actions.load_draft()['stock'] == 20
+
+        history = LiveHistory(client.app.state, token, uuid4(), 'fixture')
+        actions = LiveActions(socket, history)
+        history.user = 'Tiêu đề là HONDA Wave Alpha – Đỏ Đen 110cc.'
+        result = await live.shop_tool(socket, token, 'prepare_listing', {'name': 'Tên khác'}, history, actions, traffic)
+        assert result['accepted']
+        assert actions.load_draft()['name'] == 'HONDA Wave Alpha – Đỏ Đen 110cc'
+
+        client.app.state.ai_provider = SemanticProvider({
+            'name': 'Xe máy màu đỏ', 'description': 'Xe máy màu đỏ do shop giới thiệu.',
+        })
+        history = LiveHistory(client.app.state, token, uuid4(), 'fixture')
+        history.copy_subject = 'xe máy'
+        actions = LiveActions(socket, history)
+        history.user = 'Viết đẹp hơn nhé.'
+        await live.shop_tool(socket, token, 'prepare_listing', {}, history, actions, traffic)
+        assert actions.load_draft()['description']
+        assert history.copy_subject is None
+
+    asyncio.run(scenario(history))
+
+
+def test_live_strategy_summary_points_to_the_written_plan():
+    summary = strategy_summary({'mode': 'business_plan', 'execution': {
+        'first_action': 'Kiểm tra tồn kho của món bán chạy nhất trước khi chạy ưu đãi.'}})
+    assert 'Kiểm tra tồn kho' in summary and 'cuộc trò chuyện' in summary
+    assert len(summary.split()) < 36
+
+
+def test_live_generates_requested_title_and_waits_before_rewriting_dictated_description(secured):
+    client, _ = secured
+    token = live_token(client)
+    history = LiveHistory(client.app.state, token, uuid4(), 'fixture')
+    provider = client.app.state.ai_provider = SemanticProvider({
+        'name': 'Bàn phím cơ màu đen Nova K75',
+        'description': 'Bàn phím cơ màu đen kết nối qua cổng USB.',
+    })
+
+    async def scenario():
+        async def send(_event):
+            pass
+
+        actions = LiveActions(SimpleNamespace(app=client.app, send_json=send), history)
+        history.copy_subject = 'Bàn phím cơ Nova K75 màu đen'
+        history.user = 'Bạn tự gợi ý tiêu đề cho hay.'
+        await actions.listing_copy()
+        draft = actions.load_draft()
+        assert draft['name'] == provider.result['name'] and draft['description'] is None
+        history.save(history.take())
+
+        history.user = 'Mô tả là Bàn phím USB màu đen'
+        answer = await actions.listing_copy()
+        assert 'gợi ý mô tả bắt mắt hơn' in answer['answer'] and len(provider.calls) == 1
+        assert actions.load_draft()['description'] == 'Bàn phím USB màu đen'
+        history.save(history.take())
+
+        history.user = 'Đồng ý'
+        await actions.listing_copy()
+        draft = actions.load_draft()
+        assert draft['description'] == provider.result['description']
+        assert draft['name'] == provider.result['name']
+        assert len(provider.calls) == 2
+
+    asyncio.run(scenario())
+
+
+def test_goaway_drains_late_audio_and_saves_before_reopening_same_conversation(secured, monkeypatch):
+    client, _ = secured
+    token = live_token(client)
+    conversation = str(uuid4())
+
+    class TailAudio(GeminiFixture):
+        async def send(self, value):
+            packet = json.loads(value)
+            self.sent.append(packet)
+            if 'activityEnd' not in packet.get('realtimeInput', {}):
+                return
+            for event in (
+                {'goAway': {'timeLeft': '20s'}},
+                {'serverContent': {'inputTranscription': {'text': 'Chào bạn', 'finished': True},
+                                   'generationComplete': True, 'turnComplete': True}},
+            ):
+                await self.events.put(json.dumps(event))
+            await self.events.put(json.dumps({'serverContent': {
+                'outputTranscription': {'text': 'Chào bạn nhé.'},
+                'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': 'AAAAAA=='}}]},
+            }}))
+
+    first, second = TailAudio(), TailAudio()
+    connections = iter((first, second))
+    monkeypatch.setattr(client.app.state.settings, 'gemini_api_key', SecretStr('fixture-key'))
+    monkeypatch.setattr(live, 'connect', lambda *_, **__: next(connections))
+    auth = {'type': 'auth', 'token': token, 'conversation_id': conversation, 'turn_protocol': 1}
+    with client.websocket_connect('/api/v1/live') as socket:
+        socket.send_json(auth)
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'speech_start'})
+        socket.send_json({'type': 'audio', 'rate': 16000, 'data': 'AAA='})
+        assert socket.receive_json()['type'] == 'audio_received'
+        socket.send_json({'type': 'turn'})
+        assert [socket.receive_json()['type'] for _ in range(7)] == [
+            'transcript', 'transcript', 'audio', 'audio_end', 'turn_end', 'turn_saved', 'reconnecting',
+        ]
+    with client.websocket_connect('/api/v1/live') as socket:
+        socket.send_json(auth)
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'finish'})
+        assert socket.receive_json()['type'] == 'finished'
+    assert 'Chào bạn nhé.' in json.dumps(second.sent[1], ensure_ascii=False)
+    assert all('audio' not in event.get('realtimeInput', {}) for event in second.sent)
+
 def test_live_speech_clarification_keeps_short_commerce_phrases_and_transcript_boundaries():
     assert unclear_vietnamese('Ế o que ế o cu de Hoàng Bá Đù?')
     assert not unclear_vietnamese('Cái áo kia năm xị, tồn kho hai cái')
@@ -100,12 +287,19 @@ def test_manual_live_turn_waits_for_the_final_provider_transcription(secured, mo
                     {'turnComplete': True, 'interactionStatus': 'IN_PROGRESS'},
                     {'turnComplete': True},
                     {'inputTranscription': {'text': 'Shop có bao nhiêu'}},
-                    {'outputTranscription': {'text': 'Shop có ba'}},
+                    {'outputTranscription': {'text': 'Shop có ba'},
+                     'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm', 'data': 'AAM='}}]}},
                     {'generationComplete': True},
                     {'inputTranscription': {'text': 'Shop có bao nhiêu đơn?', 'finished': True}},
                     {'outputTranscription': {'text': ' đơn.'}},
                 ):
                     await self.events.put(json.dumps({'serverContent': content}))
+            if 'text' in packet.get('realtimeInput', {}):
+                answer = packet['realtimeInput']['text'].split('nội dung khác. ', 1)[1]
+                await self.events.put(json.dumps({'serverContent': {
+                    'outputTranscription': {'text': answer, 'finished': True},
+                    'generationComplete': True, 'turnComplete': True,
+                }}))
 
     upstream = DelayedTranscript()
     monkeypatch.setattr(client.app.state.settings, 'gemini_api_key', SecretStr('fixture-key'))
@@ -123,14 +317,15 @@ def test_manual_live_turn_waits_for_the_final_provider_transcription(secured, mo
         socket.send_json({'type': 'turn'})
         socket.send_json({'type': 'turn'})
         partial = socket.receive_json()
-        assert partial['text'] == 'Shop có'
-        assert socket.receive_json()['text'] == 'Shop có bao nhiêu'
-        assert socket.receive_json()['text'] == 'Shop có ba'
-        assert socket.receive_json()['type'] == 'audio_end'
+        assert partial['text'] == 'Shop có bao nhiêu'
         question = socket.receive_json()
         assert question['text'] == 'Shop có bao nhiêu đơn?'
+        report = socket.receive_json()
+        assert report['type'] == 'shop_result'
+        assert report['report']['metrics'][1]['label'] == 'Đơn hợp lệ'
         answer = socket.receive_json()
-        assert answer['text'] == 'Shop có ba đơn.'
+        assert answer['text'] == report['spoken_summary']
+        assert socket.receive_json()['type'] == 'audio_end'
         turn_end = socket.receive_json()
         assert turn_end['type'] == 'turn_end'
         saved = socket.receive_json()
@@ -144,7 +339,7 @@ def test_manual_live_turn_waits_for_the_final_provider_transcription(secured, mo
     setup = upstream.sent[0]['setup']['realtimeInputConfig']['automaticActivityDetection']
     assert setup == {'disabled': True}
     assert [next(iter(packet['realtimeInput'])) for packet in upstream.sent[1:]] == [
-        'activityStart', 'audio', 'activityEnd',
+        'activityStart', 'audio', 'activityEnd', 'text',
     ]
 
 
@@ -153,6 +348,51 @@ def test_end_of_microphone_audio_does_not_authorize_a_partial_confirmation():
     assert not live.voice_finished(speech)
     assert live.voice_finished({**speech, 'speech_finished': True})
     assert not live.voice_finished({**speech, 'speech_finished': True, 'awaiting_turn': False})
+
+
+def test_late_completion_cannot_close_the_next_turn_while_the_mic_is_active(secured, monkeypatch):
+    client, _ = secured
+
+    class DelayedCompletion(GeminiFixture):
+        turns = 0
+
+        async def send(self, raw):
+            packet = json.loads(raw).get('realtimeInput', {})
+            if 'activityStart' in packet and self.turns == 1:
+                await self.events.put('{"serverContent":{"turnComplete":true}}')
+            if 'activityEnd' in packet:
+                self.turns += 1
+                message = 'Hôm nay shop thế nào?' if self.turns == 1 else 'Còn hôm qua thì sao?'
+                await self.events.put(json.dumps({'serverContent': {'inputTranscription': {
+                    'text': message, 'finished': True,
+                }}}))
+            if 'text' in packet:
+                await self.events.put(json.dumps({'serverContent': {
+                    'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm', 'data': 'AAABAA=='}}]},
+                    'generationComplete': True, 'turnComplete': True,
+                }}))
+
+    monkeypatch.setattr(client.app.state.settings, 'gemini_api_key', SecretStr('fixture-key'))
+    monkeypatch.setattr(live, 'connect', lambda *_, **__: DelayedCompletion())
+    with client.websocket_connect('/api/v1/live') as socket:
+        socket.send_json({'type': 'auth', 'token': live_token(client), 'turn_protocol': 1})
+        assert socket.receive_json()['type'] == 'ready'
+        reports = []
+        for index in range(2):
+            socket.send_json({'type': 'speech_start'})
+            if index:
+                # More than the previous relay's completion tail, while the seller is still speaking.
+                Event().wait(1.6)
+            socket.send_json({'type': 'turn'})
+            assert socket.receive_json()['role'] == 'user'
+            reports.append(socket.receive_json())
+            assert socket.receive_json()['type'] == 'audio'
+            assert socket.receive_json()['type'] == 'audio_end'
+            assert socket.receive_json()['type'] == 'turn_end'
+            assert socket.receive_json()['type'] == 'turn_saved'
+        assert reports[0]['sales_context']['to_date'] > reports[1]['sales_context']['to_date']
+        socket.send_json({'type': 'finish'})
+        assert socket.receive_json()['type'] == 'finished'
 
 
 def test_local_product_archive_preview_is_scoped_versioned_and_preserves_orders(secured):
@@ -264,7 +504,8 @@ def test_live_keeps_the_spoken_answer_after_a_tool_phase_reports_completion(secu
         assert socket.receive_json()['type'] == 'audio_received'
         socket.send_json({'type': 'turn'})
         question = socket.receive_json()
-        assert socket.receive_json()['type'] == 'shop_result'
+        report = socket.receive_json()
+        assert report['type'] == 'shop_result'
         assert socket.receive_json()['role'] == 'assistant'
         answer = socket.receive_json()
         assert answer['text'] == 'Mình đã xem số liệu của shop hôm nay.'
@@ -273,7 +514,7 @@ def test_live_keeps_the_spoken_answer_after_a_tool_phase_reports_completion(secu
         assert socket.receive_json()['type'] == 'turn_end'
         saved = socket.receive_json()
         assert saved['type'] == 'turn_saved'
-        assert saved['turn']['response']['answer'] == answer['text']
+        assert saved['turn']['response']['answer'] == report['spoken_summary']
         socket.send_json({'type': 'finish'})
         assert socket.receive_json()['type'] == 'finished'
 
@@ -709,7 +950,9 @@ def test_live_gallery_and_confirmation_publish_once_in_the_same_session(secured,
     details = {'name': 'Bàn phím cơ nhỏ gọn', 'price_vnd': 500_000, 'stock': 0,
                'category': 'Máy Tính & Laptop', 'description': 'Bàn phím cơ bố cục nhỏ gọn màu đen.'}
     steps = iter([
-        ('Đăng một bàn phím cơ.', [{'name': 'prepare_listing', 'args': details}]),
+        ('Tiêu đề là Bàn phím cơ nhỏ gọn, giá bán 500000 đồng, tồn kho 0 cái, '
+         'ngành Máy Tính & Laptop, mô tả Bàn phím cơ bố cục nhỏ gọn màu đen.',
+         [{'name': 'prepare_listing', 'args': details}]),
         ('Không xác nhận đăng.', [{'name': 'confirm_action'}]),
         ('Xác nhận đăng.', [{'name': 'confirm_action'}, {'name': 'confirm_action'}]),
         ('Sản phẩm này làm sao để bán tốt và tăng doanh số?', [
@@ -779,14 +1022,16 @@ def test_live_gallery_and_confirmation_publish_once_in_the_same_session(secured,
         # The app saves the selected photo through the same upload as chat.
         upload = client.post('/api/v1/product-drafts/images-data', headers=headers, json={
             'conversation_id': conversation_id,
-            'images_base64': [base64.b64encode(bytes.fromhex('ffd8ffe00001ffd9')).decode()],
+            'images_base64': [base64.b64encode(bytes.fromhex(f'ffd8ffe000{number:02x}ffd9')).decode()
+                              for number in range(6)],
         })
         assert upload.status_code == 201, upload.text
         receipt = upload.json()['data']
         assert receipt['product_draft']['status'] == 'ready'
         socket.send_json({'type': 'images_added', 'draft_id': draft['id'], 'run_id': receipt['run_id']})
         events = events_until(socket, 'turn_end')
-        assert events[0]['draft']['image_count'] == 1
+        assert events[0]['draft']['image_count'] == 6
+        assert sum('video' in event.get('realtimeInput', {}) for event in upstream.sent) == 6
 
         socket.send_json({'type': 'turn'})
         assert not any(event['type'] == 'action_done' for event in events_until(socket, 'turn_end'))

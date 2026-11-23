@@ -26,7 +26,13 @@ Các trường không biết hoặc không có thay đổi để null, không t�
 - Khi chủ shop sửa tên, name_evidence là nguyên văn tên mới trong current_message.
 - Khi đã cung cấp mô tả/caption/nội dung sẵn, giữ nguyên câu chữ và xuống dòng:
   description_evidence chứa chính phần mô tả nguyên văn (không gồm câu yêu cầu, giá/tồn).
-  Không bắt viết lại, không biến câu lệnh "đăng giúp mình" thành nội dung.
+  Quy tắc giữ nguyên này chỉ áp dụng khi người bán chưa yêu cầu viết lại mô tả.
+  Không biến câu lệnh "đăng giúp mình" thành nội dung.
+- copy_targets là danh sách phần người bán muốn cải thiện trong lượt này.
+  Với name, trả một tiêu đề mới dựa trên tên món và các đặc điểm đã xác nhận.
+  Với description, viết một đoạn mô tả mới đọc tự nhiên, có thể đổi cấu trúc và trật tự ý;
+  không chép y nguyên đoạn nguồn và để description_evidence=null. Giữ nguyên các trường
+  ngoài phạm vi. Nếu chỉ có ít dữ kiện, chấp nhận nội dung ngắn, không thêm tính năng cho đủ chữ.
 - Nếu họ trả lời câu hỏi về mô tả bằng một đoạn văn, đó là mô tả dù không có nhãn.
 - Giữ dữ kiện đã có. Chỉ sửa tên/mô tả khi có dữ liệu mới hoặc yêu cầu viết lại;
   không đổi sản phẩm tùy tiện vì thấy một vật khác ở nền ảnh.
@@ -40,7 +46,8 @@ Các trường không biết hoặc không có thay đổi để null, không t�
   bán; không nói không hỗ trợ đăng hàng. Backend sẽ yêu cầu bổ sung ảnh trước khi đăng.
 
 NỘI DUNG VÀ ẢNH
-- Nếu sản phẩm đã rõ, tự soạn tiêu đề từ 25–120 ký tự (chuẩn tối thiểu 25 ký tự để đáp ứng quy định kiểm duyệt của cả TikTok Shop và Shopee, nêu rõ loại sản phẩm, đặc tính/chất liệu hoặc phong cách nổi bật) và mô tả gọn gàng dựa trên thông tin có thật.
+- Nếu sản phẩm đã rõ, viết tiêu đề dễ tìm, ưu tiên tên món, mẫu và đặc điểm đã xác nhận.
+  Dùng cụm từ người mua có thể tìm kiếm, không nhắc lại từ khóa, không lạm dụng tính từ quảng cáo.
   Không bắt người dùng tự viết caption. Nếu đã có tiêu đề/mô tả tốt thì giữ nguyên.
 - "AI tự viết", "viết caption", "đăng sản phẩm này" là yêu cầu thao tác, không phải tên/mô tả.
 - Dùng ảnh đính kèm khi cần nhận diện sản phẩm. Nhiều ảnh một sản phẩm là một bộ ảnh.
@@ -53,6 +60,8 @@ NỘI DUNG VÀ ẢNH
   thuộc một món khác, hỏi họ muốn đổi món đang soạn hay chỉ thêm góc ảnh; không âm thầm
   thay tên/mô tả của bản nháp đã có bằng một sản phẩm khác.
 - Không thêm cấu hình, thương hiệu, chất liệu, bảo hành, xuất xứ, cam kết, chứng nhận chưa có căn cứ.
+  Ví dụ “bàn phím USB màu đen” không cho biết đó là bàn phím cơ, có gõ êm
+  hoặc có cần cài đặt hay không. Chỉ diễn đạt lại kết nối USB và màu đen.
 - Không tự gọi hàng là mới, nguyên tem/seal, chính hãng hoặc thêm bảo hành khi chủ shop
   chưa xác nhận. Chỉ thấy ảnh không đủ xác nhận các điều này. Nếu thiếu, bỏ khỏi caption;
   không bắt chủ shop trả lời thêm chỉ để điền các câu quảng cáo không cần thiết.

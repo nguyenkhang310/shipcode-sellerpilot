@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.ai.fallback import parse_fallback
+from app.ai.listing_text import listing_copy_choice
 from app.ai.money import money_mentions
 from app.ai.money import plain
 from app.ai.quantities import quantity_value
@@ -23,7 +24,7 @@ from app.services.product_archive_chat import archive_target_reply, is_product_a
 from app.ai.fallback import extract_sku
 from app.services.product_drafts import (
     ProductDraftConflictError, _wants_ai_description,
-    advance_product_draft, get_active_draft,
+    advance_product_draft, get_active_draft, has_copy_offer,
     create_text_product_draft,
 )
 
@@ -62,7 +63,10 @@ async def dispatch_chat(payload: ChatRequest, session: Session, shop: UTEMallRep
         # Keep work in progress intact so the next factual reply can resume it.
         casual = is_casual_message(payload.message) and not re.search(
             r'(?:^|[\n;,])\s*(?:tên|tiêu đề|mô tả|caption|nội dung)\s*[:=]', payload.message, re.I)
-        if social_reply(payload.message) or casual and not listing_request(payload.message) and not _wants_ai_description(payload.message):
+        copy_choice = (active_draft is not None and listing_copy_choice(payload.message) is not None
+                       and has_copy_offer(session, active_draft))
+        if not copy_choice and (social_reply(payload.message) or casual and not listing_request(payload.message)
+                                and not _wants_ai_description(payload.message)):
             return ChatResponse(data=await handle_chat(session, shop, provider,
                 message=payload.message, conversation_id=conversation_id))
         # A current order read must not be mistaken for a draft title or a

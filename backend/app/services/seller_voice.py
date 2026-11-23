@@ -19,7 +19,7 @@ def money(value):
     return f'{int(value):,}'.replace(',', '.') + 'đ'
 
 
-def summary_reply(facts, *, today: date, concise=False, detailed=False):
+def summary_reply(facts, *, today: date, concise=False, detailed=False, focused=False):
     end = date.fromisoformat(facts.get('to_date') or facts['date'])
     start = date.fromisoformat(facts.get('from_date') or end.isoformat())
     if calendar := facts.get('calendar_period'):
@@ -32,7 +32,7 @@ def summary_reply(facts, *, today: date, concise=False, detailed=False):
     count, value = facts['order_count'], facts['order_value_vnd']
     metric = facts.get('sales_metric')
     comparison = facts.get('compare_yesterday')
-    if comparison and not metric:
+    if comparison and (not metric or not focused and metric in ('orders', 'order_value')):
         yesterday_count = facts['previous_order_count']
         yesterday_value = facts['previous_value_vnd']
         difference = value - yesterday_value
@@ -50,7 +50,8 @@ def summary_reply(facts, *, today: date, concise=False, detailed=False):
         if 'all_order_status_counts' in facts:
             return f"Hiện shop có **{facts['all_order_status_counts'].get(metric, 0)} đơn {ORDER_STATUS_TEXT[metric]}**."
         amount = facts['order_status_counts'].get(metric, 0)
-        answer = f"{period} có **{amount} đơn {ORDER_STATUS_TEXT[metric]}**."
+        answer = (f"Trong các đơn phát sinh kỳ này ({period.lower()}), có **{amount} đơn {ORDER_STATUS_TEXT[metric]}**."
+                  if focused else f"{period} có **{amount} đơn {ORDER_STATUS_TEXT[metric]}**.")
         if metric == 'delivered':
             answer += f" Tổng giá trị đơn đã giao là **{money(facts['delivered_value_vnd'])}**."
         if comparison:
@@ -64,6 +65,30 @@ def summary_reply(facts, *, today: date, concise=False, detailed=False):
         if comparison:
             answer += '\n' + units_reply('Hôm qua cùng giờ', facts['previous_units_sold'],
                                          facts['previous_orders_with_item_quantity'], facts['previous_order_count'])
+        return answer
+    if metric in ('delivered_value', 'average_order') or focused and metric in ('orders', 'order_value'):
+        previous = None
+        if metric == 'orders':
+            label, current, previous = 'số đơn hợp lệ', count, facts.get('previous_order_count')
+        elif metric == 'order_value':
+            label, current = 'tổng giá trị đơn', money(value)
+            if comparison:
+                previous = money(facts['previous_value_vnd'])
+        elif metric == 'delivered_value':
+            label, current = 'giá trị đơn đã giao', money(facts['delivered_value_vnd'])
+            if comparison:
+                previous = money(facts['previous_delivered_value_vnd'])
+        else:
+            label = 'giá trị trung bình mỗi đơn'
+            current = money(facts['average_order_vnd']) if count else None
+            if comparison and facts['previous_order_count']:
+                previous = money(round(facts['previous_value_vnd'] / facts['previous_order_count']))
+        answer = (f'{period}, {label} là **{current}**.' if current is not None
+                  else f'{period} chưa có đơn hợp lệ để tính giá trị trung bình.')
+        if comparison:
+            answer += (f' **Hôm qua cùng giờ**, chỉ số này là **{previous}**.' if previous is not None
+                       else ' Hôm qua cùng giờ cũng chưa đủ đơn để tính.' if current is None
+                       else ' Hôm qua cùng giờ chưa có đơn hợp lệ để tính.')
         return answer
     if count:
         answer = f"{period} shop có **{count} đơn hợp lệ**, tổng giá trị **{money(value)}**."

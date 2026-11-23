@@ -19,6 +19,33 @@ class SemanticProvider(CopyProvider):
         return json.dumps(self.result, ensure_ascii=False)
 
 
+def test_copy_suggestions_are_scoped_and_short_text_waits_for_consent(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    with client:
+        provider = client.app.state.ai_provider = SemanticProvider({
+            'name': 'Bàn phím cơ Nova K75 màu đen',
+            'description': 'Bàn phím cơ màu đen dùng cổng USB, phù hợp với góc làm việc cần bàn phím có dây.',
+        })
+        _, reply = upload_and_reply(client)
+        title = reply('Tiêu đề: Bàn phím cơ')
+        assert title['product_draft']['name'] == 'Bàn phím cơ' and title['facts']['copy_offer'] == ['name']
+        assert 'Bạn muốn mình gợi ý tiêu đề' in title['answer'] and not provider.calls
+        revised = reply('Oke')
+        assert revised['product_draft']['name'] == provider.result['name']
+        assert revised['product_draft']['description'] is None
+        assert 'Chỉ viết lại tiêu đề' in provider.calls[-1]['facts']['copy_instructions']
+        description = reply('Mô tả: Bàn phím USB màu đen')
+        assert description['product_draft']['description'] == 'Bàn phím USB màu đen'
+        assert description['facts']['copy_offer'] == ['description'] and len(provider.calls) == 1
+        declined = reply('Giữ nguyên')
+        assert declined['product_draft']['description'] == 'Bàn phím USB màu đen' and len(provider.calls) == 1
+        provider.result['name'] = 'Tên khác không được sửa'
+        rewrite = reply('Bạn tự gợi ý mô tả cho hay')
+        assert rewrite['product_draft']['description'] == provider.result['description']
+        assert rewrite['product_draft']['name'] == revised['product_draft']['name']
+        assert 'Chỉ viết lại mô tả' in provider.calls[-1]['facts']['copy_instructions']
+
+
 @pytest.mark.parametrize('message,expected', [
     ('Đăng bán Camera 4K, tồn kho 10', None),
     ('Giá của nó chưa chốt. Màn hình 4K, còn 20 cái', None),

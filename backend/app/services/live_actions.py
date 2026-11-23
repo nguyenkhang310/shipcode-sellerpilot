@@ -1,5 +1,7 @@
 """Use the seller chat's tools and decisions inside an authenticated Live session."""
+import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -7,7 +9,10 @@ from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 from starlette.concurrency import run_in_threadpool
 
+from app.ai.listing_text import _wants_ai_description, labelled_copy, listing_copy_choice
 from app.ai.money import plain
+from app.ai.quick_reads import quick_read
+from app.ai.small_talk import social_reply
 from app.integrations.order_management import OrderConflictError, order_detail, update_order
 from app.integrations.ute_mall import ShopItemNotFoundError
 from app.models.agent_run import AgentRun
@@ -17,10 +22,13 @@ from app.services.advisor import forget_memory, is_forget_request
 from app.services.auth import verify_seller
 from app.services.conversation_state import ensure_conversation_open
 from app.services.conversations import recent_runs
+from app.services.live_language import copy_choice, spoken_listing_name
+from app.services.live_shop import strategy_summary
 from app.services.product_archive_chat import archive_target_reply
 from app.services.product_drafts import (
-    ProductDraftConflictError, ProductDraftNotFoundError, cancel_product_draft,
-    draft_stored_images, draft_to_dict, get_active_draft, get_product_draft, publish_product_draft,
+    SELLER_WRITES_COPY, ProductDraftConflictError, ProductDraftNotFoundError, cancel_product_draft,
+    draft_stored_images, draft_to_dict, get_active_draft, get_product_draft, has_copy_offer, publish_product_draft,
+    spoken_listing_amounts,
 )
 from app.services.product_edits import decide_product_edit, edit_to_dict
 from app.services.seller_tools import (
@@ -68,13 +76,14 @@ class LiveActions:
                     raise ValueError('Ảnh này không thuộc bản nháp đang soạn trong phiên Live.')
             else:
                 draft = get_active_draft(session, self.shop, self.history.conversation_id)
+                self.history.draft_copy_offer = bool(draft and has_copy_offer(session, draft))
             return draft_to_dict(draft) if draft else None
 
-    async def set_draft(self, draft):
+    async def set_draft(self, draft, *, offer_copy=False):
         if not draft or self.pending and self.pending.kind in ('publish', 'cancel_draft'):
             self.pending = None
         await self.socket.send_json({'type': 'draft', 'draft': jsonable_encoder(draft)})
-        if draft and draft['status'] == 'ready':
+        if draft and draft['status'] == 'ready' and not offer_copy:
             self.pending = Review('publish', draft,
                 self.say(f"Mình chuẩn bị đăng {draft['name']}, giá {draft['price_vnd']} đồng, "
                          f"tồn kho {draft['stock']}, có {draft['image_count']} ảnh. Bạn nói «xác nhận đăng» để mình đăng ngay.",
@@ -86,6 +95,110 @@ class LiveActions:
         if self.pending and self.pending.kind == 'archive':
             await self.socket.send_json({'type': 'archive_review', 'name': ''})
         self.pending = None
+
+    async def listing_copy(self, proposed_message=None):
+        """Separate the seller's title from Gemini's interpretation of the item."""
+        if not self.history.user:
+            return None
+        if self.history.listing_reply:
+            return self.history.listing_reply
+        speech = self.history.user
+        if self.history.draft_copy_offer and listing_copy_choice(speech) is not None:
+            self.history.listing_reply = await self.ask_chat(speech)
+            return self.history.listing_reply
+        if _wants_ai_description(speech) or labelled_copy(speech):
+            dictated = spoken_listing_name(speech)
+            if dictated and dictated[1] and speech.endswith(dictated[0] + '.'):
+                speech = speech.removesuffix('.')
+            if proposed_message:
+                details = [line for line in proposed_message.splitlines()
+                           if line.startswith(('Mô tả: ', 'Ngành hàng: ')) and line.partition(': ')[2].casefold() in speech.casefold()]
+                if details:
+                    speech += '\n' + '\n'.join(details)
+            draft = await run_in_threadpool(self.load_draft)
+            if _wants_ai_description(speech) and self.history.copy_subject:
+                request = '\n'.join(['Đăng sản phẩm lên shop.', speech,
+                                     f'Tên sản phẩm: {self.history.copy_subject}', *self.history.copy_amounts])
+                self.history.copy_subject = None
+                self.history.copy_amounts = []
+                self.history.copy_choice_touched = True
+            elif draft:
+                request = speech
+            elif labelled_copy(speech):
+                request = 'Đăng sản phẩm lên shop.\n' + speech
+            else:
+                self.history.expecting_title = True
+                self.history.copy_choice_touched = True
+                self.history.listing_reply = {'accepted': True, 'answer': self.say(
+                    'Bạn cho mình biết món cần đăng hoặc thêm một ảnh nhé, mình sẽ tự gợi ý nội dung.',
+                    'Tell me what you’re selling or add a photo, and I’ll suggest the listing copy.')}
+                return self.history.listing_reply
+            self.history.expecting_title = False
+            self.history.copy_choice_touched = True
+            self.history.listing_reply = await self.ask_chat(request)
+            return self.history.listing_reply
+        if self.history.language != 'vi':
+            return None
+        if (self.history.copy_subject or self.history.expecting_title) and cancel_draft_words(speech):
+            self.history.copy_subject = None
+            self.history.copy_amounts = []
+            self.history.expecting_title = False
+            self.history.copy_choice_touched = True
+            if await run_in_threadpool(self.load_draft):
+                return await self.ask_chat(speech)
+            self.history.listing_reply = {'accepted': True, 'answer': 'Ừ, mình dừng việc soạn sản phẩm ở đây nhé.'}
+            return self.history.listing_reply
+        choice = copy_choice(speech) if self.history.copy_subject else None
+        if not choice and (social_reply(speech) or quick_read(speech, today=datetime.now(self.shop.timezone).date())):
+            return None
+        spoken = spoken_listing_name(speech, expecting_title=self.history.expecting_title)
+        if choice:
+            name = self.history.copy_subject
+            amounts = self.history.copy_amounts
+            self.history.copy_subject = None
+            self.history.copy_amounts = []
+            self.history.copy_choice_touched = True
+            direction = ('AI tự viết lại tiêu đề và mô tả cho bắt mắt, dùng đúng thông tin đã có.'
+                         if choice == 'polish' else SELLER_WRITES_COPY)
+            request = '\n'.join(['Đăng sản phẩm lên shop.', direction, f'Tên sản phẩm: {name}', *amounts])
+            reply = await self.ask_chat(request)
+        elif spoken:
+            name, exact = spoken
+            self.history.expecting_title = False
+            self.history.copy_subject = None if exact else name
+            amounts = spoken_listing_amounts(speech.replace(name, '', 1))
+            if exact:
+                labels = {line.partition(':')[0] for line in amounts}
+                amounts += [line for line in self.history.copy_amounts if line.partition(':')[0] not in labels]
+            self.history.copy_amounts = [] if exact else amounts
+            self.history.copy_choice_touched = True
+            if exact:
+                extra = amounts.copy()
+                if proposed_message:
+                    for line in proposed_message.splitlines()[1:]:
+                        label, _, value = line.partition(': ')
+                        if label in {'Mô tả', 'Ngành hàng'} and value.casefold() in speech.casefold():
+                            extra.append(line)
+                reply = await self.ask_chat('\n'.join(['Đăng sản phẩm lên shop.', f'Tên sản phẩm: {name}', *extra]))
+                if not reply.get('review'):
+                    question = reply['answer'].split('\n\n')[-1]
+                    reply['answer'] = f'Mình giữ nguyên tiêu đề “{name}”. ' + question
+            else:
+                reply = {'accepted': True, 'answer':
+                         f'Mình hiểu bạn đang bán {name}. Bạn muốn mình viết tiêu đề và mô tả bắt mắt hơn, hay giữ tên này?'}
+        elif proposed_message is None:
+            return None
+        elif self.history.copy_subject:
+            reply = {'accepted': True, 'answer': 'Bạn muốn giữ tên đang nói hay để mình viết tiêu đề và mô tả bắt mắt hơn?'}
+        elif (draft := await run_in_threadpool(self.load_draft)) and draft.get('name'):
+            reply = await self.ask_chat(speech)
+        else:
+            self.history.expecting_title = True
+            self.history.copy_choice_touched = True
+            reply = {'accepted': True, 'answer':
+                     'Bạn muốn đặt tiêu đề gì? Bạn có thể đọc đúng tiêu đề, hoặc nói món hàng bạn muốn bán.'}
+        self.history.listing_reply = reply
+        return reply
 
     async def ask_chat(self, message):
         if self.history.delegated:
@@ -105,7 +218,19 @@ class LiveActions:
         data = self.manager.result(key).data.model_dump()
         self.history.delegated = data['run_id']
         draft = data.get('product_draft')
-        review_message = await self.set_draft(draft) if draft else None
+        if brief := data['facts'].get('business_advisory'):
+            summary = strategy_summary(brief, language=self.history.language)
+            display = {'id': str(uuid4()), 'turn_id': self.history.turn_id, 'language': self.history.language,
+                       'question': message, 'answer': data['answer'], 'report': data.get('report'),
+                       'order_id': None, 'spoken_summary': summary}
+            self.history.result(display, data['facts'])
+            await self.socket.send_json({'type': 'shop_result', **display})
+            return {'accepted': True, 'answer': summary, 'detailed_plan': True}
+        if draft and not draft['name'] and 'name' in draft['missing_fields'] and self.history.language == 'vi':
+            self.history.expecting_title = self.history.copy_choice_touched = True
+            data['answer'] = 'Bạn muốn đọc nguyên văn tiêu đề, hay nói món hàng để mình gợi ý tên và mô tả?'
+        self.history.draft_copy_offer = bool(draft and data['facts'].get('copy_offer'))
+        review_message = await self.set_draft(draft, offer_copy=self.history.draft_copy_offer) if draft else None
         if draft and (cancel_draft_words(message) or cancel_draft_words(self.history.user)):
             self.pending = Review('cancel_draft', draft, f"Bạn muốn hủy bản nháp {draft['name'] or 'sản phẩm này'}. Nói «xác nhận hủy bản nháp» để tiếp tục.")
             review_message = self.pending.message
@@ -136,7 +261,7 @@ class LiveActions:
         return {'accepted': True, 'answer': data['answer'][:3500], 'instruction': instruction}
 
     async def accept_gallery(self, draft_id, run_id):
-        draft, jpeg = await run_in_threadpool(self.gallery, draft_id, run_id)
+        draft, photos = await run_in_threadpool(self.gallery, draft_id, run_id)
         await self.clear_review()
         review = await self.set_draft(draft)
         missing = {'name': 'tên sản phẩm', 'price_vnd': 'giá bán', 'stock': 'tồn kho', 'category_id': 'ngành hàng',
@@ -145,7 +270,7 @@ class LiveActions:
         return review or self.say(f"Mình đã lưu {draft['image_count']} ảnh trong bản nháp. "
                                   f"Phần còn thiếu: {labels}. Chỉ hỏi dữ kiện cần thiết tiếp theo.",
                                   f"I saved {draft['image_count']} photos in the draft. "
-                                  f"Ask for the next missing field in English. Missing fields: {labels}."), jpeg
+                                  f"Ask for the next missing field in English. Missing fields: {labels}."), photos
 
     def gallery(self, draft_id, run_id):
         with self.state.session_factory() as session:
@@ -158,14 +283,17 @@ class LiveActions:
             if draft.status not in ('collecting', 'ready'):
                 raise ValueError('Bản nháp đã đóng.')
             images = draft_stored_images(draft)
-            jpeg = None
-            if images:
-                image = images[-1]
+            facts = json.loads(run.facts_json)
+            photos = []
+            for index in facts.get('image_indices', list(range(len(images)))):
+                if type(index) is not int or not 0 <= index < len(images):
+                    continue
+                image = images[index]
                 if image['mime'] == 'image/jpeg' and image['bytes'] <= 510_000:
                     path = self.state.settings.shop_product_upload_dir / Path(image['filename']).name
                     if path.is_file():
-                        jpeg = path.read_bytes()
-            return draft_to_dict(draft), jpeg
+                        photos.append(path.read_bytes())
+            return draft_to_dict(draft), photos
 
     async def prepare_order(self, order_id, changes):
         detail = await run_in_threadpool(self.order, order_id)

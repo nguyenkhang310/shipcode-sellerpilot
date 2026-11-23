@@ -66,13 +66,14 @@ export function assistantContent(message: Message) {
   }
   const summaryResult = results.findLast(result => result.report && result.sales_context);
   const sales = summaryResult?.sales_context ?? response?.facts;
-  const detailed = results.filter(result => result.spoken_summary && result.language !== 'en')
+  const detailed = results.filter(result => result.spoken_summary && !result.sales_context)
     .map(result => assistantText(result.answer))
     .filter(answer => answer.trim() && answer.trim() !== message.text.trim());
-  const originalText = message.text.trim() || assistantText(results[0]?.answer ?? '').trim();
+  const verifiedSales = summaryResult?.spoken_summary ? assistantText(summaryResult.answer).trim() : '';
+  const originalText = verifiedSales || message.text.trim() || assistantText(results[0]?.answer ?? '').trim();
   const preferences = response?.facts?.seller_preferences as { response_style?: string } | undefined;
   const knownSummary = summaryResult || (response?.tool === 'get_shop_summary' && response.provider === 'deterministic_parser');
-  const compactSummary = knownSummary && reports.size === 1 && !sales?.sales_metric && !sales?.compare_yesterday
+  const compactSummary = !verifiedSales && knownSummary && reports.size === 1 && !sales?.sales_metric && !sales?.compare_yesterday
     && !detailed.length && !preferences?.response_style;
   const text = compactSummary
     ? summaryResult?.language === 'en' ? 'Here’s how your shop performed during this period.'

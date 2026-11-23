@@ -39,6 +39,16 @@ const salesReport=(subtitle,value)=>({
  charts:[{kind:'line',title:'Diễn biến giá trị đơn hàng',unit:'vnd',points:[]}],table:null,
 });
 
+test('a verified Live sales result keeps one answer and one report while audio captions stream',()=>{
+ const answer='Hôm nay, tổng giá trị đơn là **440.000đ**.';
+ const report=salesReport('2026-11-21',440000);
+ const result={report,sales_context:{sales_metric:'order_value'},answer,spoken_summary:answer.replaceAll('**','')};
+ const content=assistantContent({text:'Bốn trăm bốn mươi nghìn đồng.',liveResults:[result]});
+ assert.equal(content.text,answer);
+ assert.equal(content.reports.length,1);
+ assert.equal(content.details.length,0);
+});
+
 test('a voice report attaches to one answer before transcription and keeps its identity when saved',()=>{
  const report=salesReport('2026-11-15 → 2026-11-21',19826570000);
  const first={id:'first',turn_id:'sales',report,sales_context:{},language:'vi',answer:'Có 3.244 đơn, tổng 19.826.570.000đ.'};

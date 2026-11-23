@@ -165,6 +165,39 @@ def test_known_question_does_not_change_draft_and_live_uses_spoken_scope(live_sh
     assert '900.000đ' in spoken['answer']
 
 
+@pytest.mark.parametrize('speech,language,metric,expected', [
+    ('Hôm nay có bao nhiêu đơn hợp lệ?', 'vi', 'orders', 'số đơn hợp lệ là **2**'),
+    ('Giá trị trung bình mỗi đơn hôm nay là bao nhiêu?', 'vi', 'average_order', '**220.000đ**'),
+    ('Giá trị đơn đã giao hôm nay', 'vi', 'delivered_value', '**320.000đ**'),
+    ('How many orders did we get today?', 'en', 'orders', '2 valid orders'),
+    ('What was the total order value in the last seven days?', 'en', 'order_value', '1,340,000 dong'),
+    ('How many units did we sell today?', 'en', 'units', 'sold 5 units'),
+    ('How many orders were delivered yesterday?', 'en', 'delivered', '1 order placed in the shop was delivered'),
+])
+def test_live_answers_a_specific_metric_from_shared_shop_facts(live_shop_data, speech, language, metric, expected):
+    app = live_shop_data.app.state
+    with app.session_factory() as session:
+        spoken = inspect_shop(session, app.shop_repository, 'Thống kê tháng trước', speech,
+                              language=language, sales_only=True)
+    assert spoken['sales_context']['sales_metric'] == metric
+    assert expected in spoken['answer']
+
+
+@pytest.mark.parametrize('question,language', [
+    ('Trong đó có bao nhiêu đơn đã giao?', 'vi'),
+    ('Of those, how many orders were delivered?', 'en'),
+])
+def test_live_metric_followup_keeps_the_reporting_period(live_shop_data, question, language):
+    prior = chat(live_shop_data, 'Tổng quan bán hàng bảy ngày qua')
+    app = live_shop_data.app.state
+    with app.session_factory() as session:
+        spoken = inspect_shop(session, app.shop_repository, 'Hôm nay giao mấy đơn?', question,
+                              conversation_id=prior['conversation_id'], language=language, sales_only=True)
+    assert spoken['sales_context']['days'] == 7
+    assert spoken['sales_context']['sales_metric'] == 'delivered'
+    assert spoken['facts']['order_status_counts']['delivered'] == 2
+
+
 @pytest.mark.parametrize('message,expected', [
     ('Doanh thu 31/02/2026?', 'không hợp lệ'),
     ('Doanh thu 90 ngày qua?', '1 đến 30 ngày'),

@@ -65,6 +65,7 @@ export class ReplyVolume {
 }
 
 export type AudioCallbacks = {
+  vietnamese?: boolean;
   microphone: (pcm: Uint8Array, rate: number) => void;
   speaking: (playing: boolean) => void;
   error: (message: string) => void;

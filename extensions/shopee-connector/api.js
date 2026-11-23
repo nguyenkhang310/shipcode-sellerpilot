@@ -303,8 +303,8 @@ export async function handleApi(path, method, raw, signal) {
             const payloadDraft = isTikTok ? {
               name: draft.name,
               description: draft.description,
-              price_vnd: draft.price_vnd || 300000,
-              stock: draft.stock || 50,
+              price_vnd: draft.price_vnd,
+              stock: draft.stock,
               images: draft.preview_urls?.length ? draft.preview_urls : (draft.preview_url ? [draft.preview_url] : []),
               category_name: draft.category_name || null,
               brand: draft.brand || 'Không có thương hiệu',
@@ -312,7 +312,7 @@ export async function handleApi(path, method, raw, signal) {
               weight_g: draft.weight_g || 500
             } : {
               name: draft.name,
-              description: (draft.description && draft.description.trim().length >= 100) ? draft.description : (draft.name ? `${draft.name}. Thiết kế thể thao hiện đại, kiểu dáng ôm đầu chắc chắn và thoáng khí tối ưu. Chất liệu cao cấp bền bỉ, đệm mút êm ái, chống va đập hiệu quả, mang lại sự tiện dụng và an toàn tối đa trên mọi cung đường.` : ''),
+              description: draft.description,
               price_vnd: draft.price_vnd,
               stock: draft.stock,
               images: draft.preview_urls?.length ? draft.preview_urls : (draft.preview_url ? [draft.preview_url] : []),
@@ -331,6 +331,7 @@ export async function handleApi(path, method, raw, signal) {
             if (autoFilled && !isTikTok) {
               await chrome.storage.local.set({
                 pending_shopee_draft: {
+                  connection_id: connection.id,
                   draft: payloadDraft,
                   target: connection.target,
                   timestamp: Date.now()
@@ -431,18 +432,13 @@ export async function handleApi(path, method, raw, signal) {
         category_name: draft.category_name || null,
         brand: draft.brand || null,
         origin: draft.origin || null,
-        weight_g: draft.weight_g || 500,
-        stock: draft.stock || 20,
-        price_vnd: draft.price_vnd || 150000
+        weight_g: draft.weight_g || 500
       } : {
         ...baseDraft,
-        description: (baseDraft.description && baseDraft.description.trim().length >= 100) ? baseDraft.description : (baseDraft.name ? `${baseDraft.name}. Thiết kế thể thao hiện đại, kiểu dáng ôm đầu chắc chắn và thoáng khí tối ưu. Chất liệu cao cấp bền bỉ, đệm mút êm ái, chống va đập hiệu quả, mang lại sự tiện dụng và an toàn tối đa trên mọi cung đường.` : ''),
         images,
         brand: draft.brand || 'No brand',
         origin: draft.origin || 'Việt Nam',
-        weight_g: draft.weight_g || 500,
-        stock: draft.stock || 20,
-        price_vnd: draft.price_vnd || 150000
+        weight_g: draft.weight_g || 500
       };
       const currentUrl = page?.snapshot?.url || '';
       const isProductForm = isTikTok
@@ -452,6 +448,7 @@ export async function handleApi(path, method, raw, signal) {
       if (!isProductForm) {
         await chrome.storage.local.set({
           pending_shopee_draft: {
+            connection_id: connection.id,
             draft: payloadDraft,
             target: connection.target,
             timestamp: Date.now()
@@ -503,6 +500,7 @@ export async function handleApi(path, method, raw, signal) {
       if (!isTikTok && filled.length) {
         await chrome.storage.local.set({
           pending_shopee_draft: {
+            connection_id: connection.id,
             draft: payloadDraft,
             target: connection.target,
             timestamp: Date.now()

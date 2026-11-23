@@ -403,9 +403,19 @@ def test_requests_never_become_catalogue_content_or_pet_category(tmp_path, messa
 
 
 def test_auto_copy_request_survives_clarifications_and_rewrites_ready_draft(tmp_path):
+    class ProfessionalCopyProvider(CopyProvider):
+        async def respond(self, message, *, history, facts):
+            response = await super().respond(message, history=history, facts=facts)
+            if facts.get('copy_targets') == ['description', 'name']:
+                copy = json.loads(response)
+                copy['name'] = 'Nova K75 – Bàn phím cơ'
+                copy['description'] = 'Nova K75 là mẫu bàn phím cơ đang có tại shop.'
+                return json.dumps(copy, ensure_ascii=False)
+            return response
+
     client, _, _ = make_client(tmp_path)
     with client:
-        provider = CopyProvider()
+        provider = ProfessionalCopyProvider()
         client.app.state.ai_provider = provider
         _, reply = upload_and_reply(client)
         reply('AI tự viết caption ngắn, giọng tự nhiên giúp tôi')
@@ -419,6 +429,7 @@ def test_auto_copy_request_survives_clarifications_and_rewrites_ready_draft(tmp_
         rewritten = reply('Viết lại tiêu đề và nội dung chuyên nghiệp hơn')
         assert len(provider.calls) == count + 1
         assert rewritten['product_draft']['status'] == 'ready'
+        assert rewritten['product_draft']['name'] == 'Nova K75 – Bàn phím cơ'
         assert rewritten['provider'] == 'ollama'
 
 

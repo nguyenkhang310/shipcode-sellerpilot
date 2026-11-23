@@ -61,6 +61,8 @@ export function pcmLevel(pcm: Uint8Array) {
 
 /** Detect one local turn while retaining weak syllables and pauses inside it. */
 export class VoiceTurn {
+  constructor(private readonly longPauseMs = LONG_PAUSE_MS, private readonly shortPauseMs = SHORT_PAUSE_MS) {}
+
   private active = false;
   private floor = .0015;
   private onsetMs = 0;
@@ -106,7 +108,7 @@ export class VoiceTurn {
       this.quietMs = 0;
     } else {
       this.quietMs += durationMs;
-      if (this.quietMs >= (this.speechMs >= 420 ? LONG_PAUSE_MS : SHORT_PAUSE_MS)) {
+      if (this.quietMs >= (this.speechMs >= 420 ? this.longPauseMs : this.shortPauseMs)) {
         this.finish();
         return 'end';
       }

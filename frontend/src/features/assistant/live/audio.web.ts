@@ -46,6 +46,7 @@ export function createLiveAudio(callbacks: AudioCallbacks): LiveAudio {
     throw new Error('Để dùng micro trên web, mở SellerPilot bằng localhost hoặc HTTPS.');
   }
   const context = new AudioContext();
+  const playbackRate = callbacks.vietnamese ? 1.01 : WEB_REPLY_RATE;
   let stream: MediaStream | undefined;
   let input: MediaStreamAudioSourceNode | undefined;
   let worklet: AudioWorkletNode | undefined;
@@ -100,7 +101,7 @@ export function createLiveAudio(callbacks: AudioCallbacks): LiveAudio {
       for (let i = 0; i < channel.length; i++) channel[i] = volume.sample(samples.getInt16(i * 2, true) / 32768);
       const node = context.createBufferSource();
       node.buffer = buffer;
-      node.playbackRate.value = WEB_REPLY_RATE;
+      node.playbackRate.value = playbackRate;
       node.connect(context.destination);
       sources.add(node);
       node.onended = () => {
@@ -115,7 +116,7 @@ export function createLiveAudio(callbacks: AudioCallbacks): LiveAudio {
       const now = context.currentTime;
       const start = playAt > now ? playAt : now + (playAt ? RECOVERY_BUFFER : FIRST_PLAY_BUFFER);
       node.start(start);
-      playAt = start + buffer.duration / WEB_REPLY_RATE;
+      playAt = start + buffer.duration / playbackRate;
       callbacks.speaking(true);
     },
     flush() {

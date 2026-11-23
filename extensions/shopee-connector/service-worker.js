@@ -15,9 +15,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     }).then(data => reply({ok: true, data}), error => reply({ok: false, error: error.message}));
     return true;
   }
-  if (message?.kind === 'autofill_step2_completed' && sender.id === chrome.runtime.id && sender.tab) {
-    Promise.resolve().then(() => handleStep2Completed(message.scan))
-      .then(data => reply({ok: true, data}), error => reply({ok: false, error: error.message}));
+  if (['read_pending_shopee_draft', 'autofill_step2_completed'].includes(message?.kind)
+      && sender.id === chrome.runtime.id && sender.tab && sender.frameId === 0 && sender.origin === SOURCE) {
+    Promise.resolve().then(async () => {
+      const connection = await state();
+      if (connection.mode !== 'shopee' || connection.tab_id !== sender.tab.id || !connection.target?.label) return null;
+      if (message.kind === 'autofill_step2_completed') return handleStep2Completed(message.scan);
+      const {pending_shopee_draft: draft} = await chrome.storage.local.get('pending_shopee_draft');
+      return draft?.connection_id === connection.id && draft.target?.label === connection.target.label ? draft : null;
+    }).then(data => reply({ok: true, data}), error => reply({ok: false, error: error.message}));
     return true;
   }
   // Only the packaged UI may call the backend or mutate the connection.

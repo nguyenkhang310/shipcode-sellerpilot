@@ -1,5 +1,6 @@
 """Language hints and transcript handling for Gemini Live."""
 import re
+import unicodedata
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -17,9 +18,26 @@ GEMINI_VOICES = {
     'vi': {'male': 'Iapetus', 'female': 'Erinome'},
     'en': {'male': 'Puck', 'female': 'Kore'},
 }
+LIVE_GREETINGS = {
+    'vi': (
+        'Chào chủ shop! Hôm nay bạn muốn mình giúp việc gì?',
+        'Mình đây! Bạn muốn bắt đầu từ việc nào của shop hôm nay?',
+        'Chào bạn! Hôm nay bạn muốn xem số liệu hay xử lý việc khác cho shop?',
+        'Chào chủ shop! Bạn cứ nói việc cần làm, mình bắt đầu ngay.',
+        'Chào bạn! Có việc gì của shop bạn muốn mình giúp trước không?',
+    ),
+    'en': (
+        'Hi there! What can I help you with today?',
+        'Hey! Where would you like to start with your shop today?',
+        'Hi! Want to check your shop’s numbers or tackle something else?',
+        'Hello! Tell me what’s on your list for the shop today.',
+        'Good to hear from you! What should we work on first?',
+    ),
+}
 COMMON_TERMS = ('SellerPilot', 'UTech Official', 'Shopee', 'TikTok Shop', 'SKU', 'SPX', 'Viettel Post')
 VIETNAMESE_TERMS = ('năm xị', 'hai củ rưỡi', 'giá bán', 'tồn kho', 'mã vận đơn', 'xác nhận đăng',
-                    'tiêu đề', 'mô tả', 'bản nháp', 'biểu đồ', 'hàng sắp hết', 'tổng giá trị đơn hàng',
+                    'tiêu đề là', 'giữ nguyên tiêu đề', 'viết lại mô tả', 'bản nháp', 'biểu đồ',
+                    'hàng sắp hết', 'tổng giá trị đơn hàng', 'kế hoạch bảy ngày', 'bảy ngày tới',
                     'bao nhiêu đơn hàng', 'hôm nay', 'bảy ngày qua', 'ba mươi ngày qua',
                     'sản phẩm này', 'sản phẩm vừa đăng', 'tăng doanh số', 'xóa sản phẩm', 'xác nhận xóa sản phẩm')
 ENGLISH_TERMS = ('order value', 'low stock', 'tracking number', 'confirm publish', 'confirm product update',
@@ -75,3 +93,34 @@ def unclear_vietnamese(text):
 
 
 REPEAT_QUESTION = 'Mình nghe chưa rõ. Bạn nói lại chậm hơn một chút nhé.'
+
+
+def spoken_listing_name(message, *, expecting_title=False):
+    """Keep the seller's words, distinguishing a dictated title from a product cue."""
+    source = unicodedata.normalize('NFC', message).strip()
+    text = plain(source)
+    exact = re.match(r'^(?:cho |dat |giu )?(?:tieu de|ten san pham|ten)(?: (?:chinh xac|nguyen van))?(?: la| thanh)?\s*[:=,]?\s+', text)
+    cue = re.match(r'^(?:(?:minh|toi|em) (?:muon )?)?(?:(?:cai|mon|san pham) nay |day |nay )?'
+                   r'(?:(?:dang ban|dang) (?:giup minh )?|(?:la )?ban |la )(?:(?:mot|1) (?:chiec )?|chiec )?', text)
+    if not (exact or cue or expecting_title) or '?' in source:
+        return None
+    offset = (exact or cue).end() if exact or cue else 0
+    quoted = re.match(r'^(?:"([^"\n]+)"|“([^”\n]+)”)', source[offset:])
+    name = ((quoted[1] or quoted[2]) if quoted else re.split(
+        r'[,;\n]\s*(?=(?:giá|tồn|còn|mô tả|ngành)\b)|\s+(?=(?:giá bán|tồn kho|còn \d)\b)',
+        source[offset:], maxsplit=1, flags=re.I)[0].strip().removesuffix('.').strip(' ;'))
+    if (not 2 <= len(name) <= 120 or '\n' in name
+            or re.fullmatch(r'(?:san pham|mon hang|cai nay|do|day|tieu de|ten|ban nhap)', plain(name))
+            or re.match(r'^(?:gia|ton|con \d|mo ta|nganh|\d+|ok|dong y|khong|duoc|hay|co the|huy|xac nhan|cam on)\b', plain(name))):
+        return None
+    return name, bool(exact or expecting_title and not cue)
+
+
+def copy_choice(message):
+    text = ' '.join(plain(message).strip(' .,!?').replace(',', ' ').split())
+    text = re.sub(r' (?:nhe|nha|di|giup minh)$', '', text)
+    if re.fullmatch(r'(?:minh |toi )?(?:(?:khong )?giu(?: nguyen)?(?: (?:ten|tieu de)(?: cu)?)?|khong(?: can| lam dep| viet lai)?|giu vay|de vay)', text):
+        return 'keep'
+    if re.fullmatch(r'(?:minh |toi )?(?:co|duoc|ok(?:e)?|dong y|lam dep(?: (?:ca hai|tieu de|tieu de va mo ta))?|(?:viet|soan) (?:lai|dep hon|lai cho dep)(?: ca hai)?)', text):
+        return 'polish'
+    return None

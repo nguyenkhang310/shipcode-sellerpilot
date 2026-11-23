@@ -15,7 +15,9 @@ from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from app.ai.contracts import AIProviderError
-from app.ai.listing_text import _is_generic_product_command, _wants_ai_description
+from app.ai.listing_text import (
+    _is_generic_product_command, _wants_ai_description, labelled_copy, listing_copy_choice, listing_copy_fields,
+)
 from app.ai.quantities import quantity_value, EMPTY_STOCK_PHRASES
 from app.ai.draft_actions import draft_action
 from app.ai.listing_evidence import commercial_context as _commercial_context
@@ -33,6 +35,7 @@ from app.services.conversation_state import ensure_conversation_open
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_PRODUCT_IMAGES = 6
+SELLER_WRITES_COPY = 'Giữ nguyên tiêu đề và để mình tự viết mô tả.'
 ACTIVE_STATUSES = ("collecting", "ready")
 LISTING_PROMPT = (Path(__file__).resolve().parents[1] / 'ai' / 'prompts' / 'listing.md').read_text(encoding='utf-8')
 logger = logging.getLogger(__name__)
@@ -296,18 +299,38 @@ async def advance_product_draft(
 ) -> dict:
     text = normalize_text(message).strip(".! ")
     dialogue = _draft_dialogue(session, draft, limit=1)
-    pending_fields = json.loads(dialogue[-1].facts_json).get('pending_fields', []) if dialogue else []
+    previous = json.loads(dialogue[-1].facts_json) if dialogue else {}
+    pending_fields = previous.get('pending_fields', [])
+    copy_offer = previous.get('copy_offer', [])
     used_model = False
     ai_image_count = 0
     fallback_reason = None
     fallback_stage = None
+    offered_now = False
     categories = shop.product_categories()
     repaired = _repair_command_content(draft)
     was_ready = draft.status == 'ready'
     original = (draft.name, draft.description, draft.price_vnd, draft.stock, draft.category_id)
-    wants_copy = _wants_ai_description(message)
+    seller_copy_request = review_only and SELLER_WRITES_COPY in message.splitlines()
+    wants_copy = not seller_copy_request and _wants_ai_description(message)
+    choice = listing_copy_choice(message) if copy_offer else None
+    copy_fields = listing_copy_fields(message) if wants_copy else set()
+    if wants_copy and not copy_fields and copy_offer:
+        copy_fields = set(copy_offer)
+    if wants_copy and not copy_fields and not draft.name and re.search(r'\btu goi y\b', plain(message)):
+        copy_fields = {'name'}
+    if choice is True:
+        wants_copy, copy_fields = True, set(copy_offer)
     if wants_copy:
-        draft.copy_instructions = message[:2000]
+        labels = {'name': 'tiêu đề', 'description': 'mô tả'}
+        focus = ' và '.join(labels[field] for field in labels if field in copy_fields)
+        instruction = f'Chỉ viết lại {focus}, dựa vào thông tin đã xác nhận. ' if focus else ''
+        draft.copy_instructions = (instruction + message)[:2000]
+        copy_offer = []
+    elif choice is False:
+        copy_offer = []
+    elif seller_copy_request:
+        draft.copy_instructions = SELLER_WRITES_COPY
 
     action = draft_action(message)
     if review_only and (action == 'cancel' or _is_publish_command(message)):
@@ -316,6 +339,7 @@ async def advance_product_draft(
         answer = 'Mình giữ nguyên bản nháp và ảnh. Khi muốn làm tiếp, bạn gửi thêm thông tin hoặc mở lại cuộc trò chuyện này nhé.'
     elif action == 'cancel':
         pending_fields = []
+        copy_offer = []
         draft.status = "cancelled"
         draft.decided_at = draft.updated_at = datetime.utcnow()
         delete_draft_images(draft, upload_dir)
@@ -332,6 +356,10 @@ async def advance_product_draft(
         )
     else:
         changed = _apply_explicit_details(draft, message, categories)
+        if not changed and field_was_requested(dialogue, 'mô tả') and not wants_copy and choice is None:
+            if 2 <= len(message.strip()) <= 1500 and not message.rstrip().endswith('?') and not draft_action(message):
+                draft.description = message.strip()
+                changed.add('description')
         pending_fields = [field for field in pending_fields if field not in changed]
         fields = missing_fields(draft)
         field = pending_fields[0] if pending_fields else fields[0] if fields else None
@@ -384,17 +412,38 @@ async def advance_product_draft(
         # A natural message can contain every field in any order. Interpret the
         # whole turn before deciding which question to ask, including ready edits.
         semantic_turn = not bare and (bool(missing_fields(draft)) or not changed)
-        needs_model = wants_copy or simple_name or semantic_turn or repaired or (core_complete and not draft.description)
+        own_copy = review_only and draft.copy_instructions == SELLER_WRITES_COPY
+        if not wants_copy and choice is None and not seller_copy_request and (labelled_copy(message) or 'description' in changed):
+            short = [key for key, limit, words in (('name', 22, 3), ('description', 48, 8))
+                     if key in changed and (value := getattr(draft, key)) and (len(value) < limit or len(value.split()) <= words)]
+            copy_offer = list(dict.fromkeys([*copy_offer, *short]))
+            offered_now = bool(short)
+            if 'name' in changed and 'name' not in short:
+                copy_offer = [key for key in copy_offer if key != 'name']
+            if 'description' in changed and 'description' not in short:
+                copy_offer = [key for key in copy_offer if key != 'description']
+        needs_model = wants_copy or repaired or (choice is None and not offered_now and not own_copy and (
+            simple_name or semantic_turn or core_complete and not draft.description))
         if needs_model:
             try:
-                copy, ai_image_count = await _compose_product_copy(session, ai_provider, draft, categories, upload_dir, message)
+                copy, ai_image_count = await _compose_product_copy(
+                    session, ai_provider, draft, categories, upload_dir, message, copy_fields=copy_fields)
                 used_model = True
-                changed.update(_apply_model_details(draft, copy, message, categories, rewrite=wants_copy or simple_name or contextual_product_reference(message)))
+                changed.update(_apply_model_details(draft, copy, message, categories,
+                    rewrite=wants_copy or simple_name or contextual_product_reference(message),
+                    keep_title=(not wants_copy and (review_only and bool(draft.name) or 'name' in copy_offer
+                                                    or 'name' in changed and labelled_copy(message))
+                                or wants_copy and bool(draft.name) and copy_fields == {'description'}),
+                    keep_description=(not wants_copy and ('description' in changed or 'description' in copy_offer)
+                                      or wants_copy and copy_fields == {'name'}),
+                    rewrite_description=wants_copy and 'description' in copy_fields))
                 clarification = copy.clarification
                 validation_error = None
             except AIProviderError as error:
                 fallback_reason = error.reason
                 fallback_stage = error.stage or 'listing_validation'
+                if wants_copy:
+                    copy_offer = previous.get('copy_offer', [])
                 logger.warning('Listing used grounded fallback: draft_id=%s reason=%s stage=%s', draft.id, fallback_reason, fallback_stage)
                 # Keep supplied facts and ask only for what remains. Never pass
                 # a paragraph/instruction off as a product title when AI is offline.
@@ -429,7 +478,7 @@ async def advance_product_draft(
             draft.status = 'collecting'
             answer = validation_error or _missing_question(remaining, categories, draft=draft)
         elif clarification:
-            draft.status = "collecting"
+            draft.status = 'ready' if was_ready and not remaining and fallback_reason else 'collecting'
             answer = clarification
         elif not remaining:
             mark_ready(draft)
@@ -440,14 +489,34 @@ async def advance_product_draft(
             draft.status = "collecting"
             answer = validation_error or _safe_followup(copy, remaining) or _missing_question(remaining, categories, draft=draft)
             if used_model and draft.name and draft.description and not validation_error:
-                answer = f"Mình đã soạn tiêu đề và mô tả cho **{draft.name}**.\n\n" + answer
+                copy_label = 'mô tả' if review_only and not wants_copy else 'tiêu đề và mô tả'
+                answer = f"Mình đã soạn {copy_label} cho **{draft.name}**.\n\n" + answer
         if repaired:
             answer = "Tên cũ đang là câu lệnh nên mình đã bỏ khỏi bản nháp. " + answer
+        if offered_now and copy_offer and choice is None and not validation_error:
+            offered = ('tiêu đề và mô tả' if len(copy_offer) == 2 else 'tiêu đề' if copy_offer[0] == 'name' else 'mô tả')
+            answer = f'Mình đã giữ nguyên {offered} bạn gửi. Bạn muốn mình gợi ý {offered} bắt mắt hơn không?'
+        elif choice is False:
+            answer = 'Mình giữ nguyên nội dung bạn đã gửi nhé. ' + answer
+        elif wants_copy and used_model and not clarification and not validation_error:
+            if 'name' in changed and 'name' in copy_fields:
+                answer = f'Tiêu đề mình gợi ý là **{draft.name}**.\n\n' + answer
+            elif 'description' in changed and 'description' in copy_fields:
+                answer = f'Mình đã soạn lại mô tả cho **{draft.name}**. Bạn xem bản nháp ở dưới nhé.\n\n' + answer
         draft.updated_at = datetime.utcnow()
 
     return _save_draft_turn(session, draft, message, answer, used_model, fallback_reason,
                             ai_provider=ai_provider, pending_fields=pending_fields, fallback_stage=fallback_stage,
-                            ai_image_count=ai_image_count)
+                            ai_image_count=ai_image_count, copy_offer=copy_offer)
+
+
+def field_was_requested(dialogue, field):
+    return bool(dialogue and re.match(rf'^Bạn (?:mô tả|cho mình (?:phần )?{field}|gửi (?:phần )?{field})\b', dialogue[-1].answer, re.I))
+
+
+def has_copy_offer(session, draft):
+    dialogue = _draft_dialogue(session, draft, limit=1)
+    return bool(dialogue and json.loads(dialogue[-1].facts_json).get('copy_offer'))
 
 
 def publish_product_draft(session: Session, shop: UTEMallRepository, draft_id: int) -> ProductDraft:
@@ -507,7 +576,8 @@ def _owned_draft(session, shop, draft_id):
     return draft
 
 
-def _save_draft_turn(session, draft, message, answer, used_model, fallback_reason, tool=None, ai_provider=None, pending_fields=None, fallback_stage=None, ai_image_count=0):
+def _save_draft_turn(session, draft, message, answer, used_model, fallback_reason, tool=None, ai_provider=None,
+                     pending_fields=None, fallback_stage=None, ai_image_count=0, copy_offer=None):
     if draft.id is None:
         session.flush()
     tool = tool or ("prepare_product_publish" if draft.status == "ready" else "update_product_draft")
@@ -515,6 +585,7 @@ def _save_draft_turn(session, draft, message, answer, used_model, fallback_reaso
         session, draft, message=message, answer=answer, tool=tool,
         facts={"draft_id": draft.id, "image_count": len(draft_stored_images(draft)),
                "missing_fields": missing_fields(draft), 'pending_fields': pending_fields or [],
+               **({'copy_offer': copy_offer} if copy_offer else {}),
                **({'ai_image_count': ai_image_count} if used_model else {}),
                **({'ai_failure': {'reason': fallback_reason, 'stage': fallback_stage}} if fallback_reason else {})},
         provider=getattr(ai_provider, 'response_provider', getattr(ai_provider, "provider", "unknown")) if used_model else "deterministic_parser",
@@ -542,7 +613,7 @@ def _repair_command_content(draft: ProductDraft) -> bool:
     return False
 
 
-async def _compose_product_copy(session, ai_provider, draft, categories, upload_dir, message) -> tuple[ListingCopy, int]:
+async def _compose_product_copy(session, ai_provider, draft, categories, upload_dir, message, *, copy_fields) -> tuple[ListingCopy, int]:
     runs = _draft_dialogue(session, draft)
     history = []
     for run in runs:
@@ -554,6 +625,7 @@ async def _compose_product_copy(session, ai_provider, draft, categories, upload_
         'category_id': draft.category_id, 'category': draft.category_name,
         'price_vnd': draft.price_vnd, 'stock': draft.stock,
         'copy_instructions': draft.copy_instructions,
+        'copy_targets': sorted(copy_fields),
         'allowed_categories': categories,
         'current_message': message,
         'last_question': runs[-1].answer if runs else None,
@@ -595,7 +667,8 @@ def _evidence_in_message(evidence: str | None, message: str) -> bool:
 
 
 
-def _apply_model_details(draft, copy: ListingCopy, message: str, categories, *, rewrite: bool):
+def _apply_model_details(draft, copy: ListingCopy, message: str, categories, *, rewrite: bool,
+                         keep_title=False, keep_description=False, rewrite_description=False):
     """Model interprets language; backend verifies seller-supplied commercial values."""
     applied = set()
     if copy.price_vnd is not None and _evidence_in_message(copy.price_evidence, message):
@@ -611,13 +684,14 @@ def _apply_model_details(draft, copy: ListingCopy, message: str, categories, *, 
             draft.stock = copy.stock
             applied.add('stock')
     if not copy.clarification:
-        if copy.name and (draft.name is None or rewrite or _evidence_in_message(copy.name_evidence, message)):
+        if not keep_title and copy.name and (draft.name is None or rewrite or _evidence_in_message(copy.name_evidence, message)):
             draft.name = copy.name.strip()
             applied.add('name')
-        if copy.description and (draft.description is None or rewrite or _evidence_in_message(copy.description_evidence, message)):
+        if not keep_description and copy.description and (draft.description is None or rewrite or _evidence_in_message(copy.description_evidence, message)):
             # Preserve the seller's supplied prose verbatim; generated copy is
             # used only when no source description was supplied or rewriting was requested.
-            draft.description = copy.description_evidence.strip() if _evidence_in_message(copy.description_evidence, message) else copy.description.strip()
+            supplied = not rewrite_description and _evidence_in_message(copy.description_evidence, message)
+            draft.description = copy.description_evidence.strip() if supplied else copy.description.strip()
             applied.add('description')
         if copy.category_id is not None and (draft.category_id is None or _evidence_in_message(copy.name_evidence, message)
                                               or 'name' in applied and contextual_product_reference(message)):
@@ -673,22 +747,22 @@ def _plain(value):
 
 
 FIELD_LABELS = (
-    r"tên(?:\s+sản phẩm)?|ten(?:\s+san pham)?|tiêu\s+đề|tieu\s+de|"
+    r"tên(?:\s+sản phẩm)?|ten(?:\s+san pham)?|tiêu\s+đề|tieu\s+de|title|product name|"
     r"giá(?:\s+bán)?|gia(?:\s+ban)?|"
     r"tồn(?:\s+kho)?|ton(?:\s+kho)?|số\s+lượng|so\s+luong|"
     r"ngành(?:\s+hàng)?|nganh(?:\s+hang)?|danh\s+mục|danh\s+muc|"
-    r"mô\s+tả|mo\s+ta|nội\s+dung|noi\s+dung|caption"
+    r"mô\s+tả|mo\s+ta|nội\s+dung|noi\s+dung|caption|description"
 )
 
 
 def _extract_labeled_value(message: str, labels: str) -> str | None:
     match = re.search(
-        rf"(?:^|[,;\n])\s*(?:{labels})\s*(?:là\s+|la\s+|[:=\-]\s*)(.+)",
+        rf"(?:^|[,;\n])\s*(?:{labels})\s*(?:(?:là|la|is)\s+|[:=\-]\s*)(.+)",
         message.strip(), flags=re.I | re.S,
     )
     if not match:
         return None
-    value = re.split(rf"[,;\n]\s*(?=(?:{FIELD_LABELS})\s*(?:là\s|la\s|[:=\-]))", match.group(1), maxsplit=1, flags=re.I)[0]
+    value = re.split(rf"[,;\n]\s*(?=(?:{FIELD_LABELS})\s*(?:(?:là|la|is)\s|[:=\-]))", match.group(1), maxsplit=1, flags=re.I)[0]
     return value.strip(" \t\r\n\"'") or None
 
 
@@ -790,17 +864,29 @@ def _extract_labeled_price(message: str) -> int | None:
     return values[0] if values and all(value == values[0] for value in values) else None
 
 
+def spoken_listing_amounts(message: str) -> list[str]:
+    """Keep explicitly stated selling figures while the seller chooses the copy."""
+    price = _extract_labeled_price(message)
+    stock = _extract_labeled_stock(message)
+    result = []
+    if price is not None and 1_000 <= price <= 1_000_000_000:
+        result.append(f'Giá bán: {price} đồng')
+    if stock is not None and 0 <= stock <= 1_000_000:
+        result.append(f'Tồn kho: {stock} cái')
+    return result
+
+
 def _apply_explicit_details(draft, message: str, categories: list[dict]) -> set[str]:
     """Apply clearly labelled facts, including corrections to an existing draft."""
     changed: set[str] = set()
     if _plain(message).strip(' .!?') in EMPTY_STOCK_PHRASES:
         draft.stock = 0
         changed.add('stock')
-    name = _extract_labeled_value(message, r"tên(?:\s+sản phẩm)?|ten(?:\s+san pham)?|tiêu\s+đề|tieu\s+de")
+    name = _extract_labeled_value(message, r"tên(?:\s+sản phẩm)?|ten(?:\s+san pham)?|tiêu\s+đề|tieu\s+de|title|product name")
     if not name:
         candidate = _command_product_name(message)
         name = candidate if candidate and _simple_name_reply(candidate) else None
-    if name and _candidate_product_name(name) is not None and 5 <= len(name) <= 200:
+    if name and _candidate_product_name(name) is not None and 2 <= len(name) <= 200:
         draft.name = name
         changed.add("name")
     if re.search(r"\b(?:giá|gia|bán|ban|để|de|chốt|chot)\b", message, flags=re.I):
@@ -817,8 +903,8 @@ def _apply_explicit_details(draft, message: str, categories: list[dict]) -> set[
     if category:
         draft.category_id, draft.category_name = category["id"], category["name"]
         changed.add("category_id")
-    description = _extract_labeled_value(message, r"mô\s+tả|mo\s+ta|nội\s+dung|noi\s+dung|caption")
-    if description and not _wants_ai_description(description) and len(description) >= 10:
+    description = _extract_labeled_value(message, r"mô\s+tả|mo\s+ta|nội\s+dung|noi\s+dung|caption|description")
+    if description and not _wants_ai_description(description) and len(description) >= 2:
         draft.description = _clean_supplied_description(description)[:10_000]
         changed.add("description")
     return changed

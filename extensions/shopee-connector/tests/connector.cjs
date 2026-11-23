@@ -264,7 +264,7 @@ test('publish on non-product page automatically navigates to Shopee new product 
   const [state, api] = await load(); saved = {};
   await state.bindCurrentTab('shopee');
   await state.mutate(connection => {connection.target = {label: 'fixture-shop'};});
-  await state.mutate(connection => {connection.drafts[1] = {id: 1, status: 'ready', name: 'Mũ bảo hiểm POC', description: 'Mũ đẹp', price_vnd: 250000, stock: 20};});
+  await state.mutate(connection => {connection.drafts[1] = {id: 1, status: 'ready', name: 'Mũ bảo hiểm POC', description: 'Mũ đẹp', price_vnd: 250000, stock: 0};});
 
   let navigatedUrl = null;
   const originalUpdate = chrome.tabs.update;
@@ -288,7 +288,8 @@ test('publish on non-product page automatically navigates to Shopee new product 
     assert.ok(stored);
     assert.equal(stored.draft.name, 'Mũ bảo hiểm POC');
     assert.equal(stored.draft.price_vnd, 250000);
-    assert.equal(stored.draft.stock, 20);
+    assert.equal(stored.draft.stock, 0);
+    assert.equal(stored.draft.description, 'Mũ đẹp');
   } finally {
     chrome.tabs.update = originalUpdate;
     chrome.tabs.sendMessage = originalSend;

@@ -56,6 +56,58 @@ _ORDER_STATUSES = {
     'returned': r'(?:da )?hoan(?: hang)?',
 }
 
+_EN_PERIODS = {
+    'today': 'hom nay', 'yesterday': 'hom qua', 'the day before yesterday': 'hom kia',
+    'this week': 'tuan nay', 'last week': 'tuan truoc',
+    'this month': 'thang nay', 'last month': 'thang truoc',
+}
+_EN_METRICS = (
+    (r'(?:total )?(?:value|revenue) (?:of|from) delivered orders|delivered order value', 'gia tri don da giao'),
+    (r'average order value', 'gia tri trung binh moi don'),
+    (r'(?:total )?order value|(?:total )?(?:sales|revenue)|how much did (?:we|my shop) sell', 'doanh so bao nhieu'),
+    (r'(?:how many |number of )?(?:valid )?orders(?: did (?:we|my shop) (?:get|receive|have))?', 'co bao nhieu don'),
+    (r'(?:how many |number of )?(?:units|items|products)(?: (?:did (?:we|my shop) sell|sold))', 'ban duoc bao nhieu san pham'),
+    (r'(?:actual payout|actual revenue|payouts|how much (?:cash |money )?did (?:we|my shop) collect)', 'tien thuc thu'),
+    (r'(?:sales |shop |business )?(?:overview|summary|performance|report)|how (?:is|did) (?:my|the) shop (?:doing|do)', 'tong quan shop'),
+)
+_EN_ORDER = {'pending': 'cho xac nhan', 'awaiting pickup': 'cho lay hang', 'shipped': 'dang giao',
+             'delivered': 'da giao', 'cancelled': 'da huy', 'canceled': 'da huy', 'returned': 'da hoan'}
+_EN_PERIOD = re.compile(r'\b(?:' + '|'.join(_EN_PERIODS) + r'|(?:the )?(?:last|past) (\d{1,3}|seven|thirty) days)\b')
+_EN_DAY_NUMBERS = {'seven': '7', 'thirty': '30'}
+
+
+def english_sales_text(text):
+    """Translate whole English reporting clauses into the shared read grammar."""
+    value = re.sub(r'^(?:(?:hi|hello)[,. ]+)?(?:(?:can|could|would) you )?(?:please )?'
+                   r'(?:(?:show|tell|give) me (?:the )?|what (?:is|was|were) (?:the )?)?', '', text)
+    periods = list(_EN_PERIOD.finditer(value))
+    body = ' '.join(_EN_PERIOD.sub('', value).split()).strip(' ,')
+    body = re.sub(r'^(?:for|on) (?=\w)', '', body)
+    body = re.sub(r' (?:on|for|in)$', '', body)
+    vietnamese = [
+        _EN_PERIODS[match[0]] if not match[1] else
+        f"{_EN_DAY_NUMBERS.get(match[1], match[1])} ngay qua"
+        for match in periods
+    ]
+    suffix = ' '.join(vietnamese)
+    if len(periods) == 1 and re.fullmatch(r'(?:what about|and|how about|for|on)?', body):
+        return 'con ' + suffix
+    if len(periods) == 2 and set(vietnamese) == {'hom nay', 'hom qua'}:
+        comparison = re.fullmatch(r'(?:compare )?(.+?) (?:vs\.?|versus|compared (?:with|to)|with|and)', body)
+        if comparison:
+            body, suffix = comparison[1], 'hom nay so voi hom qua'
+    prefix = ''
+    if match := re.match(r'^(?:of those|out of those|and|what about) *,? +', body):
+        prefix, body = 'trong do ', body[match.end():]
+    if status := re.fullmatch(r'(?:how many |number of )?(?:(.+?) orders|orders (?:were )?(.+))', body):
+        label = _EN_ORDER.get(status[1] or status[2])
+        if label:
+            return f'{prefix}co bao nhieu don {label} {suffix}'.strip()
+    for pattern, metric in _EN_METRICS:
+        if re.fullmatch(pattern, body):
+            return f'{prefix}{metric} {suffix}'.strip()
+    return text
+
 
 def sales_text(text):
     text = normalize_reporting_day_words(text)
@@ -109,6 +161,14 @@ def sales_period_followup(text, *, today):
     return sales_period(match[1], today=today) if match else None
 
 
+def sales_metric_followup(text, *, today):
+    match = re.fullmatch(r'(?:vay |the )?(?:trong (?:do|so do) |con )(.+?)(?: thi sao)?', text)
+    if not match:
+        return None
+    command = shop_summary_read(match[1], today=today)
+    return command if command and command.sales_metric else None
+
+
 def shop_summary_read(text, *, today):
     text = sales_text(text)
     period = sales_period(text, today=today)
@@ -124,16 +184,21 @@ def shop_summary_read(text, *, today):
     for status, label in _ORDER_STATUSES.items():
         if re.fullmatch(rf'{_SUBJECT}(?:(?:co |con )?{_AMOUNT} don(?: hang)? {label}'
                         rf'|{label} (?:duoc )?{_AMOUNT} don(?: hang)?'
+                        rf'|(?:so |tong so )?don(?: hang)? {label}'
                         rf'|don(?: hang)? {label} (?:co |con )?{_AMOUNT})', body):
             return ParsedCommand(intent='shop_summary', sales_metric=status, **period)
     modes = (
         ('units', rf'{_SUBJECT}{_SELL} {_AMOUNT} {_QUANTITY}'),
         ('collected', rf'{_SUBJECT}(?:da )?(?:thu(?: duoc)?|nhan(?: duoc)?) {_AMOUNT} tien|{_SUBJECT}(?:tien|doanh thu) (?:thuc thu|da thu)(?: {_AMOUNT})?'),
-        ('delivered', rf'{_SUBJECT}(?:gia tri|tong tien)(?: cac)? don (?:da )?giao(?:(?: la)? {_AMOUNT})?'),
+        ('delivered_value', rf'{_SUBJECT}(?:gia tri|tong tien)(?: cac)? don(?: hang)? (?:da )?giao(?:(?: la)? {_AMOUNT})?'),
+        ('average_order', rf'{_SUBJECT}(?:gia tri|tien) (?:don(?: hang)? trung binh|trung binh(?: moi)? don(?: hang)?)(?:(?: la)? {_AMOUNT})?'),
+        ('orders', rf'{_SUBJECT}(?:{_ORDER_AMOUNT}(?: hop le)?|(?:tong |tong cong )?so don(?: hang)?(?: hop le)?(?: (?:la )?{_AMOUNT})?)'),
+        ('order_value', rf'{_SUBJECT}(?:{_VALUE}|{_SELL} {_AMOUNT} tien)'),
         (None, _SUMMARY),
         (None, rf'{_SUBJECT}(?:ban hang |ban )?(?:the nao|ra sao|sao(?: roi)?|ban chay khong)'),
-        (None, r'(?:tinh hinh|tong quan|so lieu)(?: ban hang)?(?: (?:cua )?shop(?: (?:minh|toi|em))?)?'),
-        (None, r'(?:thong ke|bao cao)' if period else r'(?!)'),
+        (None, r'(?:(?:tinh hinh|tong quan|(?:tong )?so lieu)(?: (?:ban hang|kinh doanh))?|hieu qua (?:ban hang|kinh doanh))'
+               r'(?: (?:cua )?shop(?: (?:minh|toi|em))?)?(?: (?:the nao|ra sao|sao))?'),
+        (None, r'(?:thong ke|bao cao|xem)' if period else r'(?!)'),
     )
     for metric, pattern in modes:
         if re.fullmatch(pattern, body):
@@ -143,7 +208,7 @@ def shop_summary_read(text, *, today):
 
 
 def quick_read(message, *, today):
-    text = read_text(message)
+    text = english_sales_text(read_text(message))
     text = re.sub(r'[.?!;]\s*(?:ban )?(?:cho (?:minh|toi|em) xem|ve|xem|hien thi) '
                   r'(?:bieu do|bang so lieu|bao cao truc quan)$', '', text)
     if summary := shop_summary_read(text, today=today):

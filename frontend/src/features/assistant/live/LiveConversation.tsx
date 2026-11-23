@@ -33,8 +33,8 @@ export type LiveShopResult = {
   sales_context?: { sales_metric?: string; compare_yesterday?: boolean };
 };
 type LiveEvent =
-  | { type: 'ready'; turn_protocol?: number }
-  | { type: 'audio_received' | 'interrupted' | 'audio_end' | 'finished' }
+  | { type: 'ready'; turn_protocol?: number; greeting_count?: number }
+  | { type: 'audio_received' | 'interrupted' | 'audio_end' | 'finished' | 'reconnecting' }
   | { type: 'turn_end'; clear_captions?: boolean; turn_id?: string }
   | { type: 'audio'; data: string; review?: boolean }
   | { type: 'transcript'; role: LiveCaption['role']; text: string; final?: boolean; snapshot?: boolean; unclear?: boolean; turn_id?: string }
@@ -55,6 +55,7 @@ type Session = {
   audio?: LiveAudio;
   socket?: WebSocket;
   watchdog?: ReturnType<typeof setTimeout>;
+  reconnectTimer?: ReturnType<typeof setTimeout>;
   stopCue?: () => void;
   finish?: (acknowledged?: boolean) => void;
   finishTimeout?: ReturnType<typeof setTimeout>;
@@ -168,7 +169,8 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
   const voiceActive = useRef(false);
   const cues = useRef<{ enter: number | string; exit: number | string }>({ enter: ENTER_CUE, exit: EXIT_CUE });
   const exitCue = useRef<ReturnType<typeof playCue> | null>(null);
-  const [phase, setPhase] = useState<'idle' | 'connecting' | 'live'>('idle');
+  const nextGreeting = useRef<Partial<Record<LiveLanguage, number>>>({});
+  const [phase, setPhase] = useState<'idle' | 'connecting' | 'reconnecting' | 'live'>('idle');
   const [muted, setMuted] = useState(false);
   const [inputReady, setInputReady] = useState(false);
   const [captureReady, setCaptureReady] = useState(false);
@@ -188,6 +190,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     current.current = null;
     if (session.pendingHistory) interruptedHistory.current = session.conversationId;
     clearTimeout(session.watchdog);
+    clearTimeout(session.reconnectTimer);
     clearTimeout(session.finishTimeout);
     clearTimeout(session.inputTimeout);
     clearTimeout(session.captionTimer);
@@ -216,8 +219,8 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
         if (session.captureStarted) session.audio?.mute(session.muted);
         return;
       }
-      // An iOS permission prompt can temporarily make the app inactive.
-      if (state === 'background' || state === 'inactive' && session.captureStarted) {
+      // System overlays and the audio session may briefly make iOS inactive.
+      if (state === 'background') {
         if (session.finish) { session.finish(); return; }
         disconnect();
         setSpeaking(false); setPhase('idle'); setUploading(false); setPicking(false);
@@ -310,7 +313,8 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
 
   async function start() {
     if (current.current || closing.current) return;
-    const session: Session = { conversationId: conversationId ?? interruptedHistory.current ?? createMessageId(), voice: new VoiceTurn(),
+    const session: Session = { conversationId: conversationId ?? interruptedHistory.current ?? createMessageId(),
+      voice: preferences.language === 'vi' ? new VoiceTurn(1370, 970) : new VoiceTurn(),
       preRoll: new MicPrefix(420), startup: new MicPrefix(8000), captured: false, language: preferences.language,
       ready: false, captureStarted: false, pendingHistory: false, muted: false, picking: false,
       skipOutput: false, outputOpen: false, manualTurns: false, waiting: false, playing: false, fallbackTurn: createMessageId(),
@@ -319,6 +323,18 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     setMuted(false); setInputReady(false); setCaptureReady(false); setSpeaking(false); setUserSpeaking(false); setProcessing(false);
     setNotice(''); setPhase('connecting'); setUploading(false); setGalleryFailed(false); setListing(null); setArchiveReview('');
     try {
+      let welcomePending = true;
+      let greetingCount = 0;
+      function greet() {
+        const socket = session.socket;
+        if (!welcomePending || session.stopCue || !session.captureStarted || !session.ready || greetingCount < 1 ||
+            current.current !== session || closing.current || socket?.readyState !== WebSocket.OPEN) return;
+        welcomePending = false;
+        if (session.voice.hasSpeech || session.waiting || session.picking) return;
+        const variant = (nextGreeting.current[session.language] ?? Math.floor(Math.random() * greetingCount)) % greetingCount;
+        socket.send(JSON.stringify({ type: 'greet', variant }));
+        nextGreeting.current[session.language] = (variant + 1) % greetingCount;
+      }
       function forwardFrame(socket: WebSocket, frame: MicFrame, rms = pcmLevel(frame.pcm)) {
         if (session.waiting) {
           session.startup.add(frame);
@@ -332,6 +348,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
             return;
           }
           if (signal === 'start') {
+            welcomePending = false;
             socket.send('{"type":"speech_start"}');
             session.pendingHistory = true;
             for (const prefix of session.preRoll.drain()) sendPcm(socket, prefix.pcm, prefix.rate);
@@ -342,6 +359,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
         if (signal === 'end') sendTurn(session, socket);
       }
       session.audio = createLiveAudio({
+        vietnamese: session.language === 'vi',
         microphone(pcm, rate) {
           const socket = session.socket;
           if (current.current !== session || session.muted || session.picking || session.stopCue || session.readingReview) return;
@@ -386,123 +404,164 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
       exitCue.current?.stop();
       const cue = playCue(cues.current.enter);
       session.stopCue = cue.stop;
-      void cue.done.then(() => { session.stopCue = undefined; });
+      void cue.done.then(() => {
+        session.stopCue = undefined;
+        greet();
+      });
       // Open the provider connection while audio initializes. Native capture still
       // starts after the chime so it does not record the chime or cut it short.
-      const socket = session.socket = openSellerLiveSocket(session.conversationId, preferences);
-      session.watchdog = setTimeout(() => fail('Live kết nối quá lâu. Kiểm tra máy chủ rồi thử lại.'), 24_000);
-      socket.onerror = () => {
-        if (current.current !== session) return;
-        if (session.finish) session.finish(); else fail('Chưa kết nối được Live. Kiểm tra mạng và máy chủ.');
-      };
-      socket.onclose = () => {
-        if (current.current !== session) return;
-        if (session.finish) session.finish(); else fail('Phiên Live đã kết thúc.');
-      };
-      socket.onmessage = message => {
-        if (current.current !== session || typeof message.data !== 'string') return;
-        try {
-          const event = JSON.parse(message.data) as LiveEvent;
-          switch (event.type) {
-            case 'ready':
-              clearTimeout(session.watchdog);
-              session.manualTurns = event.turn_protocol === 1;
-              if (session.manualTurns) setInputReady(true);
-              session.ready = true; setPhase('live');
-              for (const frame of session.startup.drain()) forwardFrame(socket, frame);
-              watchInput(session);
-              break;
-            case 'audio_received':
-              clearTimeout(session.inputTimeout);
-              setInputReady(true);
-              break;
-            case 'audio': {
-              if (session.finish) break;
-              session.outputOpen = true;
-              if (session.skipOutput || session.picking) break;
-              const pcm = toByteArray(event.data);
-              if (pcm.length > 2 && pcm.length % 2 === 0) {
-                // Keep the read-back containing the approval phrase out of the mic.
-                session.readingReview ||= event.review;
-                meter(pcmLevel(pcm), 4);
-                session.audio?.play(pcm);
-              }
-              break;
-            }
-            case 'interrupted':
-              session.outputOpen = false;
-              session.skipOutput = false;
-              session.audio?.interrupt();
-              break;
-            case 'audio_end':
-              session.outputOpen = false;
-              session.readingReview = session.playing && session.readingReview;
-              if (!session.skipOutput) session.audio?.flush();
-              break;
-            case 'turn_end':
-              session.outputOpen = false;
-              session.skipOutput = false;
-              session.audio?.flush();
-              if (event.clear_captions) discardCaptions(session, event.turn_id ?? session.fallbackTurn);
-              else flushCaptions(session, true);
-              if (!event.turn_id) session.fallbackTurn = createMessageId();
-              setProcessing(false);
-              if (session.waiting && !session.finish) {
-                session.waiting = false;
-                for (const frame of session.startup.drain()) forwardFrame(socket, frame);
-              }
-              break;
-            case 'turn_saved':
-              session.pendingHistory = session.voice.hasSpeech || session.waiting;
-              interruptedHistory.current = undefined;
-              {
-                const id = event.turn.response.facts.live_turn_id;
-                if (typeof id === 'string') discardCaptions(session, id, false);
-                else if (event.turn.response.facts.voice) onCaptions([]);
-              }
-              onSaved(event.turn);
-              break;
-            case 'finished':
-              session.pendingHistory = false;
-              interruptedHistory.current = undefined;
-              session.finish?.(true);
-              break;
-            case 'transcript': {
-              if (session.skipOutput && event.role === 'assistant') break;
-              if (event.role === 'user') session.pendingHistory = true;
-              const id = event.turn_id ?? session.fallbackTurn;
-              if (session.closedTurns.has(id)) break;
-              const key = liveMessageKey(id, event.role);
-              session.captions.set(key, { turnId: id, role: event.role,
-                text: event.text.trim(), final: event.final || event.unclear });
-              if (event.final || event.unclear) flushCaptions(session);
-              else if (event.role === 'assistant') {
-                const user = session.captions.get(liveMessageKey(id, 'user'));
-                if (user && !session.visibleUserTurns.has(id)) user.final = true;
-                session.captionTimer ??= setTimeout(() => flushCaptions(session), 100);
-              }
-              break;
-            }
-            case 'draft': setListing(event.draft); break;
-            case 'archive_review': setArchiveReview(event.name); break;
-            case 'action_done':
-              setArchiveReview('');
-              if (event.draft) setListing(event.draft);
-              if (event.changed) onShopChanged?.();
-              break;
-            case 'shop_result': session.pendingHistory = true; onResult(event); break;
-            case 'image_rejected': setNotice(event.message); break;
-            case 'ended':
-            case 'error':
-              if (session.finish) session.finish();
-              else fail(event.message);
-              break;
+      let reconnects = 0;
+      function attach() {
+        const socket = session.socket = openSellerLiveSocket(session.conversationId, preferences);
+        function reconnect() {
+          if (current.current !== session || session.socket !== socket || closing.current) return;
+          if ((!session.ready && reconnects === 0) || reconnects >= 2) {
+            fail('Mình chưa nối lại được Live. Bạn có thể mở lại để tiếp tục.');
+            return;
           }
-        } catch {
-          if (session.finish) session.finish();
-          else fail('Chưa phát được phản hồi Live. Bạn mở lại phiên nhé.');
+          welcomePending = false;
+          reconnects++;
+          const droppedSpeech = session.voice.hasSpeech || session.waiting;
+          session.socket = undefined;
+          clearTimeout(session.watchdog);
+          clearTimeout(session.inputTimeout);
+          session.voice.reset();
+          session.preRoll.drain();
+          session.startup.drain();
+          session.waiting = session.ready = session.outputOpen = session.skipOutput = false;
+          session.readingReview = false;
+          session.audio?.flush();
+          setProcessing(false); setInputReady(false); setPhase('reconnecting');
+          setNotice(droppedSpeech ? 'Mất kết nối giữa chừng. Khi Live nối lại, bạn nói lại câu vừa rồi nhé.' : '');
+          socket.close();
+          session.reconnectTimer = setTimeout(() => {
+            if (current.current === session && !closing.current) attach();
+          }, reconnects * 500);
         }
-      };
+        session.watchdog = setTimeout(() => reconnects ? reconnect() : fail('Live kết nối quá lâu. Kiểm tra máy chủ rồi thử lại.'), 24_000);
+        socket.onerror = () => {
+          if (current.current !== session || session.socket !== socket) return;
+          if (session.finish) session.finish(); else reconnect();
+        };
+        socket.onclose = () => {
+          if (current.current !== session || session.socket !== socket) return;
+          if (session.finish) session.finish(); else reconnect();
+        };
+        socket.onmessage = message => {
+          if (current.current !== session || session.socket !== socket || typeof message.data !== 'string') return;
+          try {
+            const event = JSON.parse(message.data) as LiveEvent;
+            switch (event.type) {
+              case 'ready':
+                clearTimeout(session.watchdog);
+                session.manualTurns = event.turn_protocol === 1;
+                greetingCount = typeof event.greeting_count === 'number' && Number.isInteger(event.greeting_count)
+                  ? event.greeting_count : 0;
+                if (session.manualTurns) setInputReady(true);
+                session.ready = true; setPhase('live');
+                for (const frame of session.startup.drain()) forwardFrame(socket, frame);
+                greet();
+                watchInput(session);
+                break;
+              case 'audio_received':
+                clearTimeout(session.inputTimeout);
+                setInputReady(true);
+                break;
+              case 'audio': {
+                if (session.finish) break;
+                session.outputOpen = true;
+                if (session.skipOutput || session.picking) break;
+                const pcm = toByteArray(event.data);
+                if (pcm.length > 2 && pcm.length % 2 === 0) {
+                  // Keep the read-back containing the approval phrase out of the mic.
+                  session.readingReview ||= event.review;
+                  meter(pcmLevel(pcm), 4);
+                  session.audio?.play(pcm);
+                }
+                break;
+              }
+              case 'interrupted':
+                session.outputOpen = false;
+                session.skipOutput = false;
+                session.audio?.interrupt();
+                break;
+              case 'audio_end':
+                session.outputOpen = false;
+                session.readingReview = session.playing && session.readingReview;
+                if (!session.skipOutput) session.audio?.flush();
+                break;
+              case 'turn_end':
+                session.outputOpen = false;
+                session.skipOutput = false;
+                session.audio?.flush();
+                if (event.clear_captions) discardCaptions(session, event.turn_id ?? session.fallbackTurn);
+                else flushCaptions(session, true);
+                if (!event.turn_id) session.fallbackTurn = createMessageId();
+                setProcessing(false);
+                if (session.waiting && !session.finish) {
+                  session.waiting = false;
+                  for (const frame of session.startup.drain()) forwardFrame(socket, frame);
+                }
+                break;
+              case 'turn_saved':
+                reconnects = 0;
+                session.pendingHistory = session.voice.hasSpeech || session.waiting;
+                interruptedHistory.current = undefined;
+                {
+                  const id = event.turn.response.facts.live_turn_id;
+                  if (typeof id === 'string') discardCaptions(session, id, false);
+                  else if (event.turn.response.facts.voice) onCaptions([]);
+                }
+                onSaved(event.turn);
+                break;
+              case 'finished':
+                session.pendingHistory = false;
+                interruptedHistory.current = undefined;
+                session.finish?.(true);
+                break;
+              case 'transcript': {
+                if (session.skipOutput && event.role === 'assistant') break;
+                if (event.role === 'user') session.pendingHistory = true;
+                const id = event.turn_id ?? session.fallbackTurn;
+                if (session.closedTurns.has(id)) break;
+                const key = liveMessageKey(id, event.role);
+                session.captions.set(key, { turnId: id, role: event.role,
+                  text: event.text.trim(), final: event.final || event.unclear });
+                if (event.final || event.unclear) flushCaptions(session);
+                else if (event.role === 'assistant') {
+                  const user = session.captions.get(liveMessageKey(id, 'user'));
+                  if (user && !session.visibleUserTurns.has(id)) user.final = true;
+                  session.captionTimer ??= setTimeout(() => flushCaptions(session), 100);
+                }
+                break;
+              }
+              case 'draft': setListing(event.draft); break;
+              case 'archive_review': setArchiveReview(event.name); break;
+              case 'action_done':
+                setArchiveReview('');
+                if (event.draft) setListing(event.draft);
+                if (event.changed) onShopChanged?.();
+                break;
+              case 'shop_result': session.pendingHistory = true; onResult(event); break;
+              case 'image_rejected': setNotice(event.message); break;
+              case 'reconnecting':
+                if (session.finish) session.finish();
+                else reconnect();
+                break;
+              case 'ended':
+              case 'error':
+                if (session.finish) session.finish();
+                else if (reconnects && !session.ready) reconnect();
+                else fail(event.message);
+                break;
+            }
+          } catch {
+            if (session.finish) session.finish();
+            else fail('Chưa phát được phản hồi Live. Bạn mở lại phiên nhé.');
+          }
+        };
+      }
+      attach();
       if (Platform.OS !== 'web') {
         void Haptics.selectionAsync().catch(() => {});
       }
@@ -510,6 +569,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
       await session.audio.start(Platform.OS === 'web' ? undefined : cue.done);
       if (current.current !== session || closing.current) return;
       session.captureStarted = true;
+      greet();
       watchInput(session);
     } catch (error) {
       if (current.current === session) fail(error instanceof Error ? error.message : 'Chưa mở được Live.');
@@ -585,7 +645,7 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
     if (!session.muted) pauseMicrophone(session);
     try {
       if (!retry) {
-        const images = await pickProductImages(limit, 1400);
+        const images = await pickProductImages(limit, 1000);
         if (current.current !== session || !images.length) return;
         session.gallery = { images, requestId: createMessageId() };
       }
@@ -664,7 +724,8 @@ export const LiveConversation = forwardRef<LiveConversationHandle, Props>(functi
   if (!visible) return null;
   const copy = LIVE_TEXT[current.current?.language ?? preferences.language];
   const listening = phase === 'live' && inputReady && captureReady && !muted && !speaking && !picking;
-  const status = phase === 'connecting' ? captureReady ? copy.buffering : copy.connecting : phase === 'idle' ? copy.retry :
+  const status = phase === 'reconnecting' ? copy.reconnecting :
+    phase === 'connecting' ? captureReady ? copy.buffering : copy.connecting : phase === 'idle' ? copy.retry :
     uploading ? copy.uploading : picking ? copy.choosing : speaking ? copy.speaking : muted ? copy.muted :
     userSpeaking ? copy.userSpeaking : processing ? copy.processing : captureReady ? copy.listening : copy.openingMic;
   const canSendTurn = listening && Boolean(current.current?.voice.hasSpeech) && !processing;

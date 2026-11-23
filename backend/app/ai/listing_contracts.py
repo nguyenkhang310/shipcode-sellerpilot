@@ -58,6 +58,12 @@ class ListingCopy(BaseModel):
             instruction = bool(re.match(r'^(?:(?:hay|vui long|lam on|ban|ai|sellerpilot)\s+)?(?:dang|tao|them|dua|viet|soan|tu viet|tu soan)\b', text))
             if len(self.description.strip()) < 10 or instruction and (_is_generic_product_command(self.description) or _wants_ai_description(self.description)):
                 raise ValueError('listing_description: write product copy, not a request to generate it')
+        for target in facts.get('copy_targets', []):
+            current, proposed = facts.get(target), getattr(self, target, None)
+            if current and not proposed and not self.clarification:
+                raise ValueError(f'listing_rewrite: provide the requested {target}')
+            if isinstance(current, str) and isinstance(proposed, str) and plain(current).strip(' .') == plain(proposed).strip(' .'):
+                raise ValueError(f'listing_rewrite: provide an improved {target}, preserving the verified product details')
         has_details = any((self.name, self.description, self.price_vnd, self.stock is not None, self.category_id, self.clarification))
         question_fields = set(self.next_question_fields)
         missing = facts.get('missing_fields')
@@ -72,19 +78,22 @@ class ListingCopy(BaseModel):
     def condition_claims_need_seller_evidence(self, info: ValidationInfo):
         if not info.context or 'seller_text' not in info.context:
             return self
-        source = normalize_text(info.context['seller_text'])
-        output = normalize_text((self.name or '') + '\n' + (self.description or ''))
+        source = '\n'.join(normalize_text(line) for line in info.context['seller_text'].splitlines())
+        output = '\n'.join(normalize_text(field or '') for field in (self.name, self.description))
         claims = {
             'condition_new': r'\bmới\b',
             'sealed': r'\b(?:nguyên tem|nguyên seal|niêm phong)\b',
             'authentic': r'\bchính hãng\b',
             'warranty': r'\bbảo hành(?:\s+(?:\d+\s*(?:tháng|năm)|trọn đời))?\b',
         }
+        if (info.context.get('listing_facts') or {}).get('copy_targets'):
+            claims['unverified_feature'] = (r'\b(?:bàn phím cơ|gõ êm|chống nước|chống va đập|sạc nhanh'
+                                            r'|cắm(?: vào)? là dùng(?: ngay)?|không cần cài đặt)\b')
         for label, pattern in claims.items():
             for claim in re.finditer(pattern, output):
                 if label == 'condition_new' and re.search(r'(?:trải nghiệm|nội dung|ý tưởng|khởi đầu|góc làm việc|công việc)\s*$', output[max(0,claim.start()-30):claim.start()]):
                     continue
-                negation = r'\b(?:không|ko|khong|chưa|chua)(?:\s+\w+){0,2}\s*$'
+                negation = r'\b(?:không|ko|khong|chưa|chua)(?:[^\S\n]+\w+){0,2}[^\S\n]*\Z'
                 negative = bool(re.search(negation, output[max(0, claim.start() - 25):claim.start()]))
                 supported = any(bool(re.search(negation, source[max(0, found.start() - 25):found.start()])) == negative
                                 for found in re.finditer(re.escape(claim[0]), source))

@@ -17,6 +17,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus, WebSocketException
 
 from app.ai.key_pool import GeminiKeyPool, gemini_credentials, rejected_gemini_key, retry_delay
+from app.ai.listing_text import _wants_ai_description, labelled_copy, listing_copy_choice
 from app.ai.money import plain
 from app.core.config import LOCAL_WEB_ORIGIN
 from app.integrations.ute_mall import ShopDatabaseError, ShopItemNotFoundError
@@ -27,8 +28,11 @@ from app.services.conversation_state import ensure_conversation_open
 from app.services.conversations import has_product_reference
 from app.services.live_actions import LiveActions
 from app.services.live_history import LiveHistory
-from app.services.live_language import GEMINI_VOICES, LivePreferences, REPEAT_QUESTION, transcription_config, unclear_vietnamese
-from app.services.live_shop import inspect_shop
+from app.services.live_language import (
+    GEMINI_VOICES, LIVE_GREETINGS, LivePreferences, REPEAT_QUESTION, copy_choice, spoken_listing_name,
+    transcription_config, unclear_vietnamese,
+)
+from app.services.live_shop import inspect_shop, is_sales_question, strategy_summary
 from app.services.product_archive_chat import is_product_archive_request
 from app.services.product_drafts import ProductDraftNotFoundError
 
@@ -38,23 +42,26 @@ GEMINI_LIVE_URL = (
     'wss://generativelanguage.googleapis.com/ws/'
     'google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent'
 )
-SESSION_SECONDS = 180
+SESSION_SECONDS = 480
 MAX_PACKET = 48_000
 MAX_IMAGE_BASE64 = 700_000
 MAX_SESSIONS = 3
 LIVE_CONNECT_BUDGET = 18
 MAX_TOOLS_PER_TURN = 10
 INSTRUCTION = '''Bạn là SellerPilot, trợ lý dành cho người bán do ShipCODE phát triển.
-Ưu tiên câu ngắn, nói liền mạch với nhịp trò chuyện hơi nhanh, lấy hơi theo ý, giữ rõ phụ âm cuối và số. Chuyển sắc thái theo ngữ cảnh. Có thể đổi nhịp theo yêu cầu.
+Nói theo nhịp tự nhiên, tách nhẹ ở ranh giới ý và đọc trọn chữ cuối câu. Hỏi tiêu đề bằng giọng tò mò, xác nhận số tiền bằng giọng rõ và chậm hơn, nói về lỗi bằng giọng bình tĩnh. Khen vừa phải khi người bán hoàn tất một bước. Điều chỉnh nhịp theo yêu cầu.
 Vào thẳng việc người bán vừa hỏi. Chào hỏi, cảm ơn, đồng ý hoặc tạm biệt thì đáp bằng một câu phù hợp. Chỉ giới thiệu lại SellerPilot khi được hỏi. Nếu đã đủ dữ kiện để trả lời, chốt ý rồi nhường lượt nói, tránh hỏi «bạn cần gì nữa không» ở cuối.
 Đọc tiền, ngày và chữ viết tắt theo ngôn ngữ phiên. Không đọc markdown, JSON, SKU dài, URL, bảng hay toàn bộ một báo cáo. Chỉ nói điều quan trọng nhất rồi chừa khoảng cho người bán trao đổi tiếp.
 Khi âm thanh nghe không rõ, bị lẫn tiếng, hoặc câu nhận diện rời rạc, chỉ hỏi người bán nói lại chỗ đó. Không đoán tên sản phẩm hay yêu cầu của người bán từ âm không rõ hoặc từ ảnh có sẵn.
 Khi hỏi số liệu, tồn, sản phẩm, trạng thái đơn, kế hoạch bán hàng, quảng cáo hoặc TikTok, gọi inspect_shop trước. Truyền câu hỏi độc lập bằng tiếng Việt, giữ nguyên kỳ, mã đơn, SKU, mục tiêu và điều kiện người bán đã nói. Nếu câu tiếp nối, điền tham chiếu đã rõ từ đoạn nói trước. Khi công cụ trả detailed_plan=true, hướng người bán xem nội dung trong cuộc trò chuyện và đọc điểm chính từ answer.
 Với câu «shop bán được bao nhiêu», đọc số đơn và tổng giá trị đơn đã kiểm tra trong kỳ. Chỉ hỏi lại nếu không xác định được phạm vi từ lời người bán và lịch sử.
+Khi inspect_shop trả answer cho câu hỏi thống kê, đọc theo câu trả lời đó, giữ nguyên kỳ, chỉ số và các con số. Nếu được hỏi về lợi nhuận, tiền thực thu, lượt xem hoặc quảng cáo mà công cụ thiếu dữ liệu, nói rõ chỉ số nào chưa xác minh được.
 Khi người bán hỏi cách bán «sản phẩm này», «món đó» hay «món vừa đăng», mỗi lần đều gọi inspect_shop và giữ nguyên cụm tham chiếu. Mở đầu câu trả lời bằng tên sản phẩm lấy từ business_advisory.focus_product để bạn biết đang nói về món nào. Nếu thiếu focus thì hỏi tên hoặc SKU. Lịch sử chỉ dùng để tham khảo. Chỉ xác nhận thao tác từ lời nói mới trong phiên.
 Chỉ dùng dữ liệu từ công cụ cho các con số thực tế. Với chiến lược, nói một phát hiện và một việc nên làm trước, tách giả định và số đã đo. Không khẳng định đã chi tiền, chạy quảng cáo hoặc có doanh số từ một kênh khi không có số liệu nguồn.
+Khi công cụ gửi detailed_plan, chỉ nói một bước ưu tiên và mời xem kế hoạch trong chat. Dừng ở khoảng hai câu, giữ nguyên nội dung chi tiết trong chat.
 Khi inspect_shop trả report_available=true, báo người bán biểu đồ đã xuất hiện trong cuộc chat nếu họ hỏi về biểu đồ. Thiếu dữ liệu thì nói rõ kỳ nào chưa phát sinh.
 Khi bạn muốn đăng bán, gọi prepare_listing với dữ kiện đã có hoặc prepare_chat_request nếu chưa xác định mặt hàng. Giữ nguyên các dữ kiện đã xác nhận; không tự đoán giá, tồn, bảo hành hoặc ngành hàng. Năm xị thường là năm trăm nghìn đồng; phân biệt giá vốn với giá bán. Tồn kho 0 hợp lệ.
+Khi người bán đọc nguyên văn tiêu đề hoặc mô tả, giữ nguyên lời họ. Nếu nội dung ngắn, dùng câu hỏi từ công cụ để xin phép cải thiện. Nếu họ chủ động nhờ gợi ý hoặc đồng ý với đề xuất, gọi prepare_chat_request để viết ngay nội dung được yêu cầu. Dùng tiêu đề và mô tả từ bản nháp công cụ trả về.
 Để thêm hình, nói «Bạn bấm Thêm ảnh ở thanh Live rồi chọn ảnh nhé. Mình sẽ lưu ảnh vào bản nháp.» Nếu bạn nói không thêm hình: có ảnh thì dùng các ảnh hiện tại; chưa có ảnh thì giải thích cần một ảnh để đăng và giữ bản nháp. Đừng nói ứng dụng không tải được ảnh hay yêu cầu đổi sang chat.
 Gọi prepare_chat_request để thực hiện tư vấn, tính giá có lời, viết nội dung, chỉnh tên/mô tả/giá/tồn, tiếp tục hoặc hủy bản nháp, hoặc chuẩn bị xóa một sản phẩm khỏi gian hàng. Khi xóa, giữ đúng tên/SKU người bán vừa nói. Đọc lại tên và yêu cầu nói «xác nhận xóa sản phẩm». Dùng prepare_order để chuẩn bị cập nhật đơn. Với số liệu, tra cứu và theo dõi đơn, vẫn dùng inspect_shop trước.
 Khi công cụ trả review, đọc lại các chi tiết và cụm từ xác nhận của ngôn ngữ phiên rồi dừng để người bán trả lời. Chỉ gọi confirm_action sau lời xác nhận rõ ở lượt nói mới. Không gọi ngay sau bước chuẩn bị. Các câu hỏi, lời nói lấp lửng, điều kiện, phủ định và tiếng của trợ lý trong loa không phải là xác nhận.
@@ -82,7 +89,7 @@ ORDER_FIELDS = {
 class ListingDetails(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
 
-    name: str = Field(min_length=2, max_length=120)
+    name: str | None = Field(default=None, min_length=2, max_length=120)
     price_vnd: int | None = Field(default=None, ge=1000, le=1_000_000_000, strict=True)
     stock: int | None = Field(default=None, ge=0, le=1_000_000, strict=True)
     description: str | None = Field(default=None, max_length=1500)
@@ -90,8 +97,8 @@ class ListingDetails(BaseModel):
 
     @field_validator('name')
     @classmethod
-    def single_line_name(cls, name: str) -> str:
-        if any(ord(char) < 32 for char in name):
+    def single_line_name(cls, name: str | None) -> str | None:
+        if name and any(ord(char) < 32 for char in name):
             raise ValueError('Tên sản phẩm phải nằm trên một dòng.')
         return name
 
@@ -141,7 +148,7 @@ def live_setup(model: str, voice: str | None = None, language: str = 'vi', *,
         }, {
             'name': 'prepare_listing',
             'description': 'Lưu dữ kiện vào bản nháp sản phẩm trong Live. Chỉ truyền chi tiết có thật và do người bán xác nhận.',
-            'parameters': {'type': 'OBJECT', 'required': ['name'], 'properties': {
+            'parameters': {'type': 'OBJECT', 'properties': {
                 'name': {'type': 'STRING', 'description': 'Tên hoặc mặt hàng được người bán xác nhận.'},
                 'price_vnd': {'type': 'INTEGER', 'description': 'Giá bán đã xác nhận bằng VND. Bỏ qua khi chưa rõ.'},
                 'stock': {'type': 'INTEGER', 'description': 'Tồn kho đã xác nhận. Bỏ qua khi chưa rõ.'},
@@ -233,18 +240,58 @@ class GalleryReceipt(BaseModel):
     run_id: int = Field(ge=1, strict=True)
 
 
-def read_shop(socket, token, question, spoken, conversation_id):
+def read_shop(socket, token, question, spoken, conversation_id, *, sales_only=False, language='vi'):
     app = socket.app.state
     with app.session_factory() as session:
         verify_seller(app.shop_repository, session, token)
         ensure_conversation_open(session, app.shop_repository.seller_shop_slug or 'local', conversation_id)
-        return inspect_shop(session, app.shop_repository, question, spoken, conversation_id=conversation_id)
+        return inspect_shop(session, app.shop_repository, question, spoken, conversation_id=conversation_id,
+                            sales_only=sales_only, language=language)
 
 
-async def shop_tool(socket, token, name, args, history, actions, traffic):
+def sales_waiting(socket, history):
+    return bool(history.user and not history.unclear and not history.sales_reply and not history.delegated
+                and is_sales_question(history.user, timezone=socket.app.state.shop_repository.timezone))
+
+
+async def shop_result(socket, question, result, history):
+    order_id = result.get('order_id')
+    summary = result.get('spoken_summary')
+    detailed = bool(summary and 'business_advisory' in result['facts'])
+    if detailed and history.language == 'en':
+        summary = strategy_summary(result['facts']['business_advisory'], language='en')
+    display = {'id': str(uuid4()), 'turn_id': history.turn_id, 'language': history.language, 'question': question,
+               'answer': result['answer'], 'report': result.get('report'), 'order_id': order_id}
+    if summary:
+        display['spoken_summary'] = summary
+    if result.get('sales_context'):
+        display['sales_context'] = result['sales_context']
+    history.result(display, result['facts'])
+    await socket.send_json({'type': 'shop_result', **display})
+    answer = ('Đã tìm thông tin đơn. Đọc trạng thái và tổng tiền nếu có.' if 'order_id' in result
+              else summary or result['answer'][:2000])
+    return {'accepted': True, 'answer': answer, 'facts': result['facts'], 'order_id': order_id,
+            'report_available': display['report'] is not None, **({'detailed_plan': True} if detailed else {})}
+
+
+async def shop_tool(socket, token, name, args, history, actions, traffic, *, sales_only=False):
     try:
         if history.unclear:
             return {'accepted': False, 'message': REPEAT_QUESTION}
+        if history.sales_reply:
+            return history.sales_reply
+        if sales_only or sales_waiting(socket, history):
+            if traffic.get('manual_turns') and not voice_finished(traffic):
+                return {'accepted': False, 'message': 'Chờ nghe hết câu trước khi đọc số liệu.'}
+            question = history.user
+            result = await run_in_threadpool(read_shop, socket, token, question, question, history.conversation_id,
+                                             sales_only=True, language=history.language)
+            if result is None:
+                answer = ('Which period would you like me to check?' if history.language == 'en'
+                          else 'Bạn muốn mình xem chỉ số đó trong khoảng thời gian nào?')
+                result = {'answer': answer, 'facts': {}}
+            history.sales_reply = await shop_result(socket, question, result, history)
+            return history.sales_reply
         contextual = (name in ('inspect_shop', 'prepare_listing', 'prepare_chat_request')
                       and has_product_reference(history.user) and planning_request(history.user))
         if contextual:
@@ -254,7 +301,13 @@ async def shop_tool(socket, token, name, args, history, actions, traffic):
         elif name == 'prepare_listing' and planning_request(history.user) and not listing_request(history.user):
             name, args = 'inspect_shop', {'question': history.user[:1200]}
         if name == 'prepare_listing':
-            return await actions.ask_chat(ListingDetails.model_validate(args).message())
+            message = ListingDetails.model_validate(args).message()
+            if history.language == 'vi' and traffic.get('manual_turns'):
+                if not traffic.get('speech_finished'):
+                    return {'accepted': False, 'message': 'Chờ lời người bán rõ và kết thúc. Chưa đọc lại tiêu đề.'}
+                if not history.user:
+                    return {'accepted': False, 'message': REPEAT_QUESTION}
+            return await actions.listing_copy(message) or await actions.ask_chat(message)
         if name == 'prepare_chat_request':
             review = ChatReview.model_validate(args)
             if is_product_archive_request(review.message) or is_product_archive_request(history.user):
@@ -263,6 +316,14 @@ async def shop_tool(socket, token, name, args, history, actions, traffic):
                 if is_product_archive_request(history.user) or await run_in_threadpool(actions.follows_archive_request, history.user):
                     return await actions.ask_chat(history.user)
                 return {'accepted': False, 'message': 'Mình chỉ chuẩn bị xóa khi người bán yêu cầu rõ ràng.'}
+            spoken_title = spoken_listing_name(history.user)
+            if (direct_copy_turn(history) or history.copy_subject or history.expecting_title or listing_request(history.user)
+                    or listing_request(review.message) or spoken_title and spoken_title[1]):
+                if traffic.get('speech_finished') or not traffic.get('manual_turns'):
+                    if reply := await actions.listing_copy():
+                        return reply
+                else:
+                    return {'accepted': False, 'message': 'Đợi nghe hết câu rồi xác định tiêu đề.'}
             return await actions.ask_chat(review.message)
         if name == 'prepare_order':
             order = OrderReview.model_validate(args)
@@ -275,25 +336,11 @@ async def shop_tool(socket, token, name, args, history, actions, traffic):
             return await actions.decide(history.user, finished=voice_finished(traffic))
         if name == 'inspect_shop':
             question = ShopQuestion.model_validate(args).question
-            result = await run_in_threadpool(read_shop, socket, token, question, history.user, history.conversation_id)
+            result = await run_in_threadpool(read_shop, socket, token, question, history.user, history.conversation_id,
+                                             language=history.language)
             if result is None:
                 return {'accepted': False, 'message': 'Hãy làm rõ kỳ, sản phẩm hoặc mã đơn. Với yêu cầu khác dùng prepare_chat_request.'}
-            order_id = result.get('order_id')
-            summary = result.get('spoken_summary') if history.language == 'vi' else None
-            display = {'id': str(uuid4()), 'turn_id': history.turn_id, 'language': history.language, 'question': question,
-                       'answer': result['answer'], 'report': result.get('report'), 'order_id': order_id}
-            if summary:
-                display['spoken_summary'] = summary
-            if result.get('sales_context'):
-                display['sales_context'] = result['sales_context']
-            history.result(display, result['facts'])
-            await socket.send_json({'type': 'shop_result', **display})
-            spoken_answer = ('Đã tìm thông tin đơn. Đọc trạng thái và tổng tiền nếu có.' if 'order_id' in result
-                             else summary or result['answer'][:2000])
-            advice = {'accepted': True, 'answer': spoken_answer,
-                      'facts': result['facts'], 'order_id': order_id, 'report_available': display['report'] is not None}
-            if summary:
-                advice['detailed_plan'] = True
+            advice = await shop_result(socket, question, result, history)
             if contextual:
                 history.contextual_advice = advice
             return advice
@@ -354,14 +401,25 @@ async def forward_microphone(socket, upstream, traffic, actions, *, manual_turns
     images = 0
     async for message in socket.iter_text():
         data = read_json(message, MAX_IMAGE_BASE64 + 100)
+        if data.get('type') == 'greet':
+            variant = data.get('variant')
+            greetings = LIVE_GREETINGS[actions.history.language]
+            if (manual_turns and not traffic.get('greeted') and not traffic.get('output_allowed')
+                    and not active_speech and not traffic['turn_signals']
+                    and type(variant) is int and 0 <= variant < len(greetings)):
+                traffic['greeted'] = True
+                traffic['greeting'] = True
+                await request_spoken_answer(upstream, greetings[variant], actions.history.language, greeting=True)
+            continue
         if data.get('type') == 'images_added':
             try:
                 receipt = GalleryReceipt.model_validate(data)
-                summary, jpeg = await actions.accept_gallery(receipt.draft_id, receipt.run_id)
-                if jpeg:
+                summary, photos = await actions.accept_gallery(receipt.draft_id, receipt.run_id)
+                for jpeg in photos:
                     await upstream.send(json.dumps({'realtimeInput': {
                         'video': {'mimeType': 'image/jpeg', 'data': base64.b64encode(jpeg).decode('ascii')},
                     }}))
+                traffic['output_allowed'] = True
                 await upstream.send(json.dumps({'realtimeInput': {'text':
                     'Thông báo của ứng dụng: người bán vừa chọn ảnh. Hãy nói lại bằng giọng nói. ' + summary}}))
             except (ValidationError, ValueError, ProductDraftNotFoundError):
@@ -390,6 +448,8 @@ async def forward_microphone(socket, upstream, traffic, actions, *, manual_turns
         if manual_turns and kind == 'speech_start':
             if not active_speech and not traffic.get('awaiting_turn'):
                 active_speech = True
+                traffic['capturing'] = True
+                traffic['output_allowed'] = True
                 traffic['speech_finished'] = False
                 traffic['input_final'].clear()
                 await upstream.send('{"realtimeInput":{"activityStart":{}}}')
@@ -400,6 +460,7 @@ async def forward_microphone(socket, upstream, traffic, actions, *, manual_turns
                 traffic['input_ended_at'] = monotonic()
             if not manual_turns or active_speech:
                 active_speech = False
+                traffic['capturing'] = False
                 traffic['awaiting_turn'] = manual_turns
                 signal = '{"realtimeInput":{"activityEnd":{}}}' if manual_turns else '{"realtimeInput":{"audioStreamEnd":true}}'
                 await upstream.send(signal)
@@ -452,6 +513,44 @@ async def check_transcription(socket, history, traffic):
                                 'snapshot': True, 'unclear': True, 'turn_id': history.turn_id})
 
 
+async def request_spoken_answer(upstream, answer, language, *, greeting=False):
+    if language == 'en':
+        direction = ('Greet the seller warmly and say exactly this one line.' if greeting else
+                     'Speak this verified answer naturally, keeping all figures and dates.')
+        text = f'{direction} Do not use any tools or add anything. {answer}'
+    else:
+        direction = ('Đọc đúng lời chào sau bằng giọng thân thiện.' if greeting else
+                     'Nói câu trả lời đã kiểm tra sau bằng tiếng Việt, giữ nguyên kỳ và số liệu.')
+        text = f'{direction} Không gọi công cụ, không thêm nội dung khác. {answer}'
+    await upstream.send(json.dumps({'realtimeInput': {'text': text}}, ensure_ascii=False))
+
+
+def model_audio(content):
+    for part in (content.get('modelTurn') or {}).get('parts', []):
+        audio = part.get('inlineData') or {}
+        if not part.get('thought') and audio.get('mimeType', '').split(';', 1)[0] == 'audio/pcm':
+            encoded = audio.get('data')
+            if isinstance(encoded, str) and len(encoded) <= 256_000:
+                yield encoded
+
+
+def direct_copy_turn(history):
+    return bool(_wants_ai_description(history.user) or labelled_copy(history.user)
+                or history.draft_copy_offer and listing_copy_choice(history.user) is not None)
+
+
+def listing_waits_for_reply(history):
+    if history.listing_reply or history.delegated or planning_request(history.user):
+        return False
+    if direct_copy_turn(history):
+        return True
+    if history.language != 'vi':
+        return False
+    title = spoken_listing_name(history.user, expecting_title=history.expecting_title)
+    return bool(listing_request(history.user) or title and (title[1] or history.expecting_title)
+                or history.copy_subject and copy_choice(history.user))
+
+
 async def forward_response(socket, upstream, token, history, traffic, actions):
     tool_count = 0
     first_audio_at = None
@@ -462,53 +561,132 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
     read_next = upstream.recv if isinstance(upstream, ClientConnection) else lambda: anext(messages)
     loop = asyncio.get_running_loop()
     complete_by = None
+    listing_by = None
+    sales_by = None
     generation_complete = False
     waiting_for_tool_reply = False
+    deferred_audio = []
+    deferred_size = 0
+    deferred_caption = False
+
+    async def send_audio(encoded):
+        nonlocal first_audio_at, waiting_for_tool_reply
+        waiting_for_tool_reply = False
+        if first_audio_at is None and len(encoded) > 4:
+            first_audio_at = monotonic()
+            input_ended_at = traffic.pop('input_ended_at', None)
+            logger.info('Live first audio: since_input_end_ms=%s tool_ms=%d',
+                        round((first_audio_at - input_ended_at) * 1000) if input_ended_at is not None else None,
+                        round(tool_seconds * 1000))
+        await socket.send_json({'type': 'audio', 'data': encoded, **({'review': True} if actions.pending else {})})
+
+    async def release_output(*, discard=False):
+        nonlocal deferred_caption, deferred_size
+        if discard:
+            if deferred_caption:
+                history.assistant = ''
+        else:
+            if deferred_caption and history.assistant:
+                await socket.send_json({'type': 'transcript', 'role': 'assistant', 'text': history.assistant,
+                                        'snapshot': True, 'turn_id': history.turn_id})
+            for encoded in deferred_audio:
+                await send_audio(encoded)
+        deferred_audio.clear()
+        deferred_caption = False
+        deferred_size = 0
+
     while True:
         try:
-            if complete_by is None:
+            deadline = min((value for value in (complete_by, listing_by, sales_by) if value is not None), default=None)
+            if deadline is None:
                 message = await read_next()
             else:
-                async with asyncio.timeout_at(complete_by):
+                async with asyncio.timeout_at(deadline):
                     message = await read_next()
             data = read_json(message, 1_000_000)
         except StopAsyncIteration:
+            if traffic.get('manual_turns'):
+                return
             raise LiveError('Gemini đã ngắt kết nối. Bạn có thể mở phiên Live mới.') from None
         except TimeoutError:
-            if complete_by is None:
+            if deadline is None:
                 raise
             data = {}
         check_live_provider_error(data)
         if 'goAway' in data:
-            raise LiveError('Gemini đã kết thúc phiên. Bạn có thể mở phiên Live mới.')
+            traffic['provider_draining'] = True
         content = data.get('serverContent') or {}
+        if traffic.get('greeting'):
+            # The welcome is ephemeral audio, outside chat history and tools.
+            if calls := (data.get('toolCall') or {}).get('functionCalls'):
+                replies = [{'id': call['id'], 'name': call['name'], 'response': {'accepted': False}}
+                           for call in calls if isinstance(call.get('id'), str) and isinstance(call.get('name'), str)]
+                if replies:
+                    await upstream.send(json.dumps({'toolResponse': {'functionResponses': replies}}))
+            if content.get('interrupted') or content.get('inputTranscription'):
+                traffic['greeting'] = False
+                await socket.send_json({'type': 'interrupted'})
+                content = {key: content[key] for key in ('inputTranscription',) if key in content}
+            else:
+                if not traffic.get('output_allowed'):
+                    for encoded in model_audio(content):
+                        await socket.send_json({'type': 'audio', 'data': encoded})
+                if content.get('turnComplete') and content.get('interactionStatus') != 'IN_PROGRESS':
+                    traffic['greeting'] = False
+                    if not traffic.get('output_allowed'):
+                        await socket.send_json({'type': 'audio_end'})
+                if traffic.get('provider_draining') and not traffic.get('greeting'):
+                    return
+                continue
+        if traffic.get('manual_turns') and not traffic.get('output_allowed'):
+            content = {}
+        elif traffic.get('manual_turns') and traffic.get('capturing'):
+            # Late completion of the last reply must not close the new mic turn.
+            content = {key: content[key] for key in ('inputTranscription', 'interrupted') if key in content}
+            complete_by = None
         if content.get('interrupted'):
+            await release_output(discard=True)
             await socket.send_json({'type': 'interrupted'})
             first_audio_at = None
             tool_seconds = 0.0
         for key, role in (('inputTranscription', 'user'), ('outputTranscription', 'assistant')):
-            text = (content.get(key) or {}).get('text')
-            if isinstance(text, str) and text:
+            transcription = content.get(key) or {}
+            text = transcription.get('text')
+            final = transcription.get('finished') is True
+            if isinstance(text, str) and text or final:
                 if role == 'user':
                     traffic['transcript_frames'] += 1
                 else:
-                    waiting_for_tool_reply = False
-                    if not history.delegated and is_product_archive_request(history.user):
+                    if (sales_waiting(socket, history) or listing_waits_for_reply(history)
+                            or not history.delegated and is_product_archive_request(history.user)):
                         continue
-                final = (content.get(key) or {}).get('finished') is True
+                    waiting_for_tool_reply = False
                 previous = history.user if role == 'user' else history.assistant
                 if role == 'user' and final:
                     traffic['speech_finished'] = True
-                history.transcript(role, text, final)
+                if isinstance(text, str) and text:
+                    history.transcript(role, text, final)
                 if role == 'user':
                     await check_transcription(socket, history, traffic)
+                    if (traffic.get('awaiting_turn') and not history.unclear and listing_waits_for_reply(history)
+                            and (history.user != previous or final)):
+                        listing_by = loop.time() + (.45 if final else .9)
+                    if traffic.get('awaiting_turn') and (history.user != previous or final):
+                        sales_by = loop.time() + .9 if sales_waiting(socket, history) else None
                 if not history.unclear:
                     snapshot = history.user if role == 'user' else history.assistant
-                    if snapshot != previous or final:
-                        await socket.send_json({'type': 'transcript', 'role': role, 'text': snapshot,
-                                                'final': final, 'snapshot': True, 'turn_id': history.turn_id})
+                    if snapshot and (snapshot != previous or final):
+                        if role == 'assistant' and traffic.get('manual_turns') and traffic.get('awaiting_turn') and not voice_finished(traffic):
+                            deferred_caption = True
+                        else:
+                            if role == 'assistant':
+                                deferred_caption = False
+                            await socket.send_json({'type': 'transcript', 'role': role, 'text': snapshot,
+                                                    'final': final, 'snapshot': True, 'turn_id': history.turn_id})
                 if role == 'user' and final:
                     traffic['input_final'].set()
+                    await release_output(discard=sales_waiting(socket, history) or listing_waits_for_reply(history)
+                                         or history.unclear or is_product_archive_request(history.user))
         if (history.contextual_advice is None and not history.unclear
                 and (history.assistant or content.get('modelTurn') or content.get('turnComplete'))
                 and has_product_reference(history.user) and planning_request(history.user)):
@@ -517,51 +695,58 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
             started = monotonic()
             history.contextual_advice = await shop_tool(socket, token, 'inspect_shop', {}, history, actions, traffic)
             tool_seconds += monotonic() - started
-        hold_archive_reply = not history.delegated and is_product_archive_request(history.user)
-        if not content.get('interrupted') and not history.unclear and not hold_archive_reply:
-            for part in (content.get('modelTurn') or {}).get('parts', []):
-                audio = part.get('inlineData') or {}
-                if not part.get('thought') and audio.get('mimeType', '').split(';', 1)[0] == 'audio/pcm':
-                    encoded = audio.get('data')
-                    if isinstance(encoded, str) and len(encoded) <= 256_000:
-                        waiting_for_tool_reply = False
-                        if first_audio_at is None and len(encoded) > 4:
-                            first_audio_at = monotonic()
-                            input_ended_at = traffic.pop('input_ended_at', None)
-                            logger.info('Live first audio: since_input_end_ms=%s tool_ms=%d',
-                                        round((first_audio_at - input_ended_at) * 1000) if input_ended_at is not None else None,
-                                        round(tool_seconds * 1000))
-                        await socket.send_json({'type': 'audio', 'data': encoded,
-                                                **({'review': True} if actions.pending else {})})
+        hold_reply = (sales_waiting(socket, history) or listing_waits_for_reply(history) or
+                      not history.delegated and is_product_archive_request(history.user))
+        if not content.get('interrupted') and not history.unclear and not hold_reply:
+            for encoded in model_audio(content):
+                if traffic.get('manual_turns') and traffic.get('awaiting_turn') and not voice_finished(traffic):
+                    if deferred_size + len(encoded) <= 512_000:
+                        deferred_audio.append(encoded)
+                        deferred_size += len(encoded)
+                else:
+                    await send_audio(encoded)
         if content.get('generationComplete') and not content.get('interrupted') and not waiting_for_tool_reply:
             generation_complete = True
-            await socket.send_json({'type': 'audio_end'})
+            if not traffic.get('manual_turns'):
+                await socket.send_json({'type': 'audio_end'})
         replies = []
         for call in (data.get('toolCall') or {}).get('functionCalls', []):
             name, call_id = call.get('name'), call.get('id')
             if not isinstance(name, str) or not isinstance(call_id, str):
                 continue
+            if traffic.get('manual_turns') and (not traffic.get('output_allowed') or traffic.get('capturing')):
+                continue
+            if tool_count >= MAX_TOOLS_PER_TURN:
+                break
             tool_count += 1
             started = monotonic()
             await check_transcription(socket, history, traffic)
-            result = (await shop_tool(socket, token, name, call.get('args', {}), history, actions, traffic)
-                      if tool_count <= MAX_TOOLS_PER_TURN else
-                      {'accepted': False, 'message': 'Lượt này đã tra cứu nhiều mục. Tóm tắt kết quả rồi chờ câu hỏi tiếp theo.'})
+            result = await shop_tool(socket, token, name, call.get('args', {}), history, actions, traffic)
             tool_seconds += monotonic() - started
             replies.append({'id': call_id, 'name': name, 'response': result})
         if replies:
             await upstream.send(json.dumps({'toolResponse': {'functionResponses': replies}}, default=str))
-            if traffic.get('manual_turns'):
+            if traffic.get('manual_turns') and traffic.get('output_allowed'):
                 # Gemini can mark the tool phase complete before starting the spoken answer.
                 waiting_for_tool_reply = True
                 generation_complete = False
+        if listing_by is not None and not listing_waits_for_reply(history):
+            listing_by = None
         completed = content.get('turnComplete') and content.get('interactionStatus') != 'IN_PROGRESS'
         now = loop.time()
+        if sales_by is not None and not sales_waiting(socket, history):
+            sales_by = None
+        if sales_by is not None and now >= sales_by:
+            complete_by = now
+            sales_by = None
+        if listing_by is not None and now >= listing_by:
+            complete_by = now
+            listing_by = None
         if traffic.get('manual_turns') and (completed or complete_by is not None):
-            if content or replies:
+            if (content or replies) and (tool_count < MAX_TOOLS_PER_TURN or not waiting_for_tool_reply):
                 # Audio and both transcriptions can follow an early turnComplete.
                 # Keep those chunks in the same turn until output settles.
-                tail = 5.0 if waiting_for_tool_reply else .32 if generation_complete else 1.25
+                tail = 7.0 if waiting_for_tool_reply else .55 if generation_complete else 1.45
                 if traffic.get('awaiting_turn') and not traffic.get('speech_finished'):
                     tail = max(tail, .75)
                 complete_by = now + tail
@@ -569,11 +754,40 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
                 continue
         if completed or complete_by is not None:
             complete_by = None
+            listing_by = None
+            sales_by = None
+            audio_finished = generation_complete
             generation_complete = False
             waiting_for_tool_reply = False
             traffic['settled_input'] = True
             await check_transcription(socket, history, traffic)
             unclear = history.unclear
+            await release_output(discard=unclear or hold_reply)
+            if sales_waiting(socket, history) and voice_finished(traffic):
+                started = monotonic()
+                result = await shop_tool(socket, token, 'inspect_shop', {}, history, actions, traffic, sales_only=True)
+                tool_seconds += monotonic() - started
+                answer = result.get('answer') or result['message']
+                if not history.sales_reply:
+                    history.sales_reply = {**result, 'answer': answer}
+                history.assistant = ''
+                await request_spoken_answer(upstream, answer, history.language)
+                if traffic.get('manual_turns'):
+                    waiting_for_tool_reply = True
+                    complete_by = loop.time() + 7
+                    continue
+            spoken_title = spoken_listing_name(history.user)
+            if (not unclear and not history.delegated and not history.listing_reply and voice_finished(traffic)
+                    and (direct_copy_turn(history) or history.copy_subject or history.expecting_title or listing_request(history.user)
+                         or spoken_title and spoken_title[1])
+                    and not planning_request(history.user)):
+                if reply := await actions.listing_copy():
+                    history.assistant = ''
+                    await request_spoken_answer(upstream, reply.get('review') or reply['answer'], history.language)
+                    if traffic.get('manual_turns'):
+                        waiting_for_tool_reply = True
+                        complete_by = loop.time() + 7
+                        continue
             if not unclear and not history.delegated and voice_finished(traffic) and is_product_archive_request(history.user):
                 result = await shop_tool(socket, token, 'prepare_chat_request', {'message': history.user}, history, actions, traffic)
                 if result.get('accepted'):
@@ -588,6 +802,9 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
                 answer = result.get('answer') or result['message']
                 await upstream.send(json.dumps({'realtimeInput': {'text':
                     'Thông báo của ứng dụng: hãy nói lại kết quả đã kiểm chứng bằng giọng nói. ' + answer}}))
+                followup_audio = True
+            else:
+                followup_audio = unclear
             archive_phrase = ('confirm product removal' if history.language == 'en' else 'xac nhan xoa san pham')
             if (actions.pending and not actions.pending.armed and history.assistant
                     and (actions.pending.kind != 'archive' or archive_phrase in plain(history.assistant))):
@@ -596,9 +813,12 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
             traffic['speech_finished'] = False
             traffic['settled_input'] = False
             traffic['awaiting_turn'] = False
+            traffic['output_allowed'] = followup_audio
             traffic['input_final'].set()
             identifier = history.turn_id
             clear_captions = not (history.user or history.results or history.delegated)
+            if traffic.get('manual_turns') and (first_audio_at is not None or audio_finished):
+                await socket.send_json({'type': 'audio_end'})
             await socket.send_json({'type': 'turn_end', 'turn_id': identifier,
                                     **({'clear_captions': True} if clear_captions else {})})
             first_audio_at = None
@@ -607,41 +827,52 @@ async def forward_response(socket, upstream, token, history, traffic, actions):
             saved = traffic['save_task'] = asyncio.create_task(save_live_turn(socket, history, notify=True))
             await asyncio.shield(saved)
             traffic.pop('save_task', None)
+            if traffic.get('provider_draining'):
+                return
             if unclear:
                 await upstream.send(json.dumps({'realtimeInput': {'text':
                     'Thông báo ứng dụng: lượt nói vừa rồi không rõ. Chỉ nói đúng một câu sau rồi chờ. ' + REPEAT_QUESTION}}))
 
 
 async def relay(socket, upstream, token, history, *, manual_turns, started):
-    await socket.send_json({'type': 'ready', 'seconds': SESSION_SECONDS, 'turn_protocol': int(manual_turns)})
+    await socket.send_json({'type': 'ready', 'seconds': SESSION_SECONDS, 'turn_protocol': int(manual_turns),
+                            'greeting_count': len(LIVE_GREETINGS[history.language]) if manual_turns else 0})
     actions = LiveActions(socket, history)
     if draft := await run_in_threadpool(actions.load_draft):
-        await actions.set_draft(draft)
+        await actions.set_draft(draft, offer_copy=history.draft_copy_offer)
     traffic = {'audio_frames': 0, 'transcript_frames': 0, 'turn_signals': 0, 'manual_turns': manual_turns,
                'input_final': asyncio.Event()}
     microphone = asyncio.create_task(forward_microphone(socket, upstream, traffic, actions,
                                                       manual_turns=manual_turns, started=started))
     tasks = {microphone, asyncio.create_task(forward_response(socket, upstream, token, history, traffic, actions))}
-    finishing = False
+    finishing = reconnect = False
     done = set()
     try:
         done, _ = await asyncio.wait(tasks, timeout=SESSION_SECONDS, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
-            task.result()
-        finishing = microphone in done and microphone.result() is True
+            try:
+                task.result()
+            except ConnectionClosed:
+                if not manual_turns:
+                    raise
+                reconnect = True
+        finishing = microphone in done and microphone.exception() is None and microphone.result() is True
+        reconnect = reconnect or manual_turns and microphone not in done
     finally:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         if (saving := traffic.get('save_task')) is not None:
             await saving
-        await save_live_turn(socket, history, notify=finishing or not done)
+        await save_live_turn(socket, history, notify=finishing or reconnect or not done)
         logger.info('Live input ended: audio_frames=%d transcript_frames=%d turn_signals=%d',
                     traffic['audio_frames'], traffic['transcript_frames'], traffic['turn_signals'])
     if finishing:
         return {'type': 'finished'}
+    if reconnect:
+        return {'type': 'reconnecting'}
     if not done:
-        return {'type': 'ended', 'message': 'Đã hết 3 phút Live. Bạn có thể mở phiên mới.'}
+        return {'type': 'ended', 'message': 'Phiên Live đã hết thời gian. Bạn có thể mở lại để tiếp tục.'}
     return None
 
 

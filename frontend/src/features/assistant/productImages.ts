@@ -19,6 +19,7 @@ export async function pickProductImages(limit: number, maxSize?: number): Promis
   // including on the web where the dialog must follow the initiating gesture.
   const selected = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
+    allowsEditing: false,
     allowsMultipleSelection: limit > 1,
     selectionLimit: limit,
     orderedSelection: limit > 1,
